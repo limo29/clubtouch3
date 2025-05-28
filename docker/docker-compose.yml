@@ -1,16 +1,142 @@
-version: "3.9" 
-services: 
-  db: 
-    image: postgres:16 
-    restart: always 
-    environment: 
-      POSTGRES_USER: clubtouch3 
-      POSTGRES_PASSWORD: clubtouch3 
-      POSTGRES_DB: clubtouch3 
-    ports: 
-      - "5432:5432" 
-    volumes: 
-      - pgdata:/var/lib/postgresql/data 
- 
-volumes: 
-  pgdata: 
+
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: clubtouch3-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-clubtouch3}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-clubtouch3}
+      POSTGRES_DB: ${DB_NAME:-clubtouch3}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-clubtouch3}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clubtouch3-network
+
+  # Backend API
+  backend:
+    build:
+      context: ../apps/backend
+      dockerfile: Dockerfile
+    container_name: clubtouch3-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+      DATABASE_URL: postgresql://${DB_USER:-clubtouch3}:${DB_PASSWORD:-clubtouch3}@db:5432/${DB_NAME:-clubtouch3}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-key-change-this}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-your-refresh-secret-key-change-this}
+      JWT_EXPIRE_TIME: ${JWT_EXPIRE_TIME:-15m}
+      JWT_REFRESH_EXPIRE_TIME: ${JWT_REFRESH_EXPIRE_TIME:-7d}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+    volumes:
+      - ../apps/backend/exports:/app/exports
+      - ../apps/backend/uploads:/app/uploads
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - clubtouch3-network
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        sleep 5 &&
+        npx prisma migrate deploy &&
+        npx prisma db seed &&
+        node src/server.js
+      "
+
+  # Frontend
+  frontend:
+    build:
+      context: ../apps/frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:3001/api}
+        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:3001}
+    container_name: clubtouch3-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - clubtouch3-network
+
+  # Adminer for database management (optional, nur für Development)
+  adminer:
+    image: adminer:latest
+    container_name: clubtouch3-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    depends_on:
+      - db
+    networks:
+      - clubtouch3-network
+    profiles:
+      - dev
+
+  # Backup Service (optional)
+  backup:
+    image: postgres:15-alpine
+    container_name: clubtouch3-backup
+    environment:
+      PGUSER: ${DB_USER:-clubtouch3}
+      PGPASSWORD: ${DB_PASSWORD:-clubtouch3}
+      PGHOST: db
+      PGDATABASE: ${DB_NAME:-clubtouch3}
+    volumes:
+      - ./backups:/backups
+    command: >
+      sh -c "
+        while true; do
+          echo 'Creating backup...' &&
+          pg_dump -h db -U ${DB_USER:-clubtouch3} ${DB_NAME:-clubtouch3} > /backups/backup_$$(date +%Y%m%d_%H%M%S).sql &&
+          echo 'Backup created' &&
+          find /backups -name 'backup_*.sql' -mtime +7 -delete &&
+          echo 'Old backups cleaned' &&
+          sleep 86400
+        done
+      "
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - clubtouch3-network
+    profiles:
+      - backup
+
+volumes:
+  postgres_data:
+    name: clubtouch3_postgres_data
+
+networks:
+  clubtouch3-network:
+    name: clubtouch3_network
+    driver: bridge
