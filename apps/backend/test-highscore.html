@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clubtouch3 Highscore Test</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .highscore-board {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .highscore-entry {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .rank {
+            font-weight: bold;
+            width: 50px;
+        }
+        .rank-1 { color: #FFD700; }
+        .rank-2 { color: #C0C0C0; }
+        .rank-3 { color: #CD7F32; }
+        .score {
+            font-weight: bold;
+            color: #2196F3;
+        }
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #4CAF50;
+            border-radius: 50%;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            background: #2196F3;
+            color: white;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.connected {
+            background: #E8F5E9;
+            color: #2E7D32;
+        }
+        .status.disconnected {
+            background: #FFEBEE;
+            color: #C62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏆 Clubtouch3 Highscore <span class="live-indicator"></span></h1>
+        
+        <div class="status" id="status">Nicht verbunden</div>
+        
+        <div class="controls">
+            <button onclick="connectWebSocket()">Verbinden</button>
+            <button onclick="loadHighscores()">Highscores laden</button>
+            <button onclick="switchView('daily')">Tageswertung</button>
+            <button onclick="switchView('yearly')">Jahreswertung</button>
+            <button onclick="switchMode('amount')">Nach Umsatz</button>
+            <button onclick="switchMode('count')">Nach Anzahl</button>
+        </div>
+        
+        <div id="highscore-container">
+            <div class="highscore-board">
+                <h2 id="highscore-title">Tageswertung - Umsatz</h2>
+                <div id="highscore-list">
+                    <p>Bitte erst verbinden und Daten laden...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div id="events">
+            <h3>Live Events:</h3>
+            <div id="event-log"></div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let token = null;
+        let currentView = 'daily';
+        let currentMode = 'amount';
+        
+        // Login und hole Token
+        async function getToken() {
+            if (token) return token;
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'admin@clubtouch3.local',
+                        password: 'Admin123!'
+                    })
+                });
+                
+                const data = await response.json();
+                token = data.accessToken;
+                return token;
+            } catch (error) {
+                console.error('Login error:', error);
+                return null;
+            }
+        }
+        
+        async function connectWebSocket() {
+            const authToken = await getToken();
+            if (!authToken) {
+                updateStatus('Login fehlgeschlagen', false);
+                return;
+            }
+            
+            socket = io('http://localhost:3001', {
+                auth: {
+                    token: authToken
+                }
+            });
+            
+            socket.on('connect', () => {
+                updateStatus('Verbunden', true);
+                console.log('WebSocket connected');
+            });
+            
+            socket.on('disconnect', () => {
+                updateStatus('Getrennt', false);
+            });
+            
+            socket.on('highscore:update', (data) => {
+                console.log('Highscore update:', data);
+                updateHighscoreDisplay(data);
+                addEventLog('Highscore aktualisiert');
+            });
+            
+            socket.on('sale:new', (data) => {
+                console.log('New sale:', data);
+                addEventLog(`Neuer Verkauf: ${data.customerName || 'Anonym'} - €${data.amount}`);
+            });
+        }
+        
+        function updateStatus(message, connected) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = connected ? 'status connected' : 'status disconnected';
+        }
+        
+        async function loadHighscores() {
+            const authToken = await getToken();
+            if (!authToken) return;
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/highscore/all', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+                
+                const data = await response.json();
+                updateHighscoreDisplay(data);
+            } catch (error) {
+                console.error('Error loading highscores:', error);
+            }
+        }
+        
+        function updateHighscoreDisplay(data) {
+            const highscoreData = data[currentView]?.[currentMode];
+            if (!highscoreData) return;
+            
+            const listEl = document.getElementById('highscore-list');
+            const titleEl = document.getElementById('highscore-title');
+            
+            const viewText = currentView === 'daily' ? 'Tageswertung' : 'Jahreswertung';
+            const modeText = currentMode === 'amount' ? 'Umsatz' : 'Anzahl';
+            titleEl.textContent = `${viewText} - ${modeText}`;
+            
+            if (highscoreData.entries.length === 0) {
+                listEl.innerHTML = '<p>Noch keine Einträge</p>';
+                return;
+            }
+            
+            listEl.innerHTML = highscoreData.entries.map(entry => {
+                const rankClass = entry.rank <= 3 ? `rank-${entry.rank}` : '';
+                const displayName = entry.customerNickname || entry.customerName;
+                const score = currentMode === 'amount' 
+                    ? `€${entry.score.toFixed(2)}` 
+                    : `${entry.score} Stück`;
+                
+                return `
+                    <div class="highscore-entry">
+                        <span class="rank ${rankClass}">#${entry.rank}</span>
+                        <span class="name">${displayName}</span>
+                        <span class="score">${score}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function switchView(view) {
+            currentView = view;
+            loadHighscores();
+        }
+        
+        function switchMode(mode) {
+            currentMode = mode;
+            loadHighscores();
+        }
+        
+        function addEventLog(message) {
+            const logEl = document.getElementById('event-log');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.textContent = `[${time}] ${message}`;
+            logEl.insertBefore(entry, logEl.firstChild);
+            
+            // Behalte nur die letzten 10 Events
+            while (logEl.children.length > 10) {
+                logEl.removeChild(logEl.lastChild);
+            }
+        }
+    </script>
+</body>
+</html>

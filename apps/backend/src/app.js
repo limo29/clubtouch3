@@ -1,11 +1,14 @@
 const express = require('express');
 const cors = require('cors');
-
+const prisma = require('./utils/prisma');
 
 // Route imports
 const authRoutes = require('./routes/auth');
-
-const prisma = require('./utils/prisma');
+const userRoutes = require('./routes/users');
+const articleRoutes = require('./routes/articles'); 
+const customerRoutes = require('./routes/customers');
+const transactionRoutes = require('./routes/transactions');
+const highscoreRoutes = require('./routes/highscore');  
 const app = express();
 
 // Middleware
@@ -15,6 +18,11 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes); 
+app.use('/api/articles', articleRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/transactions', transactionRoutes);
+app.use('/api/highscore', highscoreRoutes);    
 
 // Basis-Route
 app.get('/', (req, res) => {

@@ -14,17 +14,23 @@
     "@prisma/client": "^6.8.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
+    "csv-writer": "^1.6.0",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "express-validator": "^7.2.1",
+    "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.2",
-    "prisma": "^6.8.2"
+    "pdfkit": "^0.17.1",
+    "prisma": "^6.8.2",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.18",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.15.23",
+    "@types/pdfkit": "^0.13.9",
+    "@types/socket.io": "^3.0.1",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
