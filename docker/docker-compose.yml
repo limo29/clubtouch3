@@ -1,0 +1,16 @@
+version: "3.9" 
+services: 
+  db: 
+    image: postgres:16 
+    restart: always 
+    environment: 
+      POSTGRES_USER: clubtouch3 
+      POSTGRES_PASSWORD: clubtouch3 
+      POSTGRES_DB: clubtouch3 
+    ports: 
+      - "5432:5432" 
+    volumes: 
+      - pgdata:/var/lib/postgresql/data 
+ 
+volumes: 
+  pgdata: 
