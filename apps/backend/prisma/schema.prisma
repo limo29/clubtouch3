@@ -1,0 +1,209 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client { 
+  provider = "prisma-client-js" 
+} 
+ 
+datasource db { 
+  provider = "postgresql" 
+  url      = env("DATABASE_URL") 
+} 
+ 
+// Nutzer des Systems (Kassierer, Admins, etc.) 
+model User { 
+  id        String   @id @default(uuid()) 
+  email     String   @unique 
+  name      String 
+  password  String   // Hashed! 
+  role      Role     @default(CASHIER) 
+  active    Boolean  @default(true) 
+  createdAt DateTime @default(now()) 
+  updatedAt DateTime @updatedAt 
+ 
+  // Relationen 
+  transactions Transaction[] 
+  auditLogs    AuditLog[] 
+  sessions     Session[] 
+} 
+ 
+// Kunden mit Guthaben-Konto 
+model Customer { 
+  id        String   @id @default(uuid()) 
+  name      String 
+  nickname  String? 
+  balance   Decimal  @default(0) @db.Decimal(10, 2) 
+  createdAt DateTime @default(now()) 
+  updatedAt DateTime @updatedAt 
+ 
+  // Relationen 
+  transactions    Transaction[] 
+  accountTopUps   AccountTopUp[] 
+  highscorePoints HighscoreEntry[] 
+} 
+ 
+// Artikel/Produkte 
+model Article { 
+  id            String   @id @default(uuid()) 
+  name          String 
+  price         Decimal  @db.Decimal(10, 2) 
+  stock         Int      @default(0) 
+  minStock      Int      @default(0) // Mindestbestand für Warnung 
+  unit          String   @default("Stück") // Mengeneinheit 
+  category      String 
+  imageUrl      String? 
+  active        Boolean  @default(true) 
+  countsForHighscore Boolean @default(true) // Für Highscore-Konfiguration 
+  createdAt     DateTime @default(now()) 
+  updatedAt     DateTime @updatedAt 
+ 
+  // Relationen 
+  transactionItems TransactionItem[] 
+  stockMovements   StockMovement[] 
+} 
+ 
+// Verkaufstransaktion 
+model Transaction { 
+  id           String      @id @default(uuid()) 
+  type         TransactionType 
+  paymentMethod PaymentMethod 
+  totalAmount  Decimal     @db.Decimal(10, 2) 
+  cancelled    Boolean     @default(false) 
+  cancelledAt  DateTime? 
+  cancelledBy  String?     // User ID 
+  instanceId   String?     // Multi-Instanz-Support 
+  createdAt    DateTime    @default(now()) 
+ 
+  // Relationen 
+  userId       String 
+  user         User        @relation(fields: [userId], references: [id]) 
+  customerId   String? 
+  customer     Customer?   @relation(fields: [customerId], references: [id]) 
+  items        TransactionItem[] 
+   
+  // Für Storno-Verknüpfung 
+  originalTransactionId String? 
+  originalTransaction   Transaction? @relation("CancelledTransaction", fields: [originalTransactionId], references: [id]) 
+  cancelledTransactions Transaction[] @relation("CancelledTransaction") 
+} 
+ 
+// Einzelne Positionen einer Transaktion 
+model TransactionItem { 
+  id            String   @id @default(uuid()) 
+  quantity      Int 
+  pricePerUnit  Decimal  @db.Decimal(10, 2) 
+  totalPrice    Decimal  @db.Decimal(10, 2) 
+ 
+  // Relationen 
+  transactionId String 
+  transaction   Transaction @relation(fields: [transactionId], references: [id]) 
+  articleId     String 
+  article       Article     @relation(fields: [articleId], references: [id]) 
+} 
+ 
+// Kundenkonto-Aufladungen 
+model AccountTopUp { 
+  id        String   @id @default(uuid()) 
+  amount    Decimal  @db.Decimal(10, 2) 
+  method    TopUpMethod 
+  reference String?  // z.B. Überweisungsreferenz 
+  createdAt DateTime @default(now()) 
+ 
+  // Relationen 
+  customerId String 
+  customer   Customer @relation(fields: [customerId], references: [id]) 
+} 
+ 
+// Bestandsbewegungen (Wareneingang, Inventur, etc.) 
+model StockMovement { 
+  id          String   @id @default(uuid()) 
+  type        StockMovementType 
+  quantity    Int      // positiv = Zugang, negativ = Abgang 
+  reason      String? 
+  createdAt   DateTime @default(now()) 
+ 
+  // Relationen 
+  articleId   String 
+  article     Article  @relation(fields: [articleId], references: [id]) 
+} 
+ 
+// Audit-Log für alle Änderungen 
+model AuditLog { 
+  id         String   @id @default(uuid()) 
+  action     String   // z.B. "CREATE_ARTICLE", "CANCEL_TRANSACTION" 
+  entityType String   // z.B. "Article", "Transaction" 
+  entityId   String 
+  changes    Json?    // JSON mit Änderungen 
+  createdAt  DateTime @default(now()) 
+ 
+  // Relationen 
+  userId     String 
+  user       User     @relation(fields: [userId], references: [id]) 
+} 
+ 
+// Sessions für JWT-Token-Management 
+model Session { 
+  id           String   @id @default(uuid()) 
+  token        String   @unique 
+  refreshToken String   @unique 
+  expiresAt    DateTime 
+  createdAt    DateTime @default(now()) 
+ 
+  // Relationen 
+  userId       String 
+  user         User     @relation(fields: [userId], references: [id]) 
+} 
+ 
+// Highscore-Einträge 
+model HighscoreEntry { 
+  id        String   @id @default(uuid()) 
+  type      HighscoreType 
+  value     Decimal  @db.Decimal(10, 2) // Euro oder Anzahl 
+  date      DateTime @default(now()) 
+   
+  // Relationen 
+  customerId String 
+  customer   Customer @relation(fields: [customerId], references: [id]) 
+   
+  @@index([type, date]) 
+} 
+ 
+// ENUMS 
+enum Role { 
+  ADMIN 
+  CASHIER 
+  ACCOUNTANT 
+} 
+ 
+enum TransactionType { 
+  SALE 
+  REFUND 
+} 
+ 
+enum PaymentMethod { 
+  CASH 
+  ACCOUNT 
+  INVOICE 
+} 
+ 
+enum TopUpMethod { 
+  CASH 
+  TRANSFER 
+} 
+ 
+enum StockMovementType { 
+  DELIVERY      // Wareneingang 
+  INVENTORY     // Inventur 
+  CORRECTION    // Korrektur 
+  SALE          // Verkauf (automatisch) 
+} 
+ 
+enum HighscoreType { 
+  DAILY_AMOUNT  // Tagesumsatz in Euro 
+  DAILY_COUNT   // Tagesanzahl 
+  YEARLY_AMOUNT // Jahresumsatz in Euro 
+  YEARLY_COUNT  // Jahresanzahl 
+}
