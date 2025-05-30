@@ -4,206 +4,340 @@
 // Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
-generator client { 
-  provider = "prisma-client-js" 
-} 
- 
-datasource db { 
-  provider = "postgresql" 
-  url      = env("DATABASE_URL") 
-} 
- 
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
 // Nutzer des Systems (Kassierer, Admins, etc.) 
-model User { 
-  id        String   @id @default(uuid()) 
-  email     String   @unique 
-  name      String 
-  password  String   // Hashed! 
-  role      Role     @default(CASHIER) 
-  active    Boolean  @default(true) 
-  createdAt DateTime @default(now()) 
-  updatedAt DateTime @updatedAt 
- 
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  password  String // Hashed! 
+  role      Role     @default(CASHIER)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relationen 
-  transactions Transaction[] 
-  auditLogs    AuditLog[] 
-  sessions     Session[] 
-} 
- 
+  transactions Transaction[]
+  auditLogs    AuditLog[]
+  sessions     Session[]
+  Purchase     Purchase[]
+  Invoice      Invoice[]
+}
+
 // Kunden mit Guthaben-Konto 
-model Customer { 
-  id        String   @id @default(uuid()) 
-  name      String 
-  nickname  String? 
-  balance   Decimal  @default(0) @db.Decimal(10, 2) 
-  createdAt DateTime @default(now()) 
-  updatedAt DateTime @updatedAt 
- 
+model Customer {
+  id           String   @id @default(uuid())
+  name         String
+  nickname     String?
+  balance      Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  gender       Gender?  @default(OTHER)
+  lastActivity DateTime @default(now())
+
   // Relationen 
-  transactions    Transaction[] 
-  accountTopUps   AccountTopUp[] 
-  highscorePoints HighscoreEntry[] 
-} 
- 
+  transactions    Transaction[]
+  accountTopUps   AccountTopUp[]
+  highscorePoints HighscoreEntry[]
+  invoices        Invoice[]
+}
+
 // Artikel/Produkte 
-model Article { 
-  id            String   @id @default(uuid()) 
-  name          String 
-  price         Decimal  @db.Decimal(10, 2) 
-  stock         Int      @default(0) 
-  minStock      Int      @default(0) // Mindestbestand für Warnung 
-  unit          String   @default("Stück") // Mengeneinheit 
-  category      String 
-  imageUrl      String? 
-  active        Boolean  @default(true) 
-  countsForHighscore Boolean @default(true) // Für Highscore-Konfiguration 
-  createdAt     DateTime @default(now()) 
-  updatedAt     DateTime @updatedAt 
- 
+model Article {
+  id                 String   @id @default(uuid())
+  name               String
+  price              Decimal  @db.Decimal(10, 2)
+  stock              Int      @default(0)
+  minStock           Int      @default(0) // Mindestbestand für Warnung 
+  unit               String   @default("Stück") // Mengeneinheit 
+  category           String
+  imageUrl           String?
+  active             Boolean  @default(true)
+  countsForHighscore Boolean  @default(true) // Für Highscore-Konfiguration 
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  // NEU: Mehrere Bildgrößen
+  imageThumbnail     String? // 150x150
+  imageSmall         String? // 300x300
+  imageMedium        String? // 600x600
+  imageLarge         String? // 1200x1200
+    // Umrechnungsfaktoren
+  purchaseUnit     String?   @default("Stück") // z.B. "Kiste"
+  unitsPerPurchase Decimal?  @db.Decimal(10, 2) @default(1) // z.B. 20 Flaschen pro Kiste
+
   // Relationen 
-  transactionItems TransactionItem[] 
-  stockMovements   StockMovement[] 
-} 
- 
+  transactionItems TransactionItem[]
+  stockMovements   StockMovement[]
+  purchaseItems    PurchaseItem[]
+  invoiceItems     InvoiceItem[]
+  deliveryNoteItems DeliveryNoteItem[]
+}
+
 // Verkaufstransaktion 
-model Transaction { 
-  id           String      @id @default(uuid()) 
-  type         TransactionType 
-  paymentMethod PaymentMethod 
-  totalAmount  Decimal     @db.Decimal(10, 2) 
-  cancelled    Boolean     @default(false) 
-  cancelledAt  DateTime? 
-  cancelledBy  String?     // User ID 
-  instanceId   String?     // Multi-Instanz-Support 
-  createdAt    DateTime    @default(now()) 
- 
+model Transaction {
+  id            String          @id @default(uuid())
+  type          TransactionType
+  paymentMethod PaymentMethod
+  totalAmount   Decimal         @db.Decimal(10, 2)
+  cancelled     Boolean         @default(false)
+  cancelledAt   DateTime?
+  cancelledBy   String? // User ID 
+  instanceId    String? // Multi-Instanz-Support 
+  createdAt     DateTime        @default(now())
+
   // Relationen 
-  userId       String 
-  user         User        @relation(fields: [userId], references: [id]) 
-  customerId   String? 
-  customer     Customer?   @relation(fields: [customerId], references: [id]) 
-  items        TransactionItem[] 
-   
+  userId     String
+  user       User              @relation(fields: [userId], references: [id])
+  customerId String?
+  customer   Customer?         @relation(fields: [customerId], references: [id])
+  items      TransactionItem[]
+
   // Für Storno-Verknüpfung 
-  originalTransactionId String? 
-  originalTransaction   Transaction? @relation("CancelledTransaction", fields: [originalTransactionId], references: [id]) 
-  cancelledTransactions Transaction[] @relation("CancelledTransaction") 
-} 
- 
+  originalTransactionId String?
+  originalTransaction   Transaction?  @relation("CancelledTransaction", fields: [originalTransactionId], references: [id])
+  cancelledTransactions Transaction[] @relation("CancelledTransaction")
+  Invoice               Invoice?      @relation(fields: [invoiceId], references: [id])
+  invoiceId             String?
+}
+
 // Einzelne Positionen einer Transaktion 
-model TransactionItem { 
-  id            String   @id @default(uuid()) 
-  quantity      Int 
-  pricePerUnit  Decimal  @db.Decimal(10, 2) 
-  totalPrice    Decimal  @db.Decimal(10, 2) 
- 
+model TransactionItem {
+  id           String  @id @default(uuid())
+  quantity     Int
+  pricePerUnit Decimal @db.Decimal(10, 2)
+  totalPrice   Decimal @db.Decimal(10, 2)
+
   // Relationen 
-  transactionId String 
-  transaction   Transaction @relation(fields: [transactionId], references: [id]) 
-  articleId     String 
-  article       Article     @relation(fields: [articleId], references: [id]) 
-} 
- 
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  articleId     String
+  article       Article     @relation(fields: [articleId], references: [id])
+}
+
 // Kundenkonto-Aufladungen 
-model AccountTopUp { 
-  id        String   @id @default(uuid()) 
-  amount    Decimal  @db.Decimal(10, 2) 
-  method    TopUpMethod 
-  reference String?  // z.B. Überweisungsreferenz 
-  createdAt DateTime @default(now()) 
- 
+model AccountTopUp {
+  id        String      @id @default(uuid())
+  amount    Decimal     @db.Decimal(10, 2)
+  method    TopUpMethod
+  reference String? // z.B. Überweisungsreferenz 
+  createdAt DateTime    @default(now())
+
   // Relationen 
-  customerId String 
-  customer   Customer @relation(fields: [customerId], references: [id]) 
-} 
- 
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+}
+
 // Bestandsbewegungen (Wareneingang, Inventur, etc.) 
-model StockMovement { 
-  id          String   @id @default(uuid()) 
-  type        StockMovementType 
-  quantity    Int      // positiv = Zugang, negativ = Abgang 
-  reason      String? 
-  createdAt   DateTime @default(now()) 
- 
+model StockMovement {
+  id        String            @id @default(uuid())
+  type      StockMovementType
+  quantity  Int // positiv = Zugang, negativ = Abgang 
+  reason    String?
+  createdAt DateTime          @default(now())
+
   // Relationen 
-  articleId   String 
-  article     Article  @relation(fields: [articleId], references: [id]) 
-} 
- 
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id])
+}
+
 // Audit-Log für alle Änderungen 
-model AuditLog { 
-  id         String   @id @default(uuid()) 
-  action     String   // z.B. "CREATE_ARTICLE", "CANCEL_TRANSACTION" 
-  entityType String   // z.B. "Article", "Transaction" 
-  entityId   String 
-  changes    Json?    // JSON mit Änderungen 
-  createdAt  DateTime @default(now()) 
- 
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String // z.B. "CREATE_ARTICLE", "CANCEL_TRANSACTION" 
+  entityType String // z.B. "Article", "Transaction" 
+  entityId   String
+  changes    Json? // JSON mit Änderungen 
+  createdAt  DateTime @default(now())
+
   // Relationen 
-  userId     String 
-  user       User     @relation(fields: [userId], references: [id]) 
-} 
- 
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+}
+
 // Sessions für JWT-Token-Management 
-model Session { 
-  id           String   @id @default(uuid()) 
-  token        String   @unique 
-  refreshToken String   @unique 
-  expiresAt    DateTime 
-  createdAt    DateTime @default(now()) 
- 
+model Session {
+  id           String   @id @default(uuid())
+  token        String   @unique
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
   // Relationen 
-  userId       String 
-  user         User     @relation(fields: [userId], references: [id]) 
-} 
- 
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+}
+
 // Highscore-Einträge 
-model HighscoreEntry { 
-  id        String   @id @default(uuid()) 
-  type      HighscoreType 
-  value     Decimal  @db.Decimal(10, 2) // Euro oder Anzahl 
-  date      DateTime @default(now()) 
-   
+model HighscoreEntry {
+  id    String        @id @default(uuid())
+  type  HighscoreType
+  value Decimal       @db.Decimal(10, 2) // Euro oder Anzahl 
+  date  DateTime      @default(now())
+
   // Relationen 
-  customerId String 
-  customer   Customer @relation(fields: [customerId], references: [id]) 
-   
-  @@index([type, date]) 
-} 
- 
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  @@index([type, date])
+}
+
 // ENUMS 
-enum Role { 
-  ADMIN 
-  CASHIER 
-  ACCOUNTANT 
-} 
- 
-enum TransactionType { 
-  SALE 
-  REFUND 
-} 
- 
-enum PaymentMethod { 
-  CASH 
-  ACCOUNT 
-  INVOICE 
-} 
- 
-enum TopUpMethod { 
-  CASH 
-  TRANSFER 
-} 
- 
-enum StockMovementType { 
-  DELIVERY      // Wareneingang 
-  INVENTORY     // Inventur 
-  CORRECTION    // Korrektur 
-  SALE          // Verkauf (automatisch) 
-} 
- 
-enum HighscoreType { 
-  DAILY_AMOUNT  // Tagesumsatz in Euro 
-  DAILY_COUNT   // Tagesanzahl 
+enum Role {
+  ADMIN
+  CASHIER
+  ACCOUNTANT
+}
+
+enum TransactionType {
+  SALE
+  REFUND
+}
+
+enum PaymentMethod {
+  CASH
+  ACCOUNT
+  INVOICE
+  TRANSFER
+}
+
+enum TopUpMethod {
+  CASH
+  TRANSFER
+}
+
+enum StockMovementType {
+  DELIVERY // Wareneingang 
+  INVENTORY // Inventur 
+  CORRECTION // Korrektur 
+  SALE // Verkauf (automatisch) 
+}
+
+enum HighscoreType {
+  DAILY_AMOUNT // Tagesumsatz in Euro 
+  DAILY_COUNT // Tagesanzahl 
   YEARLY_AMOUNT // Jahresumsatz in Euro 
-  YEARLY_COUNT  // Jahresanzahl 
+  YEARLY_COUNT // Jahresanzahl 
+}
+
+model Purchase {
+  id            String         @id @default(uuid())
+  invoiceNumber String?
+  supplier      String
+  description   String?
+  totalAmount   Decimal        @db.Decimal(10, 2)
+  paid          Boolean        @default(false)
+  paidAt        DateTime?
+  paymentMethod PaymentMethod?
+  dueDate       DateTime?
+  invoiceDate   DateTime
+  invoiceImage  String? // Pfad zum Bild
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relationen
+  userId String
+  user   User           @relation(fields: [userId], references: [id])
+  items  PurchaseItem[]
+  deliveryNotes   DeliveryNote[]
+}
+
+// Einzelpositionen eines Einkaufs
+model PurchaseItem {
+  id           String  @id @default(uuid())
+  description  String
+  quantity     Decimal @db.Decimal(10, 2)
+  unit         String?
+  pricePerUnit Decimal @db.Decimal(10, 2)
+  totalPrice   Decimal @db.Decimal(10, 2)
+
+  // Relationen
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id])
+  articleId  String? // Optional, falls es ein bekannter Artikel ist
+  article    Article? @relation(fields: [articleId], references: [id])
+}
+model DeliveryNote {
+  id           String   @id @default(uuid())
+  noteNumber   String   @unique
+  supplier     String
+  deliveryDate DateTime
+  createdAt    DateTime @default(now())
+  
+  // Relationen
+  items        DeliveryNoteItem[]
+  purchases    Purchase[] // Mehrere Lieferscheine pro Rechnung
+}
+
+model DeliveryNoteItem {
+  id              String   @id @default(uuid())
+  description     String
+  quantity        Decimal  @db.Decimal(10, 2)
+  unit            String
+  
+  // Relationen
+  deliveryNoteId  String
+  deliveryNote    DeliveryNote @relation(fields: [deliveryNoteId], references: [id])
+  articleId       String?
+  article         Article? @relation(fields: [articleId], references: [id])
+}
+
+// Neues Model für Ausgangsrechnungen
+model Invoice {
+  id              String        @id @default(uuid())
+  invoiceNumber   String        @unique
+  customerName    String
+  customerAddress String?
+  description     String?
+  totalAmount     Decimal       @db.Decimal(10, 2)
+  taxRate         Decimal       @default(19) @db.Decimal(5, 2)
+  status          InvoiceStatus @default(DRAFT)
+  paidAt          DateTime?
+  dueDate         DateTime
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relationen
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  customerId   String? // Optional, falls registrierter Kunde
+  customer     Customer?     @relation(fields: [customerId], references: [id])
+  items        InvoiceItem[]
+  transactions Transaction[] // Verknüpfung zu Zahlungen
+}
+
+// Rechnungspositionen
+model InvoiceItem {
+  id           String  @id @default(uuid())
+  description  String
+  quantity     Decimal @db.Decimal(10, 2)
+  pricePerUnit Decimal @db.Decimal(10, 2)
+  totalPrice   Decimal @db.Decimal(10, 2)
+
+  // Relationen
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+  articleId String?
+  article   Article? @relation(fields: [articleId], references: [id])
+}
+
+// Neue Enums
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  CANCELLED
 }

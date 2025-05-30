@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const articleController = require('../controllers/articleController');
+const fileUploadService = require('../services/fileUploadService');
 const { authenticate, authorize } = require('../middleware/auth');
 const { 
   validateArticle,
@@ -28,18 +29,22 @@ router.get('/:id/stats', articleController.getArticleStats);
 // Neuen Artikel erstellen (nur Admins und Kassierer)
 router.post('/', 
   authorize('ADMIN', 'CASHIER'),
+  fileUploadService.articleImageUpload.single('image'),
   validateArticle,
   handleValidationErrors,
   articleController.createArticle
 );
 
+
 // Artikel aktualisieren (nur Admins und Kassierer)
 router.put('/:id',
   authorize('ADMIN', 'CASHIER'),
+  fileUploadService.articleImageUpload.single('image'),
   validateArticleUpdate,
   handleValidationErrors,
   articleController.updateArticle
 );
+
 
 // Artikel aktivieren/deaktivieren (nur Admins)
 router.patch('/:id/toggle-status',

@@ -46,51 +46,58 @@ class CustomerService {
   }
   
   // Erstelle neuen Kunden
-  async createCustomer(data) {
-    // Prüfe ob Name bereits existiert
+async createCustomer(data) {
+  // Prüfe ob Name bereits existiert
+  const existing = await prisma.customer.findFirst({
+    where: { 
+      name: data.name 
+    }
+  });
+  
+  if (existing) {
+    throw new Error('Ein Kunde mit diesem Namen existiert bereits');
+  }
+  
+  // Aktualisiere lastActivity beim Erstellen
+  return await prisma.customer.create({
+    data: {
+      name: data.name,
+      nickname: data.nickname,
+      gender: data.gender || 'OTHER',
+      balance: 0,
+      lastActivity: new Date()
+    }
+  });
+}
+
+  
+  // Update Kunde
+  async updateCustomer(id, data) {
+  // Prüfe ob neuer Name bereits existiert
+  if (data.name) {
     const existing = await prisma.customer.findFirst({
       where: { 
-        name: { equals: data.name, mode: 'insensitive' } 
+        name: data.name,
+        NOT: { id }
       }
     });
     
     if (existing) {
-      throw new Error('Ein Kunde mit diesem Namen existiert bereits');
+      throw new Error('Ein anderer Kunde mit diesem Namen existiert bereits');
     }
-    
-    return await prisma.customer.create({
-      data: {
-        name: data.name,
-        nickname: data.nickname,
-        balance: 0 // Startet immer mit 0
-      }
-    });
   }
   
-  // Update Kunde
-  async updateCustomer(id, data) {
-    // Prüfe ob neuer Name bereits existiert
-    if (data.name) {
-      const existing = await prisma.customer.findFirst({
-        where: { 
-          name: { equals: data.name, mode: 'insensitive' },
-          NOT: { id }
-        }
-      });
-      
-      if (existing) {
-        throw new Error('Ein anderer Kunde mit diesem Namen existiert bereits');
-      }
+  return await prisma.customer.update({
+    where: { id },
+    data: {
+      name: data.name,
+      nickname: data.nickname,
+      gender: data.gender,
+      lastActivity: new Date()
     }
-    
-    return await prisma.customer.update({
-      where: { id },
-      data: {
-        name: data.name,
-        nickname: data.nickname
-      }
-    });
-  }
+  });
+}
+
   
   // Guthaben aufladen
   async topUpAccount(customerId, amount, method, reference = null) {

@@ -131,21 +131,25 @@ const Customers = () => {
 
   const customers = customersData?.customers || [];
 
-  const handleOpenDialog = (customer = null) => {
-    setEditingCustomer(customer);
-    if (customer) {
-      reset({
-        name: customer.name,
-        nickname: customer.nickname || '',
-      });
-    } else {
-      reset({
-        name: '',
-        nickname: '',
-      });
-    }
-    setOpenDialog(true);
-  };
+// In der handleOpenDialog Funktion
+const handleOpenDialog = (customer = null) => {
+  setEditingCustomer(customer);
+  if (customer) {
+    reset({
+      name: customer.name,
+      nickname: customer.nickname || '',
+      gender: customer.gender || 'OTHER', // NEU
+    });
+  } else {
+    reset({
+      name: '',
+      nickname: '',
+      gender: 'OTHER', // NEU
+    });
+  }
+  setOpenDialog(true);
+};
+
 
   const handleCloseDialog = () => {
     setOpenDialog(false);
@@ -405,6 +409,26 @@ const Customers = () => {
                   )}
                 />
               </Grid>
+              <Grid item xs={12}>
+  <Controller
+    name="gender"
+    control={control}
+    defaultValue="OTHER"
+    render={({ field }) => (
+      <TextField
+        {...field}
+        label="Geschlecht"
+        select
+        fullWidth
+      >
+        <MenuItem value="FEMALE">Weiblich</MenuItem>
+        <MenuItem value="MALE">Männlich</MenuItem>
+        <MenuItem value="OTHER">Andere/Nicht angegeben</MenuItem>
+      </TextField>
+    )}
+  />
+</Grid>
+
             </Grid>
           </DialogContent>
           <DialogActions>

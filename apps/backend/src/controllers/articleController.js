@@ -1,4 +1,5 @@
 const articleService = require('../services/articleService');
+const fileUploadService = require('../services/fileUploadService');
 const prisma = require('../utils/prisma');
 
 class ArticleController {
@@ -37,57 +38,97 @@ class ArticleController {
   
   // Neuen Artikel erstellen
   async createArticle(req, res) {
-    try {
-      const article = await articleService.createArticle(req.body);
-      
-      // Audit-Log
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user.id,
-          action: 'CREATE_ARTICLE',
-          entityType: 'Article',
-          entityId: article.id,
-          changes: req.body
-        }
-      });
-      
-      res.status(201).json({
-        message: 'Artikel erfolgreich erstellt',
-        article
-      });
-    } catch (error) {
-      console.error('Create article error:', error);
-      res.status(500).json({ error: 'Fehler beim Erstellen des Artikels' });
+  try {
+    const articleData = req.body;
+    
+    // Wenn Bild hochgeladen wurde
+    if (req.file) {
+      const imagePaths = await fileUploadService.processArticleImage(req.file);
+      articleData.imageUrl = imagePaths.original;
+      articleData.imageThumbnail = imagePaths.thumbnail;
+      articleData.imageSmall = imagePaths.small;
+      articleData.imageMedium = imagePaths.medium;
+      articleData.imageLarge = imagePaths.large;
     }
+    
+    const article = await articleService.createArticle(articleData);
+    
+    // Audit-Log
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'CREATE_ARTICLE',
+        entityType: 'Article',
+        entityId: article.id,
+        changes: articleData
+      }
+    });
+    
+    res.status(201).json({
+      message: 'Artikel erfolgreich erstellt',
+      article
+    });
+  } catch (error) {
+    console.error('Create article error:', error);
+    res.status(500).json({ error: 'Fehler beim Erstellen des Artikels' });
   }
+}
+
+
   
   // Artikel aktualisieren
   async updateArticle(req, res) {
-    try {
-      const { id } = req.params;
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    // Hole aktuellen Artikel für alte Bilder
+    const currentArticle = await articleService.findById(id);
+    
+    // Wenn neues Bild hochgeladen wurde
+    if (req.file) {
+      const imagePaths = await fileUploadService.processArticleImage(req.file);
+      updateData.imageUrl = imagePaths.original;
+      updateData.imageThumbnail = imagePaths.thumbnail;
+      updateData.imageSmall = imagePaths.small;
+      updateData.imageMedium = imagePaths.medium;
+      updateData.imageLarge = imagePaths.large;
       
-      const article = await articleService.updateArticle(id, req.body);
-      
-      // Audit-Log
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user.id,
-          action: 'UPDATE_ARTICLE',
-          entityType: 'Article',
-          entityId: id,
-          changes: req.body
-        }
-      });
-      
-      res.json({
-        message: 'Artikel erfolgreich aktualisiert',
-        article
-      });
-    } catch (error) {
-      console.error('Update article error:', error);
-      res.status(500).json({ error: 'Fehler beim Aktualisieren des Artikels' });
+      // Lösche alte Bilder
+      if (currentArticle.imageUrl) {
+        await fileUploadService.deleteArticleImages({
+          original: currentArticle.imageUrl,
+          thumbnail: currentArticle.imageThumbnail,
+          small: currentArticle.imageSmall,
+          medium: currentArticle.imageMedium,
+          large: currentArticle.imageLarge
+        });
+      }
     }
+    
+    const article = await articleService.updateArticle(id, updateData);
+    
+    // Audit-Log
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user.id,
+        action: 'UPDATE_ARTICLE',
+        entityType: 'Article',
+        entityId: id,
+        changes: updateData
+      }
+    });
+    
+    res.json({
+      message: 'Artikel erfolgreich aktualisiert',
+      article
+    });
+  } catch (error) {
+    console.error('Update article error:', error);
+    res.status(500).json({ error: 'Fehler beim Aktualisieren des Artikels' });
   }
+}
+
   
   // Artikel aktivieren/deaktivieren
   async toggleArticleStatus(req, res) {

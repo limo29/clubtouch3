@@ -33,6 +33,7 @@ import {
   TrendingUp,
   TrendingDown,
   Search,
+  CloudUpload,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
@@ -50,6 +51,8 @@ const Articles = () => {
   
   const { control, handleSubmit, reset, formState: { errors } } = useForm();
   const { control: stockControl, handleSubmit: handleStockSubmit, reset: resetStock } = useForm();
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
 
   // Fetch articles
 const { data: articlesData, isLoading } = useQuery({
@@ -141,32 +144,40 @@ const { data: articlesData, isLoading } = useQuery({
     article.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleOpenDialog = (article = null) => {
-    setEditingArticle(article);
-    if (article) {
-      reset({
-        name: article.name,
-        price: article.price,
-        category: article.category,
-        unit: article.unit,
-        minStock: article.minStock,
-        imageUrl: article.imageUrl || '',
-        countsForHighscore: article.countsForHighscore,
-      });
-    } else {
-      reset({
-        name: '',
-        price: '',
-        category: '',
-        unit: 'Stück',
-        minStock: 0,
-        initialStock: 0,
-        imageUrl: '',
-        countsForHighscore: true,
-      });
+const handleOpenDialog = (article = null) => {
+  setEditingArticle(article);
+  setImageFile(null);
+  setImagePreview(null);
+  
+  if (article) {
+    reset({
+      name: article.name,
+      price: article.price,
+      category: article.category,
+      unit: article.unit,
+      minStock: article.minStock,
+      imageUrl: article.imageUrl || '',
+      countsForHighscore: article.countsForHighscore,
+    });
+    // Setze Vorschau wenn Bild vorhanden
+    if (article.imageMedium) {
+      setImagePreview(article.imageMedium);
     }
-    setOpenDialog(true);
-  };
+  } else {
+    reset({
+      name: '',
+      price: '',
+      category: '',
+      unit: 'Stück',
+      minStock: 0,
+      initialStock: 0,
+      imageUrl: '',
+      countsForHighscore: true,
+    });
+  }
+  setOpenDialog(true);
+};
+
 
   const handleCloseDialog = () => {
     setOpenDialog(false);
@@ -191,16 +202,40 @@ const { data: articlesData, isLoading } = useQuery({
     resetStock();
   };
 
-  const onSubmit = (data) => {
-    // Convert strings to numbers
-    data.price = parseFloat(data.price);
-    data.minStock = parseInt(data.minStock);
-    if (data.initialStock) {
-      data.initialStock = parseInt(data.initialStock);
+const onSubmit = (data) => {
+  const formData = new FormData();
+  
+  // Füge alle Felder hinzu
+  Object.keys(data).forEach(key => {
+    if (data[key] !== undefined && data[key] !== '') {
+      formData.append(key, data[key]);
     }
-    
-    articleMutation.mutate(data);
-  };
+  });
+  
+  // Füge Bild hinzu wenn vorhanden
+  if (imageFile) {
+    formData.append('image', imageFile);
+  }
+  
+  if (editingArticle) {
+    // Update mit PUT
+    api.put(`/articles/${editingArticle.id}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(() => {
+      queryClient.invalidateQueries(['articles']);
+      handleCloseDialog();
+    });
+  } else {
+    // Create mit POST
+    api.post('/articles', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(() => {
+      queryClient.invalidateQueries(['articles']);
+      handleCloseDialog();
+    });
+  }
+};
+
 
   const onStockSubmit = (data) => {
     const mutation = stockAction === 'delivery' ? deliveryMutation : inventoryMutation;
@@ -528,8 +563,49 @@ const { data: articlesData, isLoading } = useQuery({
                   )}
                 />
               </Grid>
+              <Grid item xs={12}>
+  <Button
+    variant="outlined"
+    component="label"
+    fullWidth
+    startIcon={<CloudUpload />}
+  >
+    Artikelbild hochladen
+    <input
+      type="file"
+      hidden
+      accept="image/*"
+      onChange={(e) => {
+        const file = e.target.files[0];
+        if (file) {
+          setImageFile(file);
+          // Erstelle Vorschau
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setImagePreview(reader.result);
+          };
+          reader.readAsDataURL(file);
+        }
+      }}
+    />
+  </Button>
+  {imagePreview && (
+    <Box sx={{ mt: 2, textAlign: 'center' }}>
+      <img 
+        src={imagePreview} 
+        alt="Vorschau" 
+        style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
+      />
+      <Typography variant="caption" display="block">
+        {imageFile ? imageFile.name : 'Aktuelles Bild'}
+      </Typography>
+    </Box>
+  )}
+</Grid>
+
             </Grid>
           </DialogContent>
+          
           <DialogActions>
             <Button onClick={handleCloseDialog}>Abbrechen</Button>
             <Button

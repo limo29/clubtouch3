@@ -22,6 +22,13 @@ import Transactions from './pages/Transactions';
 import Highscore from './pages/Highscore';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
+import Purchases from './pages/Purchases';
+import ProfitLoss from './pages/ProfitLoss';
+import Invoices from './pages/Invoices';
+import PurchasesNew from './pages/PurchasesNew';
+import InvoicesNew from './pages/InvoicesNew';
+
+
 
 // Create a client
 const queryClient = new QueryClient({
@@ -55,6 +62,13 @@ function App() {
                   <Route path="highscore" element={<Highscore />} />
                   <Route path="users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
                   <Route path="reports" element={<Reports />} />
+                  <Route path="purchases" element={<Purchases />} />
+                  <Route path="profit-loss" element={<ProfitLoss />} />
+                  <Route path="invoices" element={<Invoices />} />
+                  <Route path="purchases/new" element={<PurchasesNew />} />
+                  <Route path="invoices/new" element={<InvoicesNew />} />
+
+
                 </Route>
                 
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
