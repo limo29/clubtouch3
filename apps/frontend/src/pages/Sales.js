@@ -1,641 +1,500 @@
-import React, { useState, useEffect } from 'react';
+// src/pages/Sales.jsx
+import React, { useMemo, useState } from 'react';
 import {
-  Grid,
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  TextField,
-  InputAdornment,
-  Chip,
-  Avatar,
-  Button,
-  IconButton,
-  Badge,
-  Tooltip,
-  Divider,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  List,
-  ListItem,
-  ListItemText,
-  Tab,
-  Tabs,
-  alpha,
-  MenuItem,
+  Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
+  Avatar, Stack, IconButton, List, ListItem, ListItemText, Button, Dialog, DialogTitle,
+  DialogContent, DialogActions, MenuItem, Chip, useMediaQuery
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
-  Search,
-  Female,
-  Male,
-  Person,
-  ShoppingCart,
-  AccountBalanceWallet,
-  History,
-  Add,
-  AttachMoney,
-  Cancel,
-  LocalDrink,
-  Fastfood,
-  Category,
+  Search, Female, Male, Person, ShoppingCart, AttachMoney,
+  History, AccountBalanceWallet
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 
+/* ---------------- Helpers ---------------- */
+const num = (v) => {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  const x = parseFloat(String(v).replace(',', '.'));
+  return Number.isNaN(x) ? 0 : x;
+};
+const money = (v) => `€${num(v).toFixed(2)}`;
+const withinHours = (date, h) => {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return false;
+  return Date.now() - d.getTime() <= h * 60 * 60 * 1000;
+};
+
 const Sales = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const queryClient = useQueryClient();
+
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerSearch, setCustomerSearch] = useState('');
   const [articleSearch, setArticleSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [cart, setCart] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState('');
   const [topUpMethod, setTopUpMethod] = useState('CASH');
 
+  const [showMoreGirls, setShowMoreGirls] = useState(false);
+  const [showMoreBoys, setShowMoreBoys] = useState(false);
+  const MOBILE_LIMIT = 12; // pro Geschlecht
 
-// Fetch customers with enhanced data
-const { data: customersData = { customers: [] } } = useQuery({
-  queryKey: ['customers-sales'],
-  queryFn: async () => {
-    const response = await api.get(API_ENDPOINTS.CUSTOMERS);
-
-    // Überprüfe, ob die Datenstruktur wie erwartet ist
-    if (response.data && Array.isArray(response.data.customers)) {
-      const processedCustomers = response.data.customers.map(customer => {
-        const balance = parseFloat(customer.balance);
-        return {
-          ...customer,
-          balance: isNaN(balance) ? 0 : balance // Konvertiere balance
-        };
-      });
-
-      // Sortiere NACH der Konvertierung, falls die Sortierung von numerischen Werten abhängt (hier nicht der Fall)
-      // oder wenn die ursprünglichen Werte für die Sortierung benötigt werden.
-      // In diesem Fall sortieren wir nach Datum, was vorher geschehen kann.
-      const sorted = processedCustomers.sort((a, b) =>
-        new Date(b.lastActivity || b.createdAt) - new Date(a.lastActivity || a.createdAt)
-      );
-      return { customers: sorted };
+  /* ---------------- Daten laden ---------------- */
+  const { data: customersData = { customers: [] } } = useQuery({
+    queryKey: ['customers-sales'],
+    queryFn: async () => {
+      const res = await api.get(API_ENDPOINTS.CUSTOMERS);
+      const customers = Array.isArray(res.data?.customers) ? res.data.customers : [];
+      return {
+        customers: customers.map(c => ({
+          ...c,
+          balance: num(c.balance),
+          lastActivity: c.lastActivity || c.updatedAt || c.createdAt,
+          isRecent: withinHours(c.lastActivity || c.updatedAt || c.createdAt, 24)
+        }))
+      };
     }
-    return { customers: [] }; // Fallback, falls Datenstruktur unerwartet
-  },
-});
-
-// Fetch articles
-const { data: articles = [] } = useQuery({
-  queryKey: ['articles'],
-  queryFn: async () => {
-    const response = await api.get(API_ENDPOINTS.ARTICLES);
-
-    // Überprüfe, ob die Datenstruktur wie erwartet ist
-    if (response.data && Array.isArray(response.data.articles)) {
-      const activeArticles = response.data.articles.filter(a => a.active);
-
-      // Konvertiere 'price' für jeden aktiven Artikel
-      return activeArticles.map(article => {
-        const price = parseFloat(article.price);
-        return {
-          ...article,
-          price: isNaN(price) ? 0 : price // Konvertiere price
-        };
-      });
-    }
-    return []; // Fallback, falls Datenstruktur unerwartet
-  },
-});
-
-
-// TopUp Mutation
-const topUpMutation = useMutation({
-  mutationFn: async (data) => {
-    const response = await api.post(`/customers/${data.customerId}/topup`, {
-      amount: parseFloat(data.amount),
-      method: data.method,
-      reference: data.reference
-    });
-    return response.data;
-  },
-  onSuccess: () => {
-    queryClient.invalidateQueries(['customers-sales']);
-    setShowTopUp(false);
-    setTopUpAmount('');
-  },
-});
-
-// Füge Barverkauf-Funktion hinzu:
-const handleCashSale = () => {
-  if (cart.length === 0) return;
-  
-  const saleData = {
-    paymentMethod: 'CASH',
-    customerId: null,
-    items: cart.map(item => ({
-      articleId: item.id,
-      quantity: item.quantity,
-    })),
-  };
-  
-  quickSaleMutation.mutate(saleData);
-};
-
-
-// Fetch customer transactions
-const { data: customerTransactions = [] } = useQuery({
-  queryKey: ['customer-transactions', selectedCustomer?.id],
-  queryFn: async () => {
-    if (!selectedCustomer) return [];
-    const response = await api.get(API_ENDPOINTS.TRANSACTIONS, {
-      params: {
-        customerId: selectedCustomer.id,
-        includeItems: true
-      }
-    });
-
-    // Überprüfe, ob die Datenstruktur wie erwartet ist
-    if (response.data && Array.isArray(response.data.transactions)) {
-      return response.data.transactions.map(transaction => {
-        const totalAmount = parseFloat(transaction.totalAmount);
-        let processedItems = transaction.items || [];
-
-        // Wenn 'includeItems: true' auch Preise pro Artikel liefert, die formatiert werden müssen:
-        if (Array.isArray(transaction.items)) {
-          processedItems = transaction.items.map(item => {
-            // Annahme: Jedes Item könnte einen eigenen 'price' oder 'itemTotal' haben, der konvertiert werden muss.
-            // Passe dies an die tatsächliche Struktur deiner 'item'-Objekte an.
-            // Beispiel, falls ein Item einen eigenen Preis hat:
-            const itemPrice = parseFloat(item.price); // oder item.unitPrice, item.lineTotal etc.
-            return {
-              ...item,
-              price: isNaN(itemPrice) ? 0 : itemPrice // Ersetze 'price' mit dem tatsächlichen Feldnamen
-              // Füge hier weitere Konvertierungen für Item-Eigenschaften hinzu, falls nötig
-            };
-          });
-        }
-
-        return {
-          ...transaction,
-          totalAmount: isNaN(totalAmount) ? 0 : totalAmount, // Konvertiere totalAmount
-          items: processedItems // Füge die verarbeiteten Items hinzu
-        };
-      });
-    }
-    return []; // Fallback, falls Datenstruktur unerwartet
-  },
-  enabled: !!selectedCustomer && showHistory, // `showHistory` muss in deinem Komponenten-Scope definiert sein
-});
-
-  // Filter customers
-  const filteredCustomers = customersData.customers.filter(customer =>
-    customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-    (customer.nickname && customer.nickname.toLowerCase().includes(customerSearch.toLowerCase()))
-  );
-
-  // Separate by gender
-  const femaleCustomers = filteredCustomers.filter(c => c.gender === 'FEMALE');
-  const maleCustomers = filteredCustomers.filter(c => c.gender === 'MALE');
-  const otherCustomers = filteredCustomers.filter(c => !c.gender || c.gender === 'OTHER');
-
-  // Get unique categories
-  const categories = ['all', ...new Set(articles.map(a => a.category))];
-
-  // Filter articles
-  const filteredArticles = articles.filter(article => {
-    if (selectedCategory !== 'all' && article.category !== selectedCategory) return false;
-    if (articleSearch && !article.name.toLowerCase().includes(articleSearch.toLowerCase())) return false;
-    return true;
   });
 
-  // Quick sale for customer
+  const { data: articles = [] } = useQuery({
+    queryKey: ['articles'],
+    queryFn: async () => {
+      const res = await api.get(API_ENDPOINTS.ARTICLES);
+      const list = Array.isArray(res.data?.articles) ? res.data.articles : [];
+      return list
+        .filter(a => a.active)
+        .map(a => ({ ...a, price: num(a.price) }));
+    }
+  });
+
+  /* ---------------- Mutations ---------------- */
+  const topUpMutation = useMutation({
+    mutationFn: async (data) =>
+      api.post(`/customers/${data.customerId}/topup`, {
+        amount: num(data.amount),
+        method: data.method,
+        reference: data.reference
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['customers-sales']);
+      setShowTopUp(false);
+      setTopUpAmount('');
+    }
+  });
+
   const quickSaleMutation = useMutation({
-    mutationFn: async (data) => {
-      const response = await api.post(API_ENDPOINTS.TRANSACTIONS, data);
-      return response.data;
-    },
+    mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
     onSuccess: () => {
       queryClient.invalidateQueries(['customers-sales']);
       queryClient.invalidateQueries(['articles']);
       setCart([]);
-    },
+    }
   });
 
-  const handleQuickSale = (customer) => {
-    if (cart.length === 0) return;
-    
-    const saleData = {
-      paymentMethod: 'ACCOUNT',
-      customerId: customer.id,
-      items: cart.map(item => ({
-        articleId: item.id,
-        quantity: item.quantity,
-      })),
-    };
-    
-    quickSaleMutation.mutate(saleData);
+  /* ---------------- Logik ---------------- */
+  const handleCashSale = () => {
+    if (!cart.length) return;
+    quickSaleMutation.mutate({
+      paymentMethod: 'CASH',
+      items: cart.map(i => ({ articleId: i.id, quantity: i.quantity }))
+    });
   };
 
-  const CustomerCard = ({ customer }) => {
-    const isRecent = new Date() - new Date(customer.lastActivity || customer.createdAt) < 5 * 60 * 1000; // 5 Minuten
-    
-    return (
-      <Card
-        sx={{
-          cursor: 'pointer',
-          transition: 'all 0.2s',
-          border: selectedCustomer?.id === customer.id ? 2 : 0,
-          borderColor: 'primary.main',
-          backgroundColor: isRecent ? alpha('#4caf50', 0.1) : 'background.paper',
-          '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: 3,
-          },
-        }}
-        onClick={() => setSelectedCustomer(customer)}
-      >
-        <CardContent sx={{ p: 1.5 }}>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
-            <Box display="flex" alignItems="center">
-              <Avatar sx={{ width: 32, height: 32, mr: 1, bgcolor: getGenderColor(customer.gender) }}>
-                {getGenderIcon(customer.gender)}
-              </Avatar>
-              <Box>
-                <Typography variant="body2" fontWeight="bold">
-                  {customer.nickname || customer.name}
-                </Typography>
-                {customer.nickname && (
-                  <Typography variant="caption" color="text.secondary">
-                    {customer.name}
-                  </Typography>
-                )}
-              </Box>
-            </Box>
-            <Typography 
-              variant="h6" 
-              color={customer.balance < 5 ? 'error' : 'primary'}
-              fontWeight="bold"
-            >
-              €{customer.balance.toFixed(2)}
+  const handleQuickSale = (customer) => {
+    if (!cart.length) return;
+    quickSaleMutation.mutate({
+      paymentMethod: 'ACCOUNT',
+      customerId: customer.id,
+      items: cart.map(i => ({ articleId: i.id, quantity: i.quantity }))
+    });
+  };
+
+  const filteredCustomers = useMemo(() => {
+    const s = customerSearch.toLowerCase();
+    const matches = customersData.customers.filter(c =>
+      c.name.toLowerCase().includes(s) ||
+      (c.nickname && c.nickname.toLowerCase().includes(s))
+    );
+
+    // recent (24h) zuerst, dann nach Aktivität desc
+    return matches.sort((a, b) => {
+      if (a.isRecent !== b.isRecent) return a.isRecent ? -1 : 1;
+      return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime();
+    });
+  }, [customersData.customers, customerSearch]);
+
+  const girls = filteredCustomers.filter(c => c.gender === 'FEMALE');
+  const boys  = filteredCustomers.filter(c => c.gender === 'MALE');
+  const other = filteredCustomers.filter(c => !c.gender || c.gender === 'OTHER');
+
+  const categories = ['all', ...new Set(articles.map(a => a.category))];
+
+  const filteredArticles = articles.filter(a =>
+    (selectedCategory === 'all' || a.category === selectedCategory) &&
+    a.name.toLowerCase().includes(articleSearch.toLowerCase())
+  );
+
+  const addToCart = (a) => {
+    const exists = cart.find(i => i.id === a.id);
+    exists
+      ? setCart(cart.map(i => i.id === a.id ? { ...i, quantity: i.quantity + 1 } : i))
+      : setCart([...cart, { ...a, quantity: 1 }]);
+  };
+
+  const updateQty = (id, qty) =>
+    qty <= 0
+      ? setCart(cart.filter(i => i.id !== id))
+      : setCart(cart.map(i => (i.id === id ? { ...i, quantity: qty } : i)));
+
+  const total = cart.reduce((s, i) => s + num(i.price) * num(i.quantity), 0);
+
+  /* ---------------- UI Bausteine ---------------- */
+  const GenderHeader = ({ icon, label, count }) => (
+    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+      {icon}
+      <Typography variant="subtitle2">{label} ({count})</Typography>
+    </Stack>
+  );
+
+  const CustomerCard = ({ customer }) => (
+    <Card
+      onClick={() => setSelectedCustomer(customer)}
+      sx={{
+        p: 1,
+        border: selectedCustomer?.id === customer.id ? '2px solid #1976d2' : '1px solid #e0e0e0',
+        cursor: 'pointer',
+        '&:hover': { boxShadow: 3 },
+        backgroundColor: customer.isRecent ? 'rgba(76, 175, 80, 0.08)' : 'background.paper',
+        maxWidth: '100%'
+      }}
+    >
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 1 }}>
+        {/* links: darf schrumpfen */}
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
+          <Avatar
+            sx={{
+              bgcolor: customer.gender === 'FEMALE' ? 'pink.main' : customer.gender === 'MALE' ? 'blue.main' : 'grey.500',
+              flexShrink: 0
+            }}
+          >
+            {customer.gender === 'FEMALE' ? <Female /> : customer.gender === 'MALE' ? <Male /> : <Person />}
+          </Avatar>
+
+          <Box sx={{ minWidth: 0 }}>
+            <Typography noWrap sx={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {customer.nickname || customer.name}
             </Typography>
-          </Box>
-          
-          {selectedCustomer?.id === customer.id && cart.length > 0 && (
-            <Box mt={1} display="flex" gap={0.5}>
-              <Button
-                size="small"
-                variant="contained"
-                fullWidth
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleQuickSale(customer);
-                }}
-                disabled={customer.balance < getTotalAmount()}
+            {customer.nickname && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                noWrap
+                sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}
               >
-                €{getTotalAmount().toFixed(2)} buchen
-              </Button>
-            </Box>
-          )}
-          
-          {selectedCustomer?.id === customer.id && (
-            <Box mt={1} display="flex" gap={0.5}>
-              <Tooltip title="Guthaben aufladen">
-                <IconButton 
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowTopUp(true);
-                  }}
-                >
-                  <AccountBalanceWallet />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Verlauf">
-                <IconButton 
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowHistory(true);
-                  }}
-                >
-                  <History />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          )}
-        </CardContent>
-      </Card>
+                {customer.name}
+              </Typography>
+            )}
+            {customer.isRecent && (
+              <Chip size="small" color="success" label="aktiv (24h)" sx={{ mt: 0.5, maxWidth: '100%', overflow: 'hidden' }} />
+            )}
+          </Box>
+        </Stack>
+
+        {/* rechts: feste Breite */}
+        <Typography
+          fontWeight={700}
+          color={customer.balance < 5 ? 'error' : 'primary'}
+          sx={{ flexShrink: 0, pl: 1, whiteSpace: 'nowrap' }}
+        >
+          €{customer.balance.toFixed(2)}
+        </Typography>
+      </Stack>
+
+      {selectedCustomer?.id === customer.id && (
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+          <IconButton size="small" onClick={(e) => { e.stopPropagation(); setShowTopUp(true); }}>
+            <AccountBalanceWallet />
+          </IconButton>
+          <IconButton size="small" onClick={(e) => { e.stopPropagation(); /* Verlauf */ }}>
+            <History />
+          </IconButton>
+        </Stack>
+      )}
+    </Card>
+  );
+
+  const renderGenderList = (list, gender) => {
+    const limit = isMobile && !((gender === 'FEMALE' && showMoreGirls) || (gender === 'MALE' && showMoreBoys))
+      ? list.slice(0, MOBILE_LIMIT)
+      : list;
+
+    return (
+      <>
+        <Stack spacing={1}>
+          {limit.map(c => <CustomerCard key={c.id} customer={c} />)}
+        </Stack>
+        {isMobile && list.length > MOBILE_LIMIT && (
+          <Button
+            sx={{ mt: 1 }}
+            fullWidth
+            size="small"
+            variant="outlined"
+            onClick={() => gender === 'FEMALE' ? setShowMoreGirls(v => !v) : setShowMoreBoys(v => !v)}
+          >
+            {((gender === 'FEMALE' && showMoreGirls) || (gender === 'MALE' && showMoreBoys))
+              ? 'Weniger anzeigen' : 'Mehr anzeigen'}
+          </Button>
+        )}
+      </>
     );
   };
 
-  const getGenderIcon = (gender) => {
-    switch (gender) {
-      case 'FEMALE':
-        return <Female />;
-      case 'MALE':
-        return <Male />;
-      default:
-        return <Person />;
-    }
-  };
-
-  const getGenderColor = (gender) => {
-    switch (gender) {
-      case 'FEMALE':
-        return 'pink.main';
-      case 'MALE':
-        return 'blue.main';
-      default:
-        return 'grey.500';
-    }
-  };
-
-  const addToCart = (article) => {
-    const existingItem = cart.find(item => item.id === article.id);
-    if (existingItem) {
-      updateQuantity(article.id, existingItem.quantity + 1);
-    } else {
-      setCart([...cart, { ...article, quantity: 1 }]);
-    }
-  };
-
-  const updateQuantity = (articleId, newQuantity) => {
-    if (newQuantity <= 0) {
-      removeFromCart(articleId);
-    } else {
-      setCart(cart.map(item =>
-        item.id === articleId ? { ...item, quantity: newQuantity } : item
-      ));
-    }
-  };
-
-  const removeFromCart = (articleId) => {
-    setCart(cart.filter(item => item.id !== articleId));
-  };
-
-  const getTotalAmount = () => {
-    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
-  };
-
+  /* ---------------- Render ---------------- */
   return (
-    <Box sx={{ height: 'calc(100vh - 100px)', display: 'flex', gap: 2 }}>
-      {/* Left - Customer Lists */}
-      <Box sx={{ width: 600, display: 'flex', gap: 2 }}>
-        {/* Female Customers */}
-        <Box sx={{ flex: 1 }}>
-          <Box sx={{ mb: 2, textAlign: 'center' }}>
-            <Female sx={{ color: 'pink.main' }} />
-            <Typography variant="subtitle2">Mädels ({femaleCustomers.length})</Typography>
-          </Box>
-          <Box sx={{ height: 'calc(100% - 60px)', overflowY: 'auto' }}>
-            {femaleCustomers.map(customer => (
-              <Box key={customer.id} mb={1}>
-                <CustomerCard customer={customer} />
-              </Box>
-            ))}
-          </Box>
-        </Box>
+    <Box sx={{ pb: 2 }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gap: 2,
+          gridTemplateColumns: { xs: '1fr', md: '380px 1fr 380px' }
+        }}
+      >
+        {/* Kunden (links) */}
+        <Card sx={{ position: { md: 'sticky' }, top: 88, height: { md: 'calc(100vh - 120px)' }, overflow: 'hidden' }}>
+          <CardContent sx={{ pb: 1 }}>
+            <TextField
+              placeholder="Kunde suchen…"
+              size="small"
+              fullWidth
+              value={customerSearch}
+              onChange={e => setCustomerSearch(e.target.value)}
+              InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
+            />
+          </CardContent>
 
-        {/* Male Customers */}
-        <Box sx={{ flex: 1 }}>
-          <Box sx={{ mb: 2, textAlign: 'center' }}>
-            <Male sx={{ color: 'blue.main' }} />
-            <Typography variant="subtitle2">Jungs ({maleCustomers.length})</Typography>
-          </Box>
-          <Box sx={{ height: 'calc(100% - 60px)', overflowY: 'auto' }}>
-            {maleCustomers.map(customer => (
-              <Box key={customer.id} mb={1}>
-                <CustomerCard customer={customer} />
-              </Box>
-            ))}
-          </Box>
-        </Box>
-      </Box>
+          <Box sx={{ p: 2, pt: 0, overflowY: 'auto', height: { md: '100%' } }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
+                <GenderHeader icon={<Female sx={{ color: 'pink.main' }} />} label="Mädels" count={girls.length} />
+                {renderGenderList(girls, 'FEMALE')}
+              </Grid>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
+                <GenderHeader icon={<Male sx={{ color: 'blue.main' }} />} label="Jungs" count={boys.length} />
+                {renderGenderList(boys, 'MALE')}
+              </Grid>
 
-      {/* Middle - Articles */}
-      <Box sx={{ flex: 1 }}>
-        <TextField
-          placeholder="Artikel suchen..."
-          size="small"
-          fullWidth
-          value={articleSearch}
-          onChange={(e) => setArticleSearch(e.target.value)}
-          sx={{ mb: 2 }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search />
-              </InputAdornment>
-            ),
-          }}
-        />
-        
-        <Tabs
-          value={selectedCategory}
-          onChange={(e, value) => setSelectedCategory(value)}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{ mb: 2 }}
-        >
-          {categories.map(category => (
-            <Tab key={category} label={category === 'all' ? 'Alle' : category} value={category} />
-          ))}
-        </Tabs>
-
-        <Grid container spacing={1} sx={{ height: 'calc(100% - 120px)', overflowY: 'auto' }}>
-          {filteredArticles.map(article => (
-            <Grid item xs={6} sm={4} md={3} key={article.id}>
-              <Card
-                sx={{
-                  cursor: 'pointer',
-                  transition: 'transform 0.2s',
-                  '&:hover': {
-                    transform: 'scale(1.05)',
-                  },
-                }}
-                onClick={() => addToCart(article)}
-              >
-                {article.imageMedium && (
-                  <Box
-                    component="img"
-                    src={article.imageMedium}
-                    alt={article.name}
-                    sx={{ width: '100%', height: 100, objectFit: 'cover' }}
-                  />
-                )}
-                <CardContent sx={{ p: 1 }}>
-                  <Typography variant="body2" noWrap>
-                    {article.name}
-                  </Typography>
-                  <Typography variant="h6" color="primary">
-                    €{article.price.toFixed(2)}
-                  </Typography>
-                  {article.stock <= article.minStock && (
-                    <Chip label="Niedrig" size="small" color="warning" />
-                  )}
-                </CardContent>
-              </Card>
+              {other.length > 0 && (
+                <Grid item xs={12} sx={{ minWidth: 0 }}>
+                  <GenderHeader icon={<Person />} label="Andere" count={other.length} />
+                  <Stack spacing={1}>
+                    {other.map(c => <CustomerCard key={c.id} customer={c} />)}
+                  </Stack>
+                </Grid>
+              )}
             </Grid>
-          ))}
-        </Grid>
-      </Box>
+          </Box>
+        </Card>
 
-      {/* Right - Cart */}
-      <Box sx={{ width: 300 }}>
-        <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* Artikel (Mitte) */}
+        <Card sx={{ position: { md: 'sticky' }, top: 88, height: { md: 'calc(100vh - 120px)' }, display: 'flex', flexDirection: 'column' }}>
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <TextField
+              placeholder="Artikel suchen…"
+              size="small"
+              fullWidth
+              value={articleSearch}
+              onChange={e => setArticleSearch(e.target.value)}
+              InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
+            />
+            <Tabs
+              value={selectedCategory}
+              onChange={(e, v) => setSelectedCategory(v)}
+              variant="scrollable"
+              scrollButtons="auto"
+              sx={{ mt: 1 }}
+            >
+              {categories.map(c => <Tab key={c} value={c} label={c === 'all' ? 'Alle' : c} />)}
+            </Tabs>
+          </Box>
+
+          <Box sx={{ p: 2, overflowY: 'auto' }}>
+            <Grid container spacing={1.5}>
+              {filteredArticles.map(a => (
+                <Grid item xs={6} sm={4} md={3} lg={2} key={a.id}>
+                  <Card
+                    sx={{
+                      cursor: 'pointer',
+                      '&:hover': { transform: 'scale(1.03)' },
+                      transition: 'transform .15s'
+                    }}
+                    onClick={() => addToCart(a)}
+                  >
+                    {a.imageMedium && (
+                      <Box
+                        component="img"
+                        src={a.imageMedium}
+                        alt={a.name}
+                        loading="lazy"
+                        sx={{ width: '100%', height: 140, objectFit: 'cover' }}
+                      />
+                    )}
+                    <CardContent sx={{ p: 1.25 }}>
+                      <Typography noWrap fontSize={14} fontWeight={600}>{a.name}</Typography>
+                      <Typography fontWeight={800} color="primary" fontSize={16}>
+                        {money(a.price)}
+                      </Typography>
+                      {num(a.stock) <= num(a.minStock) && (
+                        <Chip size="small" color="warning" label="Niedrig" sx={{ mt: 0.5 }} />
+                      )}
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        </Card>
+
+        {/* Warenkorb (rechts) */}
+        <Card sx={{ position: { md: 'sticky' }, top: 88, height: { md: 'calc(100vh - 120px)' }, display: 'flex', flexDirection: 'column' }}>
           <CardContent sx={{ flex: 1, overflowY: 'auto' }}>
-            <Typography variant="h6" gutterBottom>
-              <ShoppingCart sx={{ mr: 1, verticalAlign: 'middle' }} />
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              <ShoppingCart sx={{ verticalAlign: 'middle', mr: 1 }} />
               Warenkorb
             </Typography>
-            
-            {cart.length === 0 ? (
-              <Typography color="text.secondary" align="center" sx={{ py: 4 }}>
+
+            {!cart.length && (
+              <Typography sx={{ textAlign: 'center', mt: 3, color: 'text.secondary' }}>
                 Warenkorb ist leer
               </Typography>
-            ) : (
-              <List dense>
-                {cart.map(item => (
-                  <ListItem key={item.id}>
-                    <ListItemText
-                      primary={item.name}
-                      secondary={`${item.quantity}x €${item.price.toFixed(2)}`}
-                    />
-                    <Box>
-                      <IconButton size="small" onClick={() => updateQuantity(item.id, item.quantity - 1)}>
-                        -
+            )}
+
+            <List dense sx={{ '& .MuiListItem-root': { py: 1.25 } }}>
+              {cart.map(i => (
+                <ListItem
+                  key={i.id}
+                  secondaryAction={
+                    <Stack direction="row" spacing={1}>
+                      <IconButton
+                        onClick={() => updateQty(i.id, i.quantity - 1)}
+                        sx={{
+                          bgcolor: 'grey.200',
+                          width: 40, height: 40, borderRadius: '50%',
+                          '&:hover': { bgcolor: 'grey.300' }
+                        }}
+                      >
+                        –
                       </IconButton>
-                      <IconButton size="small" onClick={() => updateQuantity(item.id, item.quantity + 1)}>
+                      <IconButton
+                        onClick={() => updateQty(i.id, i.quantity + 1)}
+                        sx={{
+                          bgcolor: 'primary.main', color: '#fff',
+                          width: 40, height: 40, borderRadius: '50%',
+                          '&:hover': { bgcolor: 'primary.dark' }
+                        }}
+                      >
                         +
                       </IconButton>
-                    </Box>
-                  </ListItem>
-                ))}
-              </List>
-            )}
+                    </Stack>
+                  }
+                >
+                  <ListItemText
+                    primary={<Typography fontSize={15} fontWeight={600}>{i.name}</Typography>}
+                    secondary={<Typography fontSize={14}>{i.quantity} × {money(i.price)}</Typography>}
+                  />
+                </ListItem>
+              ))}
+            </List>
           </CardContent>
-          
-          {cart.length > 0 && (
-  <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-    <Typography variant="h5" align="right" gutterBottom>
-      Gesamt: €{getTotalAmount().toFixed(2)}
-    </Typography>
-    
-    <Grid container spacing={1}>
-      <Grid item xs={12}>
-        <Button
-          fullWidth
-          variant="contained"
-          color="success"
-          onClick={handleCashSale}
-          startIcon={<AttachMoney />}
-        >
-          Bar bezahlen
-        </Button>
-      </Grid>
-      {selectedCustomer && (
-        <Grid item xs={12}>
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={() => handleQuickSale(selectedCustomer)}
-            disabled={selectedCustomer.balance < getTotalAmount()}
-          >
-            Auf {selectedCustomer.nickname || selectedCustomer.name} buchen
-          </Button>
-        </Grid>
-      )}
-    </Grid>
-  </Box>
-)}
 
+          {cart.length > 0 && (
+            <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', background: 'background.paper' }}>
+              <Typography variant="h5" align="right" gutterBottom sx={{ fontWeight: 800 }}>
+                Gesamt: {money(total)}
+              </Typography>
+
+              <Button
+                fullWidth
+                size="large"
+                sx={{ py: 1.2 }}
+                variant="contained"
+                color="success"
+                onClick={handleCashSale}
+                startIcon={<AttachMoney />}
+              >
+                Bar bezahlen
+              </Button>
+
+              {selectedCustomer && (
+                <Button
+                  fullWidth
+                  size="large"
+                  sx={{ mt: 1, py: 1.2 }}
+                  variant="contained"
+                  disabled={num(selectedCustomer.balance) < num(total)}
+                  onClick={() => handleQuickSale(selectedCustomer)}
+                >
+                  Auf {selectedCustomer.nickname || selectedCustomer.name} buchen
+                </Button>
+              )}
+            </Box>
+          )}
         </Card>
       </Box>
 
-      {/* History Dialog */}
-      <Dialog open={showHistory} onClose={() => setShowHistory(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
-          Transaktionsverlauf - {selectedCustomer?.name}
-        </DialogTitle>
+      {/* TopUp Modal */}
+      <Dialog open={showTopUp} onClose={() => setShowTopUp(false)}>
+        <DialogTitle>Guthaben aufladen – {selectedCustomer?.nickname || selectedCustomer?.name}</DialogTitle>
         <DialogContent>
-          <List>
-            {customerTransactions.map(transaction => (
-              <ListItem key={transaction.id}>
-                <ListItemText
-                  primary={`€${transaction.totalAmount.toFixed(2)} - ${transaction.items?.length || 0} Artikel`}
-                  secondary={new Date(transaction.createdAt).toLocaleString('de-DE')}
-                />
-                {!transaction.cancelled && (
-                  <IconButton
-                    color="error"
-                    onClick={() => {
-                      // Storno-Logik
-                    }}
-                  >
-                    <Cancel />
-                  </IconButton>
-                )}
-              </ListItem>
+          <TextField
+            label="Betrag"
+            type="number"
+            value={topUpAmount}
+            onChange={e => setTopUpAmount(e.target.value)}
+            fullWidth
+            sx={{ mt: 1 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">€</InputAdornment> }}
+          />
+          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
+            {[5, 10, 20, 50].map(v => (
+              <Button key={v} variant="outlined" onClick={() => setTopUpAmount(String(v))}>
+                💶 {v}
+              </Button>
             ))}
-          </List>
+          </Stack>
+          <TextField
+            select
+            label="Zahlungsart"
+            value={topUpMethod}
+            onChange={e => setTopUpMethod(e.target.value)}
+            fullWidth
+            sx={{ mt: 2 }}
+          >
+            <MenuItem value="CASH">Bar</MenuItem>
+            <MenuItem value="TRANSFER">Überweisung</MenuItem>
+          </TextField>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowTopUp(false)}>Abbrechen</Button>
+          <Button
+            variant="contained"
+            disabled={!topUpAmount || num(topUpAmount) <= 0}
+            onClick={() => topUpMutation.mutate({
+              customerId: selectedCustomer.id,
+              amount: num(topUpAmount),
+              method: topUpMethod
+            })}
+          >
+            Aufladen
+          </Button>
+        </DialogActions>
       </Dialog>
-
-      
-<Dialog open={showTopUp} onClose={() => setShowTopUp(false)}>
-  <DialogTitle>
-    Guthaben aufladen - {selectedCustomer?.name}
-  </DialogTitle>
-  <DialogContent>
-    <Grid container spacing={2} sx={{ mt: 1 }}>
-      <Grid item xs={12}>
-        <TextField
-          label="Betrag"
-          type="number"
-          value={topUpAmount}
-          onChange={(e) => setTopUpAmount(e.target.value)}
-          fullWidth
-          InputProps={{
-            startAdornment: <InputAdornment position="start">€</InputAdornment>,
-          }}
-        />
-      </Grid>
-      <Grid item xs={12}>
-        <TextField
-          select
-          label="Zahlungsart"
-          value={topUpMethod}
-          onChange={(e) => setTopUpMethod(e.target.value)}
-          fullWidth
-        >
-          <MenuItem value="CASH">Bar</MenuItem>
-          <MenuItem value="TRANSFER">Überweisung</MenuItem>
-        </TextField>
-      </Grid>
-    </Grid>
-  </DialogContent>
-  <DialogActions>
-    <Button onClick={() => setShowTopUp(false)}>Abbrechen</Button>
-    <Button
-      onClick={() => {
-        if (topUpAmount && parseFloat(topUpAmount) > 0) {
-          topUpMutation.mutate({
-            customerId: selectedCustomer.id,
-            amount: topUpAmount,
-            method: topUpMethod
-          });
-        }
-      }}
-      variant="contained"
-      disabled={!topUpAmount || parseFloat(topUpAmount) <= 0}
-    >
-      Aufladen
-    </Button>
-  </DialogActions>
-</Dialog>
-
     </Box>
   );
 };

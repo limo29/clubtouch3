@@ -68,7 +68,7 @@ const Layout = () => {
   { text: 'Artikel', icon: <Inventory />, path: '/articles' },
   { text: 'Kunden', icon: <People />, path: '/customers' },
   { text: 'Transaktionen', icon: <Receipt />, path: '/transactions' },
-  { text: 'Einkäufe', icon: <ShoppingBasket />, path: '/purchases' }, 
+  { text: 'Einkäufe', icon: <ShoppingBasket />, path: '/PurchaseDocuments' }, 
   { text: 'Rechnungen', icon: <Description />, path: '/invoices' }, 
   { text: 'Highscore', icon: <EmojiEvents />, path: '/highscore' },
   { text: 'EÜR', icon: <AccountBalance />, path: '/profit-loss' }, 

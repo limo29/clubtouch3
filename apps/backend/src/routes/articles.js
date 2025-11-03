@@ -1,71 +1,75 @@
+// apps/backend/src/routes/articles.js
 const express = require('express');
 const router = express.Router();
+
 const articleController = require('../controllers/articleController');
 const fileUploadService = require('../services/fileUploadService');
 const { authenticate, authorize } = require('../middleware/auth');
-const { 
+const {
   validateArticle,
   validateArticleUpdate,
-  validateDelivery,
-  validateInventory,
-  handleValidationErrors 
+  handleValidationErrors,
 } = require('../middleware/validation');
+
+// --- (optional) kurze Diagnose, kann nach dem Test wieder raus ---
+// console.log('[articles routes] ready', {
+//   authenticate: typeof authenticate,
+//   authorize: typeof authorize,
+//   multerSingle: typeof (fileUploadService?.articleImageUpload?.single),
+//   controller: {
+//     listArticles: typeof articleController?.listArticles,
+//     createArticle: typeof articleController?.createArticle,
+//     updateArticle: typeof articleController?.updateArticle,
+//     toggleArticleStatus: typeof articleController?.toggleArticleStatus,
+//     checkLowStock: typeof articleController?.checkLowStock,
+//     getArticle: typeof articleController?.getArticle,
+//     getArticleStats: typeof articleController?.getArticleStats,
+//   }
+// });
+
+// Helper für async-Controller
+const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // Alle Artikel-Routes benötigen Authentifizierung
 router.use(authenticate);
 
-// Liste aller Artikel (alle authentifizierten Nutzer)
-router.get('/', articleController.listArticles);
+// Liste aller Artikel
+router.get('/', h(articleController.listArticles));
 
-// Bestands-Warnungen (alle authentifizierten Nutzer)
-router.get('/low-stock', articleController.checkLowStock);
+// Bestandswarnungen
+router.get('/low-stock', h(articleController.checkLowStock));
 
-// Einzelnen Artikel abrufen (alle authentifizierten Nutzer)
-router.get('/:id', articleController.getArticle);
+// Einzelner Artikel
+router.get('/:id', h(articleController.getArticle));
 
-// Artikel-Statistiken (alle authentifizierten Nutzer)
-router.get('/:id/stats', articleController.getArticleStats);
+// Statistiken
+router.get('/:id/stats', h(articleController.getArticleStats));
 
-// Neuen Artikel erstellen (nur Admins und Kassierer)
-router.post('/', 
+// Neuen Artikel erstellen (Admins + Kassierer)
+router.post(
+  '/',
   authorize('ADMIN', 'CASHIER'),
   fileUploadService.articleImageUpload.single('image'),
   validateArticle,
   handleValidationErrors,
-  articleController.createArticle
+  h(articleController.createArticle)
 );
 
-
-// Artikel aktualisieren (nur Admins und Kassierer)
-router.put('/:id',
+// Artikel aktualisieren (Admins + Kassierer)
+router.put(
+  '/:id',
   authorize('ADMIN', 'CASHIER'),
   fileUploadService.articleImageUpload.single('image'),
   validateArticleUpdate,
   handleValidationErrors,
-  articleController.updateArticle
+  h(articleController.updateArticle)
 );
-
 
 // Artikel aktivieren/deaktivieren (nur Admins)
-router.patch('/:id/toggle-status',
-  authorize('ADMIN'),
-  articleController.toggleArticleStatus
-);
-
-// Wareneingang (nur Admins und Kassierer)
-router.post('/:id/delivery',
+router.patch(
+  '/:id/toggle-status',
   authorize('ADMIN', 'CASHIER'),
-  validateDelivery,
-  handleValidationErrors,
-  articleController.processDelivery
-);
-
-// Inventur (nur Admins und Kassierer)
-router.post('/:id/inventory',
-  authorize('ADMIN', 'CASHIER'),
-  validateInventory,
-  handleValidationErrors,
-  articleController.processInventory
+  h(articleController.toggleArticleStatus)
 );
 
 module.exports = router;

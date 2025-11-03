@@ -5,7 +5,7 @@ CREATE TYPE "Role" AS ENUM ('ADMIN', 'CASHIER', 'ACCOUNTANT');
 CREATE TYPE "TransactionType" AS ENUM ('SALE', 'REFUND');
 
 -- CreateEnum
-CREATE TYPE "PaymentMethod" AS ENUM ('CASH', 'ACCOUNT', 'INVOICE');
+CREATE TYPE "PaymentMethod" AS ENUM ('CASH', 'ACCOUNT', 'INVOICE', 'TRANSFER');
 
 -- CreateEnum
 CREATE TYPE "TopUpMethod" AS ENUM ('CASH', 'TRANSFER');
@@ -15,6 +15,15 @@ CREATE TYPE "StockMovementType" AS ENUM ('DELIVERY', 'INVENTORY', 'CORRECTION', 
 
 -- CreateEnum
 CREATE TYPE "HighscoreType" AS ENUM ('DAILY_AMOUNT', 'DAILY_COUNT', 'YEARLY_AMOUNT', 'YEARLY_COUNT');
+
+-- CreateEnum
+CREATE TYPE "PurchaseDocumentType" AS ENUM ('RECHNUNG', 'LIEFERSCHEIN');
+
+-- CreateEnum
+CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE', 'OTHER');
+
+-- CreateEnum
+CREATE TYPE "InvoiceStatus" AS ENUM ('DRAFT', 'SENT', 'PAID', 'CANCELLED');
 
 -- CreateTable
 CREATE TABLE "User" (
@@ -38,6 +47,8 @@ CREATE TABLE "Customer" (
     "balance" DECIMAL(10,2) NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "gender" "Gender" DEFAULT 'OTHER',
+    "lastActivity" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Customer_pkey" PRIMARY KEY ("id")
 );
@@ -47,8 +58,8 @@ CREATE TABLE "Article" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "price" DECIMAL(10,2) NOT NULL,
-    "stock" INTEGER NOT NULL DEFAULT 0,
-    "minStock" INTEGER NOT NULL DEFAULT 0,
+    "stock" DECIMAL(10,2) NOT NULL DEFAULT 0,
+    "minStock" DECIMAL(10,2) NOT NULL DEFAULT 0,
     "unit" TEXT NOT NULL DEFAULT 'Stück',
     "category" TEXT NOT NULL,
     "imageUrl" TEXT,
@@ -56,6 +67,12 @@ CREATE TABLE "Article" (
     "countsForHighscore" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "imageThumbnail" TEXT,
+    "imageSmall" TEXT,
+    "imageMedium" TEXT,
+    "imageLarge" TEXT,
+    "purchaseUnit" TEXT DEFAULT 'Kiste',
+    "unitsPerPurchase" DECIMAL(10,2) DEFAULT 6,
 
     CONSTRAINT "Article_pkey" PRIMARY KEY ("id")
 );
@@ -74,6 +91,7 @@ CREATE TABLE "Transaction" (
     "userId" TEXT NOT NULL,
     "customerId" TEXT,
     "originalTransactionId" TEXT,
+    "invoiceId" TEXT,
 
     CONSTRAINT "Transaction_pkey" PRIMARY KEY ("id")
 );
@@ -106,7 +124,7 @@ CREATE TABLE "AccountTopUp" (
 CREATE TABLE "StockMovement" (
     "id" TEXT NOT NULL,
     "type" "StockMovementType" NOT NULL,
-    "quantity" INTEGER NOT NULL,
+    "quantity" DECIMAL(10,2) NOT NULL,
     "reason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "articleId" TEXT NOT NULL,
@@ -150,6 +168,79 @@ CREATE TABLE "HighscoreEntry" (
     CONSTRAINT "HighscoreEntry_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "PurchaseDocument" (
+    "id" TEXT NOT NULL,
+    "type" "PurchaseDocumentType" NOT NULL,
+    "documentNumber" TEXT NOT NULL,
+    "supplier" TEXT NOT NULL,
+    "documentDate" TIMESTAMP(3) NOT NULL,
+    "nachweisUrl" TEXT,
+    "description" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "totalAmount" DECIMAL(10,2),
+    "paid" BOOLEAN NOT NULL DEFAULT false,
+    "paidAt" TIMESTAMP(3),
+    "paymentMethod" "PaymentMethod",
+    "dueDate" TIMESTAMP(3),
+    "rechnungId" TEXT,
+    "userId" TEXT NOT NULL,
+
+    CONSTRAINT "PurchaseDocument_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PurchaseDocumentItem" (
+    "id" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "quantity" DECIMAL(10,2) NOT NULL,
+    "unit" TEXT NOT NULL,
+    "purchaseUnit" TEXT,
+    "purchaseUnitQuantity" DECIMAL(10,2),
+    "baseUnit" TEXT,
+    "baseUnitQuantity" DECIMAL(10,2),
+    "pricePerUnit" DECIMAL(10,2) NOT NULL DEFAULT 0,
+    "totalPrice" DECIMAL(10,2) NOT NULL DEFAULT 0,
+    "documentId" TEXT NOT NULL,
+    "articleId" TEXT,
+
+    CONSTRAINT "PurchaseDocumentItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Invoice" (
+    "id" TEXT NOT NULL,
+    "invoiceNumber" TEXT NOT NULL,
+    "customerName" TEXT NOT NULL,
+    "customerAddress" TEXT,
+    "description" TEXT,
+    "totalAmount" DECIMAL(10,2) NOT NULL,
+    "taxRate" DECIMAL(5,2) NOT NULL DEFAULT 19,
+    "status" "InvoiceStatus" NOT NULL DEFAULT 'DRAFT',
+    "paidAt" TIMESTAMP(3),
+    "dueDate" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "userId" TEXT NOT NULL,
+    "customerId" TEXT,
+
+    CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "InvoiceItem" (
+    "id" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "quantity" DECIMAL(10,2) NOT NULL,
+    "pricePerUnit" DECIMAL(10,2) NOT NULL,
+    "totalPrice" DECIMAL(10,2) NOT NULL,
+    "invoiceId" TEXT NOT NULL,
+    "articleId" TEXT,
+
+    CONSTRAINT "InvoiceItem_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
@@ -162,6 +253,21 @@ CREATE UNIQUE INDEX "Session_refreshToken_key" ON "Session"("refreshToken");
 -- CreateIndex
 CREATE INDEX "HighscoreEntry_type_date_idx" ON "HighscoreEntry"("type", "date");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "PurchaseDocument_documentNumber_key" ON "PurchaseDocument"("documentNumber");
+
+-- CreateIndex
+CREATE INDEX "PurchaseDocument_type_idx" ON "PurchaseDocument"("type");
+
+-- CreateIndex
+CREATE INDEX "PurchaseDocument_supplier_idx" ON "PurchaseDocument"("supplier");
+
+-- CreateIndex
+CREATE INDEX "PurchaseDocument_rechnungId_idx" ON "PurchaseDocument"("rechnungId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Invoice_invoiceNumber_key" ON "Invoice"("invoiceNumber");
+
 -- AddForeignKey
 ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -170,6 +276,9 @@ ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_customerId_fkey" FOREIGN K
 
 -- AddForeignKey
 ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_originalTransactionId_fkey" FOREIGN KEY ("originalTransactionId") REFERENCES "Transaction"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TransactionItem" ADD CONSTRAINT "TransactionItem_transactionId_fkey" FOREIGN KEY ("transactionId") REFERENCES "Transaction"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -191,3 +300,27 @@ ALTER TABLE "Session" ADD CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId"
 
 -- AddForeignKey
 ALTER TABLE "HighscoreEntry" ADD CONSTRAINT "HighscoreEntry_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PurchaseDocument" ADD CONSTRAINT "PurchaseDocument_rechnungId_fkey" FOREIGN KEY ("rechnungId") REFERENCES "PurchaseDocument"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PurchaseDocument" ADD CONSTRAINT "PurchaseDocument_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PurchaseDocumentItem" ADD CONSTRAINT "PurchaseDocumentItem_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "PurchaseDocument"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PurchaseDocumentItem" ADD CONSTRAINT "PurchaseDocumentItem_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article"("id") ON DELETE SET NULL ON UPDATE CASCADE;

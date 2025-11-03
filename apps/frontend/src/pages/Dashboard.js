@@ -125,7 +125,7 @@ const Dashboard = () => {
   ];
 
   return (
-    <Box>
+    <Box sx={{ px: { xs: 1, md: 2 } }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">
           Dashboard
@@ -136,7 +136,7 @@ const Dashboard = () => {
       </Box>
       
       {/* Statistics Cards */}
-      <Grid container spacing={3}>
+      <Grid container spacing={3} alignItems="stretch">
         {stats.map((stat, index) => (
           <Grid item xs={12} sm={6} md={3} key={index}>
             <Card>
@@ -157,7 +157,7 @@ const Dashboard = () => {
                     {stat.title}
                   </Typography>
                 </Box>
-                <Typography variant="h5" component="div">
+                <Typography variant="h4" component="div" sx={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
                   {stat.value}
                 </Typography>
                 {stat.change !== undefined && (

@@ -12,8 +12,8 @@ const customerRoutes = require('./routes/customers');
 const transactionRoutes = require('./routes/transactions');
 const highscoreRoutes = require('./routes/highscore');
 const exportRoutes = require('./routes/exports');   
-const purchaseRoutes = require('./routes/purchases'); 
 const invoiceRoutes = require('./routes/invoices'); 
+const purchaseDocumentRoutes = require('./routes/purchaseDocuments');
 
 const app = express();
 
@@ -30,9 +30,8 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/highscore', highscoreRoutes);
 app.use('/api/exports', exportRoutes); 
-app.use('/api/purchases', purchaseRoutes); 
 app.use('/api/invoices', invoiceRoutes); 
-
+app.use('/api/purchase-documents', purchaseDocumentRoutes)
 
 // Basis-Route
 app.get('/', (req, res) => {
