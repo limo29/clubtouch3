@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   Box,
   Button,
@@ -26,7 +26,7 @@ import {
   // ListItemText, // Nicht direkt im finalen Code verwendet
   InputAdornment,
   Divider,
-  // Alert, // Nicht direkt im finalen Code verwendet
+  Alert,
   Autocomplete, // NEU (oder war schon da, wird jetzt aber intensiver genutzt)
   ToggleButton, // NEU
   ToggleButtonGroup, // NEU
@@ -44,7 +44,7 @@ import {
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm, Controller, useFieldArray } from 'react-hook-form'; // setValue wird über useForm geholt
+import { useForm, Controller, useFieldArray } from 'react-hook-form'; // setValue wird Ã¼ber useForm geholt
 import api from '../services/api';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -53,7 +53,7 @@ import { useNavigate } from 'react-router-dom';
 const Invoices = () => {
   const queryClient = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
-  // const [selectedInvoice, setSelectedInvoice] = useState(null); // Behalten, falls für Editieren/Detailansicht benötigt
+  // const [selectedInvoice, setSelectedInvoice] = useState(null); // Behalten, falls fÃ¼r Editieren/Detailansicht benÃ¶tigt
   const navigate = useNavigate();
   const [filters, setFilters] = useState({
     status: '',
@@ -65,17 +65,17 @@ const Invoices = () => {
   // NEUE STATE-VARIABLEN
   const [customerInputMode, setCustomerInputMode] = useState('existing'); // 'existing' oder 'new'
   const [itemInputMode, setItemInputMode] = useState({}); // 'article' oder 'custom' pro Position
-  const [selectedCustomer, setSelectedCustomer] = useState(null); // Für das Autocomplete im Dialog
+  const [selectedCustomer, setSelectedCustomer] = useState(null); // FÃ¼r das Autocomplete im Dialog
 
-  const { control, handleSubmit, reset, watch, setValue } = useForm({ // setValue hinzugefügt
+  const { control, handleSubmit, reset, watch, setValue, setError, clearErrors } = useForm({ // setError for inline validation
     defaultValues: {
-      customerId: null, // NEU für bestehenden Kunden
+      customerId: null, // NEU fÃ¼r bestehenden Kunden
       customerName: '',
       customerAddress: '',
       description: '',
       dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 Tage
       taxRate: 19,
-      items: [{ articleId: null, description: '', quantity: 1, unit: 'Stück', pricePerUnit: 0 }] // 'articleId' und 'unit' hinzugefügt/standardisiert
+      items: [{ articleId: null, description: '', quantity: 1, unit: 'StÃ¼ck', pricePerUnit: 0 }] // 'articleId' und 'unit' hinzugefÃ¼gt/standardisiert
     }
   });
 
@@ -120,7 +120,7 @@ const Invoices = () => {
           ...response.data,
           customers: response.data.customers.map(customer => ({
             ...customer,
-            // balance hier nicht direkt für Autocomplete benötigt, aber gute Praxis für die Datenquelle
+            // balance hier nicht direkt fÃ¼r Autocomplete benÃ¶tigt, aber gute Praxis fÃ¼r die Datenquelle
             balance: parseFloat(customer.balance) || 0,
           })),
         };
@@ -172,8 +172,8 @@ const Invoices = () => {
   });
 
   const invoices = invoicesData?.invoices || [];
-  const customers = customersData?.customers || []; // Für Kundenauswahl
-  const articles = articlesData?.articles || [];   // NEU: Für Artikelauswahl
+  const customers = customersData?.customers || []; // FÃ¼r Kundenauswahl
+  const articles = articlesData?.articles || [];   // NEU: FÃ¼r Artikelauswahl
 
   const handleOpenDialog = () => {
     reset({
@@ -183,11 +183,11 @@ const Invoices = () => {
       description: '',
       dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       taxRate: 19,
-      items: [{ articleId: null, description: '', quantity: 1, unit: 'Stück', pricePerUnit: 0 }]
+      items: [{ articleId: null, description: '', quantity: 1, unit: 'StÃ¼ck', pricePerUnit: 0 }]
     });
     setCustomerInputMode('existing'); // NEU: Standard-Kundenmodus
-    setItemInputMode({}); // NEU: Artikelmodus zurücksetzen
-    setSelectedCustomer(null); // NEU: Ausgewählten Kunden zurücksetzen
+    setItemInputMode({}); // NEU: Artikelmodus zurÃ¼cksetzen
+    setSelectedCustomer(null); // NEU: AusgewÃ¤hlten Kunden zurÃ¼cksetzen
     setOpenDialog(true);
   };
 
@@ -196,14 +196,37 @@ const Invoices = () => {
   };
 
   const onSubmit = (data) => {
-    // Bereite die Daten für das Backend vor, basierend auf customerInputMode etc.
-    const itemsPayload = data.items.map(item => ({
+    clearErrors();
+    // Bereite die Daten fÃ¼r das Backend vor, mit grundlegender Client-Validierung
+    const itemsPayload = (Array.isArray(data.items) ? data.items : []).map((item) => ({
       articleId: item.articleId || null,
-      description: item.description,
-      quantity: parseInt(item.quantity) || 1,
-      unit: item.unit || 'Stück',
+      description: (item.description || '').trim(),
+      quantity: parseFloat(item.quantity) || 0,
+      unit: item.unit || 'StÃ¼ck',
       pricePerUnit: parseFloat(item.pricePerUnit) || 0,
     }));
+
+    // Validierung: Kunde
+    if (customerInputMode === 'existing' && !selectedCustomer) {
+      setError('customerId', { type: 'required', message: 'Kunde muss ausgewÃ¤hlt werden' });
+      return;
+    }
+    if (customerInputMode === 'new' && !data.customerName?.trim()) {
+      setError('customerName', { type: 'required', message: 'Kundenname ist erforderlich' });
+      return;
+    }
+    // Validierung: Positionen
+    if (itemsPayload.length === 0) {
+      setError('items', { type: 'required', message: 'Mindestens eine Position benÃ¶tigt' });
+      return;
+    }
+    let invalid = false;
+    itemsPayload.forEach((it, idx) => {
+      if (!it.description) { setError(`items.${idx}.description`, { type: 'required', message: 'Beschreibung erforderlich' }); invalid = true; }
+      if (!(it.quantity > 0)) { setError(`items.${idx}.quantity`, { type: 'validate', message: '> 0' }); invalid = true; }
+      if (!(it.pricePerUnit >= 0)) { setError(`items.${idx}.pricePerUnit`, { type: 'validate', message: 'â‰¥ 0' }); invalid = true; }
+    });
+    if (invalid) return;
 
     const netTotalSubmit = itemsPayload.reduce((sum, item) => sum + (item.quantity * item.pricePerUnit), 0);
     const taxAmountSubmit = netTotalSubmit * ( (parseFloat(data.taxRate) || 0) / 100);
@@ -214,7 +237,7 @@ const Invoices = () => {
       dueDate: data.dueDate.toISOString(),
       taxRate: parseFloat(data.taxRate) || 0,
       items: itemsPayload,
-      // Gesamtsummen werden oft im Backend berechnet, aber können auch gesendet werden
+      // Gesamtsummen werden oft im Backend berechnet, aber kÃ¶nnen auch gesendet werden
       netAmount: netTotalSubmit,
       taxAmount: taxAmountSubmit,
       totalAmount: grossTotalSubmit,
@@ -222,8 +245,8 @@ const Invoices = () => {
 
     if (customerInputMode === 'existing' && selectedCustomer) {
       payload.customerId = selectedCustomer.id;
-      payload.customerName = selectedCustomer.name; // Name vom ausgewählten Kunden
-      // payload.customerAddress = selectedCustomer.address; // Falls Adresse vom Kunden übernommen werden soll
+      payload.customerName = selectedCustomer.name; // Name vom ausgewÃ¤hlten Kunden
+      // payload.customerAddress = selectedCustomer.address; // Falls Adresse vom Kunden Ã¼bernommen werden soll
     } else { // 'new' customer
       payload.customerName = data.customerName;
       payload.customerAddress = data.customerAddress;
@@ -246,7 +269,7 @@ const Invoices = () => {
       window.URL.revokeObjectURL(url); // Speicher freigeben
     } catch (error) {
       console.error('Download error:', error);
-      // Hier könnte eine Fehlermeldung für den User angezeigt werden
+      // Hier kÃ¶nnte eine Fehlermeldung fÃ¼r den User angezeigt werden
     }
   };
 
@@ -259,8 +282,8 @@ const Invoices = () => {
     }).format(num);
   };
 
-  const getStatusColor = (status) => { /* ... (bestehender Code) ... */ };
-  const getStatusLabel = (status) => { /* ... (bestehender Code) ... */ };
+  const getStatusColor = (status) => {\n    switch (status) {\n      case 'PAID': return 'success';\n      case 'SENT': return 'info';\n      case 'CANCELLED': return 'error';\n      case 'DRAFT': default: return 'default';\n    }\n  };
+  const getStatusLabel = (status) => {\n    switch (status) {\n      case 'PAID': return 'Bezahlt';\n      case 'SENT': return 'Versendet';\n      case 'CANCELLED': return 'Storniert';\n      case 'DRAFT': default: return 'Entwurf';\n    }\n  };
 
   const watchedItems = watch('items');
   const watchedTaxRate = watch('taxRate');
@@ -283,62 +306,62 @@ const Invoices = () => {
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
              <Grid item xs={12} sm={6} md={3}>
-            <TextField
-              label="Suche"
-              value={filters.search}
-              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-              size="small"
-              fullWidth
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <TextField
-              select
-              label="Status"
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              size="small"
-              fullWidth
-            >
-              <MenuItem value="">Alle</MenuItem>
-              <MenuItem value="DRAFT">Entwurf</MenuItem>
-              <MenuItem value="SENT">Versendet</MenuItem>
-              <MenuItem value="PAID">Bezahlt</MenuItem>
-              <MenuItem value="CANCELLED">Storniert</MenuItem>
-            </TextField>
-          </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <DatePicker
-              label="Von"
-              value={filters.startDate}
-              onChange={(date) => setFilters({ ...filters, startDate: date })}
+Â  Â  Â  Â  Â  Â  <TextField
+Â  Â  Â  Â  Â  Â  Â  label="Suche"
+Â  Â  Â  Â  Â  Â  Â  value={filters.search}
+Â  Â  Â  Â  Â  Â  Â  onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+Â  Â  Â  Â  Â  Â  Â  size="small"
+Â  Â  Â  Â  Â  Â  Â  fullWidth
+Â  Â  Â  Â  Â  Â  Â  InputProps={{
+Â  Â  Â  Â  Â  Â  Â  Â  startAdornment: (
+Â  Â  Â  Â  Â  Â  Â  Â  Â  <InputAdornment position="start">
+Â  Â  Â  Â  Â  Â  Â  Â  Â  Â  <Search />
+Â  Â  Â  Â  Â  Â  Â  Â  Â  </InputAdornment>
+Â  Â  Â  Â  Â  Â  Â  Â  ),
+Â  Â  Â  Â  Â  Â  Â  }}
+Â  Â  Â  Â  Â  Â  />
+Â  Â  Â  Â  Â  </Grid>
+Â  Â  Â  Â  Â  <Grid item xs={12} sm={6} md={2}>
+Â  Â  Â  Â  Â  Â  <TextField
+Â  Â  Â  Â  Â  Â  Â  select
+Â  Â  Â  Â  Â  Â  Â  label="Status"
+Â  Â  Â  Â  Â  Â  Â  value={filters.status}
+Â  Â  Â  Â  Â  Â  Â  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+Â  Â  Â  Â  Â  Â  Â  size="small"
+Â  Â  Â  Â  Â  Â  Â  fullWidth
+Â  Â  Â  Â  Â  Â  >
+Â  Â  Â  Â  Â  Â  Â  <MenuItem value="">Alle</MenuItem>
+Â  Â  Â  Â  Â  Â  Â  <MenuItem value="DRAFT">Entwurf</MenuItem>
+Â  Â  Â  Â  Â  Â  Â  <MenuItem value="SENT">Versendet</MenuItem>
+Â  Â  Â  Â  Â  Â  Â  <MenuItem value="PAID">Bezahlt</MenuItem>
+Â  Â  Â  Â  Â  Â  Â  <MenuItem value="CANCELLED">Storniert</MenuItem>
+Â  Â  Â  Â  Â  Â  </TextField>
+Â  Â  Â  Â  Â  </Grid>
+Â  Â  Â  Â  Â  <Grid item xs={12} sm={6} md={2}>
+Â  Â  Â  Â  Â  Â  <DatePicker
+Â  Â  Â  Â  Â  Â  Â  label="Von"
+Â  Â  Â  Â  Â  Â  Â  value={filters.startDate}
+Â  Â  Â  Â  Â  Â  Â  onChange={(date) => setFilters({ ...filters, startDate: date })}
               slotProps={{ textField: { size: 'small', fullWidth: true } }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <DatePicker
-              label="Bis"
-              value={filters.endDate}
-              onChange={(date) => setFilters({ ...filters, endDate: date })}
+Â  Â  Â  Â  Â  Â  />
+Â  Â  Â  Â  Â  </Grid>
+Â  Â  Â  Â  Â  <Grid item xs={12} sm={6} md={2}>
+Â  Â  Â  Â  Â  Â  <DatePicker
+Â  Â  Â  Â  Â  Â  Â  label="Bis"
+Â  Â  Â  Â  Â  Â  Â  value={filters.endDate}
+Â  Â  Â  Â  Â  Â  Â  onChange={(date) => setFilters({ ...filters, endDate: date })}
               slotProps={{ textField: { size: 'small', fullWidth: true } }}
-            />
-          </Grid>
+Â  Â  Â  Â  Â  Â  />
+Â  Â  Â  Â  Â  </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Button
-    variant="contained"
-    startIcon={<Add />}
-    onClick={() => navigate('/invoices/new')}
-    fullWidth
-  >
-    Neue Rechnung
-  </Button>
+              variant="contained"
+              startIcon={<Add />}
+              onClick={handleOpenDialog}
+              fullWidth
+            >
+              Neue Rechnung
+            </Button>
 
           </Grid>
         </Grid>
@@ -352,10 +375,10 @@ const Invoices = () => {
               <TableCell>Rechnungsnr.</TableCell>
               <TableCell>Datum</TableCell>
               <TableCell>Kunde</TableCell>
-              <TableCell align="right">Betrag</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>Betrag</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Fällig</TableCell>
-              <TableCell align="right">Aktionen</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>Aktionen</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -371,8 +394,8 @@ const Invoices = () => {
                   {format(new Date(invoice.createdAt), 'dd.MM.yyyy', { locale: de })}
                 </TableCell>
                 <TableCell>{invoice.customerName}</TableCell>
-                <TableCell align="right">
-                  <Typography variant="body2">
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                  <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', minWidth: '9ch', display: 'inline-block', textAlign: 'right' }}>
                     {formatCurrency(invoice.totalAmount)}
                   </Typography>
                 </TableCell>
@@ -386,7 +409,7 @@ const Invoices = () => {
                 <TableCell>
                   {format(new Date(invoice.dueDate), 'dd.MM.yyyy', { locale: de })}
                 </TableCell>
-                <TableCell align="right">
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                   <IconButton
                     size="small"
                     onClick={() => handleDownloadPDF(invoice.id)}
@@ -447,9 +470,9 @@ const Invoices = () => {
                       } else { // 'new'
                         setSelectedCustomer(null);
                         setValue('customerId', null);
-                         // Wenn von bestehend zu neu gewechselt wird und ein Kunde ausgewählt war,
-                         // könnte man customerName etc. aus selectedCustomer übernehmen oder leeren.
-                         // Hier wird es geleert bzw. nicht automatisch übernommen.
+                         // Wenn von bestehend zu neu gewechselt wird und ein Kunde ausgewÃ¤hlt war,
+                         // kÃ¶nnte man customerName etc. aus selectedCustomer Ã¼bernehmen oder leeren.
+                         // Hier wird es geleert bzw. nicht automatisch Ã¼bernommen.
                       }
                     }
                   }}
@@ -464,12 +487,12 @@ const Invoices = () => {
               {customerInputMode === 'existing' ? (
                 <Grid item xs={12}>
                   <Controller
-                    name="customerId" // Dieses Feld wird für die Formular-Daten benötigt
+                    name="customerId" // Dieses Feld wird fÃ¼r die Formular-Daten benÃ¶tigt
                     control={control}
-                    rules={{ required: customerInputMode === 'existing' ? 'Kunde muss ausgewählt werden' : false }}
+                    rules={{ required: customerInputMode === 'existing' ? 'Kunde muss ausgewÃ¤hlt werden' : false }}
                     render={({ field, fieldState: { error } }) => (
                       <Autocomplete
-                        // {...field} // field enthält onChange, onBlur, value, ref. Wir überschreiben value und onChange.
+                        // {...field} // field enthÃ¤lt onChange, onBlur, value, ref. Wir Ã¼berschreiben value und onChange.
                         options={customers}
                         getOptionLabel={(option) => `${option.name} ${option.nickname ? `(${option.nickname})` : ''}`}
                         value={selectedCustomer} // Gesteuert durch selectedCustomer State
@@ -477,8 +500,8 @@ const Invoices = () => {
                           setSelectedCustomer(newValue);
                           field.onChange(newValue?.id || null); // Formularwert setzen
                           if (newValue) {
-                            setValue('customerName', newValue.name); // Setze Namen für den Fall, dass er gebraucht wird
-                            // Optional: Adresse aus Kunde übernehmen, wenn vorhanden und gewünscht
+                            setValue('customerName', newValue.name); // Setze Namen fÃ¼r den Fall, dass er gebraucht wird
+                            // Optional: Adresse aus Kunde Ã¼bernehmen, wenn vorhanden und gewÃ¼nscht
                             // setValue('customerAddress', newValue.address || '');
                           } else {
                              setValue('customerName', '');
@@ -523,13 +546,13 @@ const Invoices = () => {
                     <Controller
                       name="customerAddress"
                       control={control}
-                      // rules für Adresse optional machen oder je nach Bedarf anpassen
+                      // rules fÃ¼r Adresse optional machen oder je nach Bedarf anpassen
                       render={({ field }) => (
                         <TextField
                           {...field}
                           label="Kundenadresse (optional)"
                           multiline
-                          rows={1} // Für eine kompaktere Darstellung, ggf. anpassen
+                          rows={1} // FÃ¼r eine kompaktere Darstellung, ggf. anpassen
                           fullWidth
                         />
                       )}
@@ -594,7 +617,7 @@ const Invoices = () => {
                 {/* NEU: Rechnungspositionen mit Auswahlmodus */}
                 {fields.map((field, index) => (
                   <Box key={field.id} sx={{ mb: 2, p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
-                    <Grid container spacing={2} alignItems="center"> {/* alignItems hinzugefügt */}
+                    <Grid container spacing={2} alignItems="center"> {/* alignItems hinzugefÃ¼gt */}
                       <Grid item xs={12}>
                         <ToggleButtonGroup
                           value={itemInputMode[index] || 'custom'}
@@ -615,7 +638,7 @@ const Invoices = () => {
                       </Grid>
 
                       {itemInputMode[index] === 'article' ? (
-                        <Grid item xs={12}> {/* Volle Breite für Artikel-Autocomplete */}
+                        <Grid item xs={12}> {/* Volle Breite fÃ¼r Artikel-Autocomplete */}
                            <Controller
                             name={`items.${index}.articleId`}
                             control={control}
@@ -630,18 +653,18 @@ const Invoices = () => {
                                   if (newValue) {
                                     setValue(`items.${index}.description`, newValue.name);
                                     setValue(`items.${index}.pricePerUnit`, newValue.price); // Preis ist bereits eine Zahl
-                                    setValue(`items.${index}.unit`, newValue.unit || 'Stück');
+                                    setValue(`items.${index}.unit`, newValue.unit || 'StÃ¼ck');
                                   } else {
                                     setValue(`items.${index}.description`, '');
                                     setValue(`items.${index}.pricePerUnit`, 0);
-                                    setValue(`items.${index}.unit`, 'Stück');
+                                    setValue(`items.${index}.unit`, 'StÃ¼ck');
                                   }
                                 }}
                                 value={articles.find(art => art.id === articleField.value) || null}
                                 renderInput={(params) => (
                                   <TextField
                                     {...params}
-                                    label="Artikel auswählen"
+                                    label="Artikel auswÃ¤hlen"
                                     size="small"
                                     fullWidth
                                   />
@@ -651,7 +674,7 @@ const Invoices = () => {
                           />
                         </Grid>
                       ) : ( // 'custom' input mode
-                        <Grid item xs={12} sm={6}> {/* Angepasst für Layout */}
+                        <Grid item xs={12} sm={6}> {/* Angepasst fÃ¼r Layout */}
                           <Controller
                             name={`items.${index}.description`}
                             control={control}
@@ -669,7 +692,7 @@ const Invoices = () => {
                           />
                         </Grid>
                       )}
-                      {/* Gemeinsame Felder, angepasst für Layout */}
+                      {/* Gemeinsame Felder, angepasst fÃ¼r Layout */}
                       <Grid item xs={itemInputMode[index] === 'article' ? 6 : 12} sm={itemInputMode[index] === 'article' ? 3 : 2}>
                         <Controller
                           name={`items.${index}.quantity`}
@@ -695,7 +718,7 @@ const Invoices = () => {
                             <Controller
                             name={`items.${index}.unit`}
                             control={control}
-                            defaultValue={"Stück"}
+                            defaultValue={"StÃ¼ck"}
                             render={({ field }) => (
                                 <TextField
                                 {...field}
@@ -722,7 +745,7 @@ const Invoices = () => {
                               size="small"
                               fullWidth
                               InputProps={{
-                                startAdornment: <InputAdornment position="start">€</InputAdornment>,
+                                startAdornment: <InputAdornment position="start">â‚¬</InputAdornment>,
                               }}
                               disabled={itemInputMode[index] === 'article' && !!watch(`items.${index}.articleId`)}
                               error={!!error}
@@ -733,7 +756,7 @@ const Invoices = () => {
                       </Grid>
                        {itemInputMode[index] === 'article' && articles.find(art => art.id === watch(`items.${index}.articleId`))?.unit && (
                          <Grid item xs={6} sm={1} container alignItems="center">
-                            <Typography variant="body2">{watch(`items.${index}.unit`)}</Typography>
+                            <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', minWidth: '9ch', display: 'inline-block', textAlign: 'right' }}>{watch(`items.${index}.unit`)}</Typography>
                          </Grid>
                        )}
                       <Grid item xs={12} sm={1} container alignItems="center" justifyContent="flex-end">
@@ -749,13 +772,13 @@ const Invoices = () => {
                 <Button
                   variant="outlined"
                   onClick={() => {
-                    append({ articleId: null, description: '', quantity: 1, unit: 'Stück', pricePerUnit: 0 });
-                    // Setzt den Modus für das neue Item standardmäßig auf 'custom'
+                    append({ articleId: null, description: '', quantity: 1, unit: 'StÃ¼ck', pricePerUnit: 0 });
+                    // Setzt den Modus fÃ¼r das neue Item standardmÃ¤ÃŸig auf 'custom'
                     setItemInputMode(prev => ({...prev, [fields.length]: 'custom'}));
                   }}
                   startIcon={<Add />}
                 >
-                  Position hinzufügen
+                  Position hinzufÃ¼gen
                 </Button>
               </Grid>
               {/* Ende Rechnungspositionen */}
@@ -793,3 +816,4 @@ const Invoices = () => {
 };
 
 export default Invoices;
+
