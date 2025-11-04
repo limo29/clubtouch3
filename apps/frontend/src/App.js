@@ -30,6 +30,7 @@ import PurchaseDocumentEdit from './pages/PurchaseDocumentEdit';
 
 
 
+
 // Create a client
 const queryClient = new QueryClient({
   defaultOptions: {

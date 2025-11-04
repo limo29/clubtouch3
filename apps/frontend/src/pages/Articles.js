@@ -111,6 +111,8 @@ const Articles = () => {
         minStock: article.minStock,
         imageUrl: article.imageUrl || '',
         countsForHighscore: article.countsForHighscore,
+        purchaseUnit: article.purchaseUnit || '',
+        unitsPerPurchase: article.unitsPerPurchase ?? '',
       });
       // Vorschau (bevorzugt Thumbnail)
       if (article.imageThumbnail || article.imageMedium) {
@@ -126,6 +128,8 @@ const Articles = () => {
         initialStock: 0,
         imageUrl: '',
         countsForHighscore: true,
+        purchaseUnit: 'Kiste',
+        unitsPerPurchase: 24,
       });
     }
     setOpenDialog(true);
@@ -274,6 +278,13 @@ const onSubmit = async (data) => {
                       <Box>
                         <Typography variant="body2">{article.name}</Typography>
                         <Typography variant="caption" color="text.secondary">{article.unit}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {article.unit}
+                          {article.purchaseUnit && article.unitsPerPurchase
+                           ? ` – ${article.purchaseUnit} à ${article.unitsPerPurchase} ${article.unit}`
+                           : ''}
+                        </Typography>
+
                       </Box>
                     </Box>
                   </TableCell>
@@ -379,8 +390,34 @@ const onSubmit = async (data) => {
                       ))}
                     </TextField>
                   )}
+
                 />
               </Grid>
+<Grid item xs={12} sm={6}>
+  <Controller
+    name="purchaseUnit"
+    control={control}
+    render={({ field }) => (
+      <TextField {...field} label="Einkaufseinheit (optional)" fullWidth placeholder="z. B. Kiste" />
+    )}
+  />
+</Grid>
+
+<Grid item xs={12} sm={6}>
+  <Controller
+    name="unitsPerPurchase"
+    control={control}
+    render={({ field }) => (
+      <TextField
+        {...field}
+        label="Einheiten pro Einkaufseinheit"
+        type="number"
+        inputProps={{ step: 1, min: 1 }}
+        fullWidth
+      />
+    )}
+  />
+</Grid>
 
               <Grid item xs={12} sm={6}>
                 <Controller

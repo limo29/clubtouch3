@@ -75,7 +75,7 @@ model Article {
   
   // Umrechnungsfaktoren für Einkauf
   purchaseUnit       String?  @default("Kiste") // Einkaufseinheit (z.B. "Kiste")
-  unitsPerPurchase   Decimal? @db.Decimal(10, 2) @default(6) // z.B. 6 Flaschen pro Kiste
+  unitsPerPurchase   Decimal? @db.Decimal(10, 2) @default(20) // z.B. 6 Flaschen pro Kiste
 
   // Relationen 
   transactionItems TransactionItem[]
@@ -368,4 +368,35 @@ enum InvoiceStatus {
   SENT
   PAID
   CANCELLED
+}
+
+// prisma/schema.prisma (Ergänzung)
+model FiscalYear {
+  id           String   @id @default(cuid())
+  name         String
+  startDate    DateTime
+  endDate      DateTime
+  closed       Boolean  @default(false)
+  report       YearEndReport?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model YearEndReport {
+  id               String   @id @default(cuid())
+  fiscalYearId     String   @unique
+  fiscalYear       FiscalYear @relation(fields: [fiscalYearId], references: [id])
+  // Finanz-Zusammenfassung
+  incomeTotal      Decimal   @default(0)
+  expensesTotal    Decimal   @default(0)
+  profit           Decimal   @default(0)
+  // Bestände / Guthaben zum Stichtag
+  cashOnHand       Decimal   @default(0)   // Barkasse (manuell eingegeben)
+  bankAccountsJson Json      @default("[]")// [{name, iban?, balance}]
+  guestBalance     Decimal   @default(0)   // Summe Customer.balance
+  // Rohdaten-Snapshots
+  inventorySystem  Json      @default("[]")// [{articleId,name,systemStock,unit}]
+  inventoryPhysical Json     @default("[]")// [{articleId,name,physicalStock,unit}]
+  inventoryDiff    Json      @default("[]")// [{articleId,name,diff,unit}]
+  createdAt        DateTime  @default(now())
 }

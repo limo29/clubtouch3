@@ -43,6 +43,8 @@ class ArticleController {
       articleData.price = toDecimalString(articleData.price);
       articleData.initialStock = toDecimalString(articleData.initialStock);
       articleData.minStock = toDecimalString(articleData.minStock);
+      articleData.unitsPerPurchase = toDecimalString(articleData.unitsPerPurchase);
+      if (articleData.purchaseUnit === '') articleData.purchaseUnit = undefined;
 
       // Bild verarbeitet?
       if (req.file) {
@@ -85,7 +87,8 @@ class ArticleController {
       // Zahlen normalisieren
       updateData.price = toDecimalString(updateData.price);
       updateData.minStock = toDecimalString(updateData.minStock);
-
+      updateData.unitsPerPurchase = toDecimalString(updateData.unitsPerPurchase);
+      if (updateData.purchaseUnit === '') updateData.purchaseUnit = undefined;
       const currentArticle = await articleService.findById(id);
       if (!currentArticle) return res.status(404).json({ error: 'Artikel nicht gefunden' });
 

@@ -1,50 +1,61 @@
 ﻿// src/pages/Invoices.jsx
-import React, { useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
-  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Paper,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
-  Grid, Chip, MenuItem, InputAdornment, Divider, Autocomplete, ToggleButton, ToggleButtonGroup
+  Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
+  Avatar, Stack, IconButton, List, ListItem, ListItemText, Button, Dialog, DialogTitle,
+  DialogContent, MenuItem, Chip, Drawer, useMediaQuery
 } from '@mui/material';
-import { Add, Send, Download, AttachMoney, Delete, Search } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { useTheme } from '@mui/material/styles';
+import {
+  Search, Person, Add, Delete, Download, Edit,
+  Remove as RemoveIcon, Add as AddIcon, Close as CloseIcon
+} from '@mui/icons-material';
+import { DatePicker, MobileDatePicker, DesktopDatePicker } from '@mui/x-date-pickers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import api from '../services/api';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 
-const num = (v) => {
-  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
-};
-const round2 = (v) => Math.round(num(v) * 100) / 100;
-const toISO = (d) => (d instanceof Date && !isNaN(d)) ? d.toISOString() : new Date().toISOString();
+/* ----------------------- kleine Helfer ----------------------- */
+const num = (v) => { const x = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return Number.isNaN(x) ? 0 : x; };
+const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(num(v));
+const uniq = (arr) => Array.from(new Set(arr));
 
-const Invoices = () => {
+/** Debounced TextField (für Suchfelder) */
+function DebouncedTextField({ value, onChange, delay = 250, ...props }) {
+  const [local, setLocal] = useState(value ?? '');
+  useEffect(() => setLocal(value ?? ''), [value]);
+  useEffect(() => {
+    const t = setTimeout(() => onChange?.(local), delay);
+    return () => clearTimeout(t);
+  }, [local, delay]); // eslint-disable-line
+  return <TextField value={local} onChange={(e) => setLocal(e.target.value)} {...props} />;
+}
+
+/** Money- und Qty-Inputs */
+function MoneyField({ value, onChange, ...props }) {
+  const val = typeof value === 'number' ? value : num(value);
+  const set = (n) => onChange?.(Number.isFinite(n) ? Number(n.toFixed(2)) : 0);
+  return (
+    <TextField
+      size="small"
+      inputMode="decimal"
+      value={String(val).replace('.', ',')}
+      onChange={(e) => set(num(e.target.value))}
+      InputProps={{ startAdornment: <InputAdornment position="start">€</InputAdornment> }}
+      {...props}
+    />
+  );
+}
+/* ============================================================ */
+
+export default function Invoices() {
   const queryClient = useQueryClient();
-  const [openDialog, setOpenDialog] = useState(false);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  // Tabelle
   const [filters, setFilters] = useState({ status: '', search: '', startDate: null, endDate: null });
-
-  // Dialog-Zustände
-  const [customerInputMode, setCustomerInputMode] = useState('existing'); // 'existing' | 'new'
-  const [itemInputMode, setItemInputMode] = useState({});                // pro Position 'article' | 'custom'
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-
-  const { control, handleSubmit, reset, watch, setValue, setError, clearErrors } = useForm({
-    defaultValues: {
-      customerId: null,
-      customerName: '',
-      customerAddress: '',
-      description: '',
-      dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // +14 Tage
-      // Steuer entfällt -> wir rechnen netto == brutto (taxRate = 0 wird nicht mehr abgefragt)
-      items: [{ articleId: null, description: '', quantity: 1, unit: 'Stück', pricePerUnit: 0 }]
-    }
-  });
-
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' });
-
-  /* ------------ Daten laden ----------- */
   const { data: invoicesData, isLoading } = useQuery({
     queryKey: ['invoices', filters],
     queryFn: async () => {
@@ -54,163 +65,164 @@ const Invoices = () => {
       if (filters.startDate) params.startDate = format(filters.startDate, 'yyyy-MM-dd');
       if (filters.endDate) params.endDate = format(filters.endDate, 'yyyy-MM-dd');
       const res = await api.get('/invoices', { params });
-      if (res.data?.invoices) {
-        return {
-          ...res.data,
-          invoices: res.data.invoices.map(i => ({ ...i, totalAmount: num(i.totalAmount) }))
-        };
-      }
-      return res.data;
+      return { invoices: (res.data?.invoices || []).map(i => ({ ...i, totalAmount: num(i.totalAmount) })) };
     }
   });
 
-  const { data: customersData } = useQuery({
-    queryKey: ['customers-invoice-form'],
-    queryFn: async () => {
-      const res = await api.get('/customers');
-      return { customers: (res.data?.customers || []).map(c => ({ ...c })) };
-    }
+  const { data: customersData = { customers: [] } } = useQuery({
+    queryKey: ['customers-invoice-pos'],
+    queryFn: async () => (await api.get('/customers')).data,
+    staleTime: 5 * 60_000
+  });
+  const { data: articlesData = { articles: [] } } = useQuery({
+    queryKey: ['articles-invoice-pos'],
+    queryFn: async () => (await api.get('/articles')).data,
+    staleTime: 5 * 60_000
   });
 
-  const { data: articlesData } = useQuery({
-    queryKey: ['articles-invoice-form'],
-    queryFn: async () => {
-      const res = await api.get('/articles');
-      return {
-        articles: (res.data?.articles || []).map(a => ({ ...a, price: num(a.price) }))
-      };
-    }
-  });
-
-  /* ------------ Mutations ----------- */
   const createInvoiceMutation = useMutation({
     mutationFn: async (payload) => (await api.post('/invoices', payload)).data,
-    onSuccess: () => {
-      queryClient.invalidateQueries(['invoices']);
-      setOpenDialog(false);
-    }
+    onSuccess: () => { queryClient.invalidateQueries(['invoices']); setShowCreate(false); }
+  });
+  const updateInvoiceMutation = useMutation({
+    mutationFn: async ({ id, payload }) => (await api.put(`/invoices/${id}`, payload)).data,
+    onSuccess: () => { queryClient.invalidateQueries(['invoices']); setShowCreate(false); }
   });
 
-  const updateStatusMutation = useMutation({
-    mutationFn: async ({ id, status }) => (await api.patch(`/invoices/${id}/status`, { status })).data,
-    onSuccess: () => queryClient.invalidateQueries(['invoices'])
-  });
-
-  /* ------------ Helpers ----------- */
   const invoices = invoicesData?.invoices || [];
   const customers = customersData?.customers || [];
-  const articles = articlesData?.articles || [];
+  const articles = (articlesData?.articles || [])
+  .filter(a => a.active)
+  .map(a => ({
+    ...a,
+    price: num(a.price),
+    unitsPerPurchase: num(a.unitsPerPurchase),     // NEU
+    purchaseUnit: a.purchaseUnit || null,          // NEU
+  }));
 
-  const formatCurrency = (amount) =>
-    new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(num(amount));
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'PAID': return 'success';
-      case 'SENT': return 'info';
-      case 'CANCELLED': return 'error';
-      default: return 'default';
-    }
+  const getStatusColor = (s) => (s === 'PAID' ? 'success' : s === 'SENT' ? 'info' : s === 'CANCELLED' ? 'error' : 'default');
+  const getStatusLabel = (s) => (s === 'PAID' ? 'Bezahlt' : s === 'SENT' ? 'Versendet' : s === 'CANCELLED' ? 'Storniert' : 'Entwurf');
+
+  // POS „Dialog“ (Desktop als Drawer)
+  const [showCreate, setShowCreate] = useState(false);
+  const [editInvoice, setEditInvoice] = useState(null); // invoice oder null
+
+  // Empfänger-Freitext – IMMER sichtbar & editierbar
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientAddress, setRecipientAddress] = useState('');
+
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [articleSearch, setArticleSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [cart, setCart] = useState([]); // {id,name,price,quantity,isFree}
+  const [dueDate, setDueDate] = useState(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
+  const [description, setDescription] = useState('');
+
+  const categories = useMemo(() => ['all', ...uniq(articles.map(a => a.category).filter(Boolean))], [articles]);
+  const filteredCustomers = useMemo(() => {
+    const s = customerSearch.toLowerCase();
+    return [...customers]
+      .filter(c => c.name.toLowerCase().includes(s) || (c.nickname || '').toLowerCase().includes(s))
+      .sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  }, [customers, customerSearch]);
+  const filteredArticles = articles.filter(a => (selectedCategory === 'all' || a.category === selectedCategory) && a.name.toLowerCase().includes(articleSearch.toLowerCase()));
+
+  const addToCart = (a) => {
+  const isCrate = a.__crate && a.unitsPerPurchase > 1;
+  const addQty = isCrate ? a.unitsPerPurchase : 1;
+
+  const exists = cart.find(i => i.id === a.id && !i.isFree);
+  if (exists) {
+    setCart(cart.map(i => i.id === a.id && !i.isFree
+      ? { ...i, quantity: num(i.quantity) + addQty }
+      : i));
+  } else {
+    setCart([...cart, { ...a, quantity: addQty }]);
+  }
+};
+
+  const updateQty = (id, q) => {
+    const val = Math.max(0, q);
+    if (val <= 0) setCart(cart.filter(i => i.id !== id));
+    else setCart(cart.map(i => i.id === id ? { ...i, quantity: val } : i));
   };
-  const getStatusLabel = (status) => {
-    switch (status) {
-      case 'PAID': return 'Bezahlt';
-      case 'SENT': return 'Versendet';
-      case 'CANCELLED': return 'Storniert';
-      default: return 'Entwurf';
-    }
+  const incQty = (id) => {
+    const item = cart.find(i => i.id === id);
+    if (item) updateQty(id, num(item.quantity) + 1);
+  };
+  const decQty = (id) => {
+    const item = cart.find(i => i.id === id);
+    if (item) updateQty(id, num(item.quantity) - 1);
+  };
+  const updatePrice = (id, p) => setCart(cart.map(i => i.id === id ? { ...i, price: num(p) } : i));
+  const addFreeLine = () => setCart([...cart, { id: `free-${crypto.randomUUID()}`, name: '', price: 0, quantity: 1, isFree: true }]);
+  const total = cart.reduce((s, i) => s + num(i.price) * num(i.quantity), 0);
+
+  const openCreate = () => {
+    setEditInvoice(null);
+    setRecipientName('');
+    setRecipientAddress('');
+    setCart([]);
+    setDescription('');
+    setDueDate(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
+    setShowCreate(true);
   };
 
-  const watchedItems = watch('items');
-  const netTotal = round2((Array.isArray(watchedItems) ? watchedItems : []).reduce(
-    (s, it) => s + num(it.quantity) * num(it.pricePerUnit), 0
-  ));
-  // Steuer gibt’s nicht -> Brutto == Netto
-  const grossTotal = netTotal;
-
-  const handleOpenDialog = () => {
-    reset({
-      customerId: null,
-      customerName: '',
-      customerAddress: '',
-      description: '',
-      dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-      items: [{ articleId: null, description: '', quantity: 1, unit: 'Stück', pricePerUnit: 0 }]
-    });
-    setCustomerInputMode('existing');
-    setItemInputMode({});
-    setSelectedCustomer(null);
-    setOpenDialog(true);
-  };
-
-  const onSubmit = (data) => {
-    clearErrors();
-
-    const items = (data.items || []).map((it) => ({
-      articleId: it.articleId || null,
-      description: String(it.description || '').trim(),
+  const openEdit = async (row) => {
+    const res = await api.get(`/invoices/${row.id}`);
+    const inv = res.data?.invoice; if (!inv) return;
+    setEditInvoice(inv);
+    setRecipientName(inv.customerName || '');
+    setRecipientAddress(inv.customerAddress || '');
+    setDueDate(new Date(inv.dueDate));
+    setDescription(inv.description || '');
+    setCart(inv.items.map(it => ({
+      id: it.articleId || `free-${it.id}`,
+      name: it.description,
+      price: num(it.pricePerUnit),
       quantity: num(it.quantity),
-      unit: it.unit || 'Stück',
-      // BACKEND erwartet bei dir "pricePerUnit" – das behalten wir exakt so.
-      pricePerUnit: num(it.pricePerUnit)
-    }));
+      isFree: !it.articleId
+    })));
+    setShowCreate(true);
+  };
 
-    if (customerInputMode === 'existing' && !selectedCustomer) {
-      setError('customerId', { type: 'required', message: 'Kunde auswählen' });
-      return;
-    }
-    if (customerInputMode === 'new' && !data.customerName?.trim()) {
-      setError('customerName', { type: 'required', message: 'Kundenname ist erforderlich' });
-      return;
-    }
-    if (!items.length) {
-      setError('items', { type: 'required', message: 'Mindestens eine Position' });
-      return;
-    }
-    for (let i = 0; i < items.length; i++) {
-      if (!items[i].description) { setError(`items.${i}.description`, { type: 'required', message: 'Beschreibung' }); return; }
-      if (!(items[i].quantity > 0)) { setError(`items.${i}.quantity`, { type: 'validate', message: '> 0' }); return; }
-      if (!(items[i].pricePerUnit >= 0)) { setError(`items.${i}.pricePerUnit`, { type: 'validate', message: '≥ 0' }); return; }
-    }
+  const submitDisabled =
+    !cart.length ||
+    !recipientName.trim() ||
+    cart.some(i => i.quantity <= 0 || i.price < 0);
 
+  const submitInvoice = () => {
+    if (submitDisabled) return;
     const payload = {
-      description: data.description || null,
-      dueDate: toISO(data.dueDate),
-      // KEINE Steuer -> taxRate weglassen bzw. 0
+      description: description || null,
+      dueDate: dueDate.toISOString(),
       taxRate: 0,
-      items,
-      // Server rechnet ohnehin – wir schicken Totale trotzdem sauber mit
-      netAmount: netTotal,
-      taxAmount: 0,
-      totalAmount: netTotal
+      items: cart.map(i => ({
+        articleId: i.isFree ? null : i.id,
+        description: i.name || 'Position',
+        quantity: num(i.quantity),
+        pricePerUnit: num(i.price)
+      })),
+      totalAmount: num(total),
+      customerName: recipientName.trim(),
+      customerAddress: recipientAddress || null
     };
-
-    if (customerInputMode === 'existing' && selectedCustomer) {
-      payload.customerId = selectedCustomer.id;
-      payload.customerName = selectedCustomer.name;
-    } else {
-      payload.customerName = data.customerName;
-      payload.customerAddress = data.customerAddress || null;
-    }
-
-    createInvoiceMutation.mutate(payload);
+    if (editInvoice) updateInvoiceMutation.mutate({ id: editInvoice.id, payload }); else createInvoiceMutation.mutate(payload);
   };
 
   const handleDownloadPDF = async (id) => {
     const res = await api.get(`/invoices/${id}/pdf`, { responseType: 'blob' });
-    const blob = new Blob([res.data], { type: 'application/pdf' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `Rechnung_${id}.pdf`; a.click();
-    window.URL.revokeObjectURL(url);
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+    const a = document.createElement('a'); a.href = url; a.download = `Rechnung_${id}.pdf`; a.click(); window.URL.revokeObjectURL(url);
   };
 
+  /* ========= Tabelle (Liste) ========= */
   return (
     <Box>
       <Typography variant="h4" gutterBottom>Rechnungen</Typography>
 
-      {/* Filter */}
-      <Paper sx={{ p: 2, mb: 2 }}>
+      <Box component={Card} sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} sm={6} md={3}>
             <TextField
@@ -222,9 +234,7 @@ const Invoices = () => {
             />
           </Grid>
           <Grid item xs={12} sm={6} md={2}>
-            <TextField select label="Status" value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              size="small" fullWidth>
+            <TextField select label="Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} size="small" fullWidth>
               <MenuItem value="">Alle</MenuItem>
               <MenuItem value="DRAFT">Entwurf</MenuItem>
               <MenuItem value="SENT">Versendet</MenuItem>
@@ -232,283 +242,407 @@ const Invoices = () => {
               <MenuItem value="CANCELLED">Storniert</MenuItem>
             </TextField>
           </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <DatePicker label="Von" value={filters.startDate}
-              onChange={(d) => setFilters({ ...filters, startDate: d })}
-              slotProps={{ textField: { size: 'small', fullWidth: true } }} />
-          </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <DatePicker label="Bis" value={filters.endDate}
-              onChange={(d) => setFilters({ ...filters, endDate: d })}
-              slotProps={{ textField: { size: 'small', fullWidth: true } }} />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Button variant="contained" startIcon={<Add />} onClick={handleOpenDialog} fullWidth>
-              Neue Rechnung
-            </Button>
-          </Grid>
+          <Grid item xs={12} sm={6} md={2}><DatePicker label="Von" value={filters.startDate} onChange={(d) => setFilters({ ...filters, startDate: d })} slotProps={{ textField: { size: 'small', fullWidth: true } }} /></Grid>
+          <Grid item xs={12} sm={6} md={2}><DatePicker label="Bis" value={filters.endDate} onChange={(d) => setFilters({ ...filters, endDate: d })} slotProps={{ textField: { size: 'small', fullWidth: true } }} /></Grid>
+          <Grid item xs={12} sm={6} md={3}><Button variant="contained" startIcon={<Add />} onClick={openCreate}>Neue Rechnung</Button></Grid>
         </Grid>
-      </Paper>
+      </Box>
 
-      {/* Tabelle */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Rechnungsnr.</TableCell>
-              <TableCell>Datum</TableCell>
-              <TableCell>Kunde</TableCell>
-              <TableCell align="right">Betrag</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Fällig</TableCell>
-              <TableCell align="right">Aktionen</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {isLoading && <TableRow><TableCell colSpan={7}>Lade…</TableCell></TableRow>}
-            {!isLoading && invoices.map((inv) => (
-              <TableRow key={inv.id}>
-                <TableCell><Typography fontWeight={600}>{inv.invoiceNumber}</Typography></TableCell>
-                <TableCell>{format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })}</TableCell>
-                <TableCell>{inv.customerName}</TableCell>
-                <TableCell align="right">{formatCurrency(inv.totalAmount)}</TableCell>
-                <TableCell><Chip size="small" label={getStatusLabel(inv.status)} color={getStatusColor(inv.status)} /></TableCell>
-                <TableCell>{format(new Date(inv.dueDate), 'dd.MM.yyyy', { locale: de })}</TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" onClick={() => handleDownloadPDF(inv.id)} title="PDF">
-                    <Download />
-                  </IconButton>
-                  {inv.status === 'DRAFT' && (
-                    <IconButton size="small" color="info"
-                      onClick={() => updateStatusMutation.mutate({ id: inv.id, status: 'SENT' })}
-                      title="Als versendet markieren">
-                      <Send />
-                    </IconButton>
-                  )}
-                  {inv.status === 'SENT' && (
-                    <IconButton size="small" color="success"
-                      onClick={() => updateStatusMutation.mutate({ id: inv.id, status: 'PAID' })}
-                      title="Als bezahlt markieren">
-                      <AttachMoney />
-                    </IconButton>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      {/* Dialog */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth>
-        <form onSubmit={handleSubmit(onSubmit)}>
-          <DialogTitle>Neue Rechnung</DialogTitle>
-          <DialogContent>
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              {/* Kunde */}
-              <Grid item xs={12}>
-                <ToggleButtonGroup
-                  value={customerInputMode} exclusive
-                  onChange={(e, v) => {
-                    if (!v) return;
-                    setCustomerInputMode(v);
-                    if (v === 'existing') { setValue('customerName', ''); setValue('customerAddress', ''); }
-                    if (v === 'new') { setSelectedCustomer(null); setValue('customerId', null); }
-                  }}
-                  size="small" fullWidth>
-                  <ToggleButton value="existing">Bestehender Kunde</ToggleButton>
-                  <ToggleButton value="new">Neuer Kunde (einmalig)</ToggleButton>
-                </ToggleButtonGroup>
-              </Grid>
-
-              {customerInputMode === 'existing' ? (
-                <Grid item xs={12}>
-                  <Controller
-                    name="customerId" control={control}
-                    rules={{ required: customerInputMode === 'existing' ? 'Kunde auswählen' : false }}
-                    render={({ field, fieldState: { error } }) => (
-                      <Autocomplete
-                        options={customers}
-                        getOptionLabel={(o) => `${o.name}${o.nickname ? ` (${o.nickname})` : ''}`}
-                        value={selectedCustomer}
-                        onChange={(_, v) => {
-                          setSelectedCustomer(v);
-                          field.onChange(v?.id || null);
-                          setValue('customerName', v?.name || '');
-                        }}
-                        isOptionEqualToValue={(o, v) => o.id === v?.id}
-                        renderInput={(params) => (
-                          <TextField {...params} label="Kunde auswählen" error={!!error} helperText={error?.message} fullWidth />
-                        )}
-                      />
-                    )}
-                  />
-                </Grid>
-              ) : (
-                <>
-                  <Grid item xs={12} sm={6}>
-                    <Controller
-                      name="customerName" control={control}
-                      rules={{ required: customerInputMode === 'new' ? 'Kundenname ist erforderlich' : false }}
-                      render={({ field, fieldState: { error } }) => (
-                        <TextField {...field} label="Kundenname" error={!!error} helperText={error?.message} fullWidth />
-                      )}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Controller
-                      name="customerAddress" control={control}
-                      render={({ field }) => (<TextField {...field} label="Adresse (optional)" fullWidth />)}
-                    />
-                  </Grid>
-                </>
-              )}
-
-              {/* Kopf */}
-              <Grid item xs={12} sm={6}>
-                <Controller
-                  name="dueDate" control={control}
-                  rules={{ required: 'Fälligkeitsdatum' }}
-                  render={({ field, fieldState: { error } }) => (
-                    <DatePicker {...field} label="Fällig am"
-                      slotProps={{ textField: { fullWidth: true, error: !!error, helperText: error?.message } }} />
-                  )}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Controller
-                  name="description" control={control}
-                  render={({ field }) => (<TextField {...field} label="Beschreibung (optional)" fullWidth />)}
-                />
-              </Grid>
-
-              {/* Positionen */}
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>Positionen</Typography>
-
-                {fields.map((f, index) => (
-                  <Box key={f.id} sx={{ mb: 2, p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
-                    <Grid container spacing={2} alignItems="center">
-                      <Grid item xs={12}>
-                        <ToggleButtonGroup
-                          value={itemInputMode[index] || 'custom'} exclusive size="small"
-                          onChange={(_, v) => {
-                            if (!v) return;
-                            setItemInputMode({ ...itemInputMode, [index]: v });
-                            if (v === 'custom') setValue(`items.${index}.articleId`, null);
-                          }}>
-                          <ToggleButton value="article">Artikel</ToggleButton>
-                          <ToggleButton value="custom">Freie Eingabe</ToggleButton>
-                        </ToggleButtonGroup>
-                      </Grid>
-
-                      {itemInputMode[index] === 'article' ? (
-                        <Grid item xs={12}>
-                          <Controller
-                            name={`items.${index}.articleId`} control={control}
-                            render={({ field: artField }) => (
-                              <Autocomplete
-                                {...artField}
-                                options={articles.filter(a => a.active)}
-                                getOptionLabel={(o) => o.name || ''}
-                                isOptionEqualToValue={(o, v) => o.id === v?.id}
-                                value={articles.find(a => a.id === artField.value) || null}
-                                onChange={(_, v) => {
-                                  artField.onChange(v?.id || null);
-                                  setValue(`items.${index}.description`, v?.name || '');
-                                  setValue(`items.${index}.pricePerUnit`, v ? num(v.price) : 0);
-                                  setValue(`items.${index}.unit`, v?.unit || 'Stück');
-                                }}
-                                renderInput={(params) => <TextField {...params} label="Artikel auswählen" size="small" fullWidth />}
-                              />
-                            )}
-                          />
-                        </Grid>
-                      ) : (
-                        <Grid item xs={12} sm={6}>
-                          <Controller
-                            name={`items.${index}.description`} control={control}
-                            rules={{ required: 'Beschreibung' }}
-                            render={({ field, fieldState: { error } }) => (
-                              <TextField {...field} label="Beschreibung" size="small" error={!!error}
-                                helperText={error?.message} fullWidth />
-                            )}
-                          />
-                        </Grid>
-                      )}
-
-                      <Grid item xs={itemInputMode[index] === 'article' ? 6 : 12} sm={itemInputMode[index] === 'article' ? 3 : 2}>
-                        <Controller
-                          name={`items.${index}.quantity`} control={control} defaultValue={1}
-                          rules={{ required: 'Menge', min: { value: 0.01, message: '> 0' } }}
-                          render={({ field, fieldState: { error } }) => (
-                            <TextField {...field} label="Menge" type="number" inputProps={{ step: 0.01 }}
-                              size="small" fullWidth error={!!error} helperText={error?.message} />
-                          )}
-                        />
-                      </Grid>
-
-                      {itemInputMode[index] !== 'article' && (
-                        <Grid item xs={6} sm={2}>
-                          <Controller name={`items.${index}.unit`} control={control} defaultValue="Stück"
-                            render={({ field }) => (<TextField {...field} label="Einheit" size="small" fullWidth />)} />
-                        </Grid>
-                      )}
-
-                      <Grid item xs={itemInputMode[index] === 'article' ? 6 : 12} sm={itemInputMode[index] === 'article' ? 3 : 3}>
-                        <Controller
-                          name={`items.${index}.pricePerUnit`} control={control} defaultValue={0}
-                          rules={{ required: 'Preis', min: { value: 0, message: '≥ 0' } }}
-                          render={({ field, fieldState: { error } }) => (
-                            <TextField {...field} label="Einzelpreis" type="number" inputProps={{ step: 0.01 }}
-                              size="small" fullWidth
-                              InputProps={{ startAdornment: <InputAdornment position="start">€</InputAdornment> }}
-                              disabled={itemInputMode[index] === 'article' && !!watch(`items.${index}.articleId`)}
-                              error={!!error} helperText={error?.message} />
-                          )}
-                        />
-                      </Grid>
-
-                      <Grid item xs={12} sm={1} container justifyContent="flex-end">
-                        {fields.length > 1 && (
-                          <IconButton color="error" onClick={() => remove(index)} size="small"><Delete /></IconButton>
-                        )}
-                      </Grid>
-                    </Grid>
-                  </Box>
-                ))}
-
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    append({ articleId: null, description: '', quantity: 1, unit: 'Stück', pricePerUnit: 0 });
-                    setItemInputMode(prev => ({ ...prev, [fields.length]: 'custom' }));
-                  }}
-                  startIcon={<Add />}>
-                  Position hinzufügen
-                </Button>
-              </Grid>
-
-              {/* Summen */}
-              <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Box sx={{ textAlign: 'right' }}>
-                  <Typography variant="body1">Summe: {formatCurrency(netTotal)}</Typography>
-                  <Typography variant="h6">Gesamt: {formatCurrency(grossTotal)}</Typography>
+      <Card>
+        <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
+          <Box component="thead" sx={{ bgcolor: 'action.hover' }}>
+            <Box component="tr">
+              <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Rechnungsnr.</Box>
+              <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Datum</Box>
+              <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Kunde</Box>
+              <Box component="th" sx={{ p: 1.5, textAlign: 'right' }}>Betrag</Box>
+              <Box component="th" sx={{ p: 1.5 }}>Status</Box>
+              <Box component="th" sx={{ p: 1.5 }}>Fällig</Box>
+              <Box component="th" sx={{ p: 1.5, textAlign: 'right' }}>Aktionen</Box>
+            </Box>
+          </Box>
+          <Box component="tbody">
+            {isLoading && (<Box component="tr"><Box component="td" colSpan={7} sx={{ p: 2 }}>Lade…</Box></Box>)}
+            {!isLoading && invoices.map(inv => (
+              <Box component="tr" key={inv.id} sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+                <Box component="td" sx={{ p: 1.5, fontWeight: 700 }}>{inv.invoiceNumber}</Box>
+                <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })}</Box>
+                <Box component="td" sx={{ p: 1.5 }}>{inv.customerName}</Box>
+                <Box component="td" sx={{ p: 1.5, textAlign: 'right' }}>{money(inv.totalAmount)}</Box>
+                <Box component="td" sx={{ p: 1.5 }}><Chip size="small" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} /></Box>
+                <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.dueDate), 'dd.MM.yyyy', { locale: de })}</Box>
+                <Box component="td" sx={{ p: 1.5, textAlign: 'right' }}>
+                  <IconButton size="small" onClick={() => handleDownloadPDF(inv.id)} title="PDF" aria-label="PDF herunterladen"><Download /></IconButton>
+                  {inv.status === 'DRAFT' &&
+                    <IconButton size="small" color="primary" title="Bearbeiten" aria-label="Bearbeiten" onClick={() => openEdit(inv)}><Edit /></IconButton>}
                 </Box>
-              </Grid>
-            </Grid>
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      </Card>
+
+      {/* ================== Erstellen/Bearbeiten: Drawer (Desktop) / Dialog (Mobile) ================== */}
+
+      {/* DESKTOP: rechte Seitenscheibe – Navigation links bleibt bestehen */}
+      {!isMobile && (
+        <Drawer
+          anchor="right"
+          open={showCreate}
+          onClose={() => setShowCreate(false)}
+          ModalProps={{ keepMounted: true }}
+          PaperProps={{ sx: { width: 2100, maxWidth: '100vw', overflow: 'hidden' } }}
+        >
+          <Box sx={{ height: '100%', display: 'grid', gridTemplateRows: 'auto 1fr' }}>
+            <DialogTitle sx={{ position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+                <span>{editInvoice ? `Rechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Rechnung'}</span>
+                <Button
+                  color="error"
+                  startIcon={<CloseIcon />}
+                  onClick={() => setShowCreate(false)}
+                >
+                  Abbrechen
+                </Button>
+              </Box>
+            </DialogTitle>
+            <DialogContent sx={{ p: 2 }}>
+              <ThreeColumnPOS
+                isMobile={false}
+                customers={filteredCustomers}
+                onPickCustomer={(c) => {
+                  setRecipientName(c.nickname || c.name || '');
+                  if (c.address) setRecipientAddress(c.address);
+                }}
+                customerSearch={customerSearch}
+                setCustomerSearch={setCustomerSearch}
+                recipientName={recipientName}
+                setRecipientName={setRecipientName}
+                recipientAddress={recipientAddress}
+                setRecipientAddress={setRecipientAddress}
+                articles={filteredArticles}
+                categories={['all', ...categories.filter(c => c !== 'all')]}
+                selectedCategory={selectedCategory}
+                setSelectedCategory={setSelectedCategory}
+                articleSearch={articleSearch}
+                setArticleSearch={setArticleSearch}
+                addToCart={addToCart}
+                cart={cart}
+                setCart={setCart}
+                addFreeLine={addFreeLine}
+                updateQty={updateQty}
+                incQty={incQty}
+                decQty={decQty}
+                updatePrice={updatePrice}
+                dueDate={dueDate}
+                setDueDate={setDueDate}
+                description={description}
+                setDescription={setDescription}
+                total={total}
+                money={money}
+                submitDisabled={submitDisabled}
+                submitInvoice={submitInvoice}
+                onClose={() => setShowCreate(false)}
+                editInvoice={editInvoice}
+              />
+            </DialogContent>
+          </Box>
+        </Drawer>
+      )}
+
+      {/* MOBILE: Fullscreen-Dialog (Sektionen untereinander) */}
+      {isMobile && (
+        <Dialog open={showCreate} onClose={() => setShowCreate(false)} fullScreen>
+          <DialogTitle sx={{ position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+              <span>{editInvoice ? `Rechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Rechnung'}</span>
+              <Button
+                color="error"
+                startIcon={<CloseIcon />}
+                onClick={() => setShowCreate(false)}
+              >
+                Abbrechen
+              </Button>
+            </Box>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
+            <ThreeColumnPOS
+              isMobile
+              customers={filteredCustomers}
+              onPickCustomer={(c) => {
+                setRecipientName(c.nickname || c.name || '');
+                if (c.address) setRecipientAddress(c.address);
+              }}
+              customerSearch={customerSearch}
+              setCustomerSearch={setCustomerSearch}
+              recipientName={recipientName}
+              setRecipientName={setRecipientName}
+              recipientAddress={recipientAddress}
+              setRecipientAddress={setRecipientAddress}
+              articles={filteredArticles}
+              categories={['all', ...categories.filter(c => c !== 'all')]}
+              selectedCategory={selectedCategory}
+              setSelectedCategory={setSelectedCategory}
+              articleSearch={articleSearch}
+              setArticleSearch={setArticleSearch}
+              addToCart={addToCart}
+              cart={cart}
+              setCart={setCart}
+              addFreeLine={addFreeLine}
+              updateQty={updateQty}
+              incQty={incQty}
+              decQty={decQty}
+              updatePrice={updatePrice}
+              dueDate={dueDate}
+              setDueDate={setDueDate}
+              description={description}
+              setDescription={setDescription}
+              total={total}
+              money={money}
+              submitDisabled={submitDisabled}
+              submitInvoice={submitInvoice}
+              onClose={() => setShowCreate(false)}
+              editInvoice={editInvoice}
+            />
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setOpenDialog(false)}>Abbrechen</Button>
-            <Button type="submit" variant="contained" disabled={createInvoiceMutation.isLoading}>
-              {createInvoiceMutation.isLoading ? 'Erstelle…' : 'Erstellen (Entwurf)'}
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
+        </Dialog>
+      )}
     </Box>
   );
-};
+}
 
-export default Invoices;
+/* ----------------------- 3-Spalten-Komponente ----------------------- */
+function ThreeColumnPOS(props) {
+  const {
+    isMobile,
+    customers, onPickCustomer, customerSearch, setCustomerSearch,
+    recipientName, setRecipientName, recipientAddress, setRecipientAddress,
+    articles, categories, selectedCategory, setSelectedCategory, articleSearch, setArticleSearch,
+    addToCart, cart, addFreeLine, updateQty, incQty, decQty, updatePrice,
+    dueDate, setDueDate, description, setDescription,
+    total, money, submitDisabled, submitInvoice, onClose, editInvoice
+  } = props;
+
+  const DuePicker = isMobile ? MobileDatePicker : DesktopDatePicker;
+
+  return (
+    <Box sx={{
+      display: 'grid',
+      gap: 2,
+      gridTemplateColumns: { xs: '1fr', md: '360px 1fr 420px' },
+      height: { md: 'calc(100vh - 160px)' } // im Drawer
+    }}>
+      {/* Empfänger + Kundenliste */}
+      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <CardContent sx={{ pb: 1 }}>
+          <TextField
+            label="Empfängername *"
+            value={recipientName}
+            onChange={(e) => setRecipientName(e.target.value)}
+            fullWidth size="small"
+          />
+          <TextField
+            label="Anschrift"
+            value={recipientAddress}
+            onChange={(e) => setRecipientAddress(e.target.value)}
+            fullWidth multiline minRows={3} size="small" sx={{ mt: 1 }}
+            placeholder={'Straße 1\n12345 Musterstadt'}
+          />
+          <DebouncedTextField
+            placeholder="Kunde suchen – Klick übernimmt Name (editierbar)"
+            size="small"
+            fullWidth
+            value={customerSearch}
+            onChange={setCustomerSearch}
+            InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
+            sx={{ mt: 1 }}
+            helperText="Tipp: Klick auf einen Kunden übernimmt den Namen (und ggf. Adresse) in die Felder."
+          />
+        </CardContent>
+        <Box sx={{ p: 2, pt: 0, overflowY: 'auto', flex: 1 }}>
+          <List dense={!isMobile}>
+            {customers.map(c => (
+              <ListItem
+                key={c.id}
+                onClick={() => onPickCustomer(c)}
+                sx={{
+                  cursor: 'pointer',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                  mb: 1,
+                  '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
+                }}
+              >
+                <Avatar sx={{ mr: 1 }}><Person /></Avatar>
+                <ListItemText
+                  primary={<Typography noWrap fontWeight={600}>{c.nickname || c.name}</Typography>}
+                  secondary={c.nickname ? c.name : null}
+                />
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      </Card>
+
+      {/* Artikelkacheln */}
+      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+          <DebouncedTextField
+            placeholder="Artikel suchen…"
+            size="small"
+            fullWidth
+            value={articleSearch}
+            onChange={setArticleSearch}
+            InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
+          />
+          <Tabs value={selectedCategory} onChange={(e, v) => setSelectedCategory(v)} variant="scrollable" scrollButtons="auto" sx={{ mt: 1 }}>
+            {categories.map(c => <Tab key={c} value={c} label={c === 'all' ? 'Alle' : c} />)}
+          </Tabs>
+        </Box>
+        <Box sx={{ p: 2, overflowY: 'auto' }}>
+          <Grid container spacing={1.5}>
+            {articles.map(a => {
+              const inCart = cart.find(i => i.id === a.id)?.quantity || 0;
+              return (
+                <Grid item xs={6} sm={4} md={3} lg={2} key={a.id}>
+                  <Card onClick={() => addToCart(a)} sx={{ cursor: 'pointer', position: 'relative', '&:hover': { transform: 'scale(1.03)' }, transition: 'transform .15s' }}>
+                    {a.imageMedium && <Box component="img" src={a.imageMedium} alt={a.name} loading="lazy" sx={{ width: '100%', height: 140, objectFit: 'cover' }} />}
+                    {!!inCart && (
+                      <Box sx={{ position: 'absolute', top: 6, right: 6, px: .75, py: .25, borderRadius: 1, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', fontSize: 12, fontWeight: 700 }}>
+                        x{inCart}
+                      </Box>
+                    )}
+                    <CardContent sx={{ p: 1.25 }}>
+                      <Typography noWrap fontSize={14} fontWeight={600}>{a.name}</Typography>
+                      <Typography fontWeight={800} color="primary" fontSize={16}>{money(a.price)}</Typography>
+                      {a.purchaseUnit && a.unitsPerPurchase > 1 && (
+                        <Button
+                         size="small"
+                          variant="outlined"
+                          sx={{ mt: 0.5 }}
+                         onClick={(e)=>{ e.stopPropagation(); addToCart({ ...a, __crate: true }); }}
+                         >
+                        +1 {a.purchaseUnit} (×{a.unitsPerPurchase})
+                         </Button>
+                         )}
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </Box>
+      </Card>
+
+      {/* Warenkorb */}
+      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column' }}>
+        <CardContent sx={{ pb: 1 }}>
+          <DuePicker
+            label="Fällig am"
+            value={dueDate}
+            onChange={setDueDate}
+            slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+          />
+          <TextField sx={{ mt: 1 }} label="Beschreibung (optional)" value={description} onChange={(e) => setDescription(e.target.value)} fullWidth size="small" />
+        </CardContent>
+
+        {/* Scrollbarer Positionsbereich */}
+        <Box sx={{ px: 2, pb: 1, overflowY: 'auto', flex: 1 }}>
+          {!cart.length && <Typography color="text.secondary" align="center" sx={{ mt: 3 }}>Noch keine Positionen</Typography>}
+          <Stack spacing={1}>
+            {cart.map(i => (
+              <Box key={i.id} sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                {i.isFree
+                  ? (
+                    <TextField
+                      size="small"
+                      value={i.name}
+                      onChange={(e) => props.setCart(cs => cs.map(x => x.id === i.id ? { ...x, name: e.target.value } : x))}
+                      placeholder="Beschreibung"
+                      fullWidth sx={{ mb: 1 }}
+                    />
+                  ) : (
+                    <Typography sx={{ fontWeight: 600, mb: .5 }} noWrap>{i.name}</Typography>
+                  )}
+
+                <Grid container spacing={1} alignItems="center">
+                  {/* Menge mit +/- */}
+                  <Grid item xs={6} sm={5} md={5}>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <IconButton size="small" onClick={() => decQty(i.id)} aria-label="Menge verringern"><RemoveIcon /></IconButton>
+                      <TextField
+                        size="small"
+                        type="number"
+                        inputMode="numeric"
+                        label="Menge"
+                        value={i.quantity}
+                        onChange={(e) => updateQty(i.id, num(e.target.value))}
+                        sx={{ width: 100 }}
+                      />
+                      <IconButton size="small" onClick={() => incQty(i.id)} aria-label="Menge erhöhen"><AddIcon /></IconButton>
+                    </Stack>
+                  </Grid>
+
+                  {/* Preis */}
+                  <Grid item xs={6} sm={5} md={5}>
+                    <MoneyField value={i.price} onChange={(v) => updatePrice(i.id, v)} label="Einzelpreis" fullWidth />
+                  </Grid>
+
+                  {!i.isFree && (
+  <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
+    <Button
+      size="small"
+      variant="outlined"
+      onClick={() => updateQty(i.id, num(i.quantity) + 1)}
+    >
+      +1 {i.unit || 'Stück'}
+    </Button>
+
+    {i.purchaseUnit && i.unitsPerPurchase > 1 && (
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => updateQty(i.id, num(i.quantity) + num(i.unitsPerPurchase))}
+      >
+        +1 {i.purchaseUnit} (×{i.unitsPerPurchase})
+      </Button>
+    )}
+  </Stack>
+)}
+
+
+                  {/* Löschen */}
+                  <Grid item xs={12} sm={2} md={2} sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+                    <IconButton onClick={() => updateQty(i.id, 0)} aria-label="Position löschen"><Delete /></IconButton>
+                  </Grid>
+                </Grid>
+
+                <Typography variant="body2" sx={{ mt: .5, color: 'text.secondary', textAlign: 'right' }}>
+                  Zwischensumme: {money(num(i.quantity) * num(i.price))}
+                </Typography>
+              </Box>
+            ))}
+          </Stack>
+
+          <Button variant="outlined" startIcon={<Add />} onClick={addFreeLine} sx={{ mt: 1 }}>
+            Freie Zeile
+          </Button>
+        </Box>
+
+        {/* Fester Footer-Bereich (kein Overlap) */}
+        <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper', position: 'sticky', bottom: 0, zIndex: 1 }}>
+          <Typography variant="h6" align="right" sx={{ fontWeight: 800 }} aria-live="polite">Gesamt: {money(total)}</Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+            <Button variant="contained" onClick={submitInvoice} disabled={submitDisabled}>
+              {editInvoice ? 'Speichern' : 'Erstellen (Entwurf)'}
+            </Button>
+            <Button variant="outlined" color="error" onClick={onClose}>
+              Abbrechen
+            </Button>
+          </Stack>
+        </Box>
+      </Card>
+    </Box>
+  );
+}

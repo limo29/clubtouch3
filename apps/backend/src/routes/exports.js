@@ -36,6 +36,12 @@ router.get('/monthly-summary',
   exportController.exportMonthlySummary
 );
 
+router.get('/eur',
+  authorize('ADMIN','ACCOUNTANT'),
+  exportController.exportEUR
+);
+
+
 router.get('/customer/:customerId/statement',
   authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
   exportController.exportCustomerStatement

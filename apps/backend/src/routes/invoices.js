@@ -35,5 +35,15 @@ router.patch('/:id/status',
   authorize('ADMIN', 'CASHIER'),
   invoiceController.updateStatus
 );
+// NEU: Rechnung updaten (nur DRAFT)
+router.put('/:id',
+  authorize('ADMIN', 'CASHIER'),
+  invoiceController.updateInvoice
+);
 
+// NEU: Rechnung löschen (stornieren oder hard delete)
+router.delete('/:id',
+  authorize('ADMIN', 'CASHIER'),
+  invoiceController.deleteInvoice
+);
 module.exports = router;

@@ -36,6 +36,8 @@ class ArticleService {
         imageMedium: data.imageMedium || null,
         imageLarge: data.imageLarge || null,
         countsForHighscore: data.countsForHighscore !== false,
+        purchaseUnit: data.purchaseUnit || null,
+        unitsPerPurchase: data.unitsPerPurchase || null,
       },
     });
 
@@ -75,6 +77,8 @@ class ArticleService {
           typeof updateData.countsForHighscore === 'boolean'
             ? updateData.countsForHighscore
             : undefined,
+        purchaseUnit: updateData.purchaseUnit ?? undefined,
+        unitsPerPurchase: updateData.unitsPerPurchase ?? undefined,
       },
     });
 
@@ -91,26 +95,55 @@ class ArticleService {
     return prisma.article.update({ where: { id }, data: { active: !article.active } });
   }
 
-  // Bestand anpassen
-  async adjustStock(articleId, quantity, reason, type = 'CORRECTION') {
-    const article = await prisma.article.findUnique({ where: { id: articleId } });
-    if (!article) throw new Error('Artikel nicht gefunden');
+// Bestand anpassen
+async adjustStock(articleId, quantity, reason, type = 'CORRECTION') {
+  const article = await prisma.article.findUnique({ where: { id: articleId } });
+  if (!article) throw new Error('Artikel nicht gefunden');
 
-    const newStock = article.stock + Number(quantity);
-    if (newStock < 0)
-      throw new Error(`Bestand kann nicht negativ werden. Aktuell: ${article.stock}, Änderung: ${quantity}`);
+  const allowNegative = String(process.env.ALLOW_NEGATIVE_STOCK || 'true').toLowerCase() === 'true';
 
-    const updatedArticle = await prisma.article.update({
-      where: { id: articleId },
-      data: { stock: newStock },
-    });
+  // bisheriger Bestand + Änderung
+  const current = Number(article.stock);
+  const delta = Number(quantity);
+  const newStock = current + delta;
 
-    await prisma.stockMovement.create({
-      data: { articleId, type, quantity, reason },
-    });
-
-    return updatedArticle;
+  // WENN negatives Lager verboten ist -> wie vorher blockieren
+  if (!allowNegative && newStock < 0) {
+    throw new Error(
+      `Bestand kann nicht negativ werden. Aktuell: ${current}, Änderung: ${delta}`
+    );
   }
+
+  const updatedArticle = await prisma.article.update({
+    where: { id: articleId },
+    data: { stock: newStock }, // negative Werte sind erlaubt
+  });
+
+  await prisma.stockMovement.create({
+    data: {
+      articleId,
+      type,
+      quantity: delta,
+      reason: reason || (newStock < 0 ? 'Warnung: Bestand negativ' : undefined),
+    },
+  });
+
+  // optional: Audit-Log mit Negativ-Warnung
+  if (newStock < 0) {
+    await prisma.auditLog.create({
+      data: {
+        userId: 'system', // oder req.user.id an Aufruferstellen durchreichen
+        action: 'NEGATIVE_STOCK_WARNING',
+        entityType: 'Article',
+        entityId: articleId,
+        changes: { previous: current, delta, newStock, reason },
+      },
+    });
+  }
+
+  return updatedArticle;
+}
+
 
   // Wareneingang
   async processDelivery(articleId, quantity, reason = 'Wareneingang') {

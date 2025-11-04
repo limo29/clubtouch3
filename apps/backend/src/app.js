@@ -14,6 +14,7 @@ const highscoreRoutes = require('./routes/highscore');
 const exportRoutes = require('./routes/exports');   
 const invoiceRoutes = require('./routes/invoices'); 
 const purchaseDocumentRoutes = require('./routes/purchaseDocuments');
+const accountingRoutes = require('./routes/accountingRoutes');
 
 const app = express();
 
@@ -32,6 +33,8 @@ app.use('/api/highscore', highscoreRoutes);
 app.use('/api/exports', exportRoutes); 
 app.use('/api/invoices', invoiceRoutes); 
 app.use('/api/purchase-documents', purchaseDocumentRoutes)
+app.use('/api/accounting', accountingRoutes);
+
 
 // Basis-Route
 app.get('/', (req, res) => {
@@ -70,6 +73,15 @@ app.use((err, req, res, next) => {
     error: err.message || 'Etwas ist schiefgelaufen!',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
+});
+// Alle JSON-Antworten: BigInt/Decimal sicher serialisieren
+app.set('json replacer', (_key, value) => {
+  if (typeof value === 'bigint') return Number(value);            // oder String(value)
+  if (value && typeof value === 'object' && typeof value.toNumber === 'function') {
+    // Prisma Decimal
+    return value.toNumber();
+  }
+  return value;
 });
 
 module.exports = { app, prisma };

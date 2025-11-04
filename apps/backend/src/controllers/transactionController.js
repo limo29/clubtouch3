@@ -5,8 +5,8 @@ class TransactionController {
   // Erstelle Verkauf
   async createSale(req, res) {
     try {
-      const transaction = await transactionService.createSale(req.body, req.user.id);
-      
+      const { transaction, warnings = [] } = await transactionService.createSale(req.body, req.user.id);
+
       // Audit-Log
       await prisma.auditLog.create({
         data: {
@@ -17,23 +17,20 @@ class TransactionController {
           changes: {
             totalAmount: transaction.totalAmount,
             paymentMethod: transaction.paymentMethod,
-            itemCount: transaction.items.length
+            itemCount: transaction.items.length,
+            warnings: warnings.length ? warnings : undefined
           }
         }
       });
-      
+
       res.status(201).json({
         message: 'Verkauf erfolgreich abgeschlossen',
-        transaction
+        transaction,
+        warnings
       });
     } catch (error) {
       console.error('Create sale error:', error);
-      
-      // Spezifische Fehlermeldungen
-      if (error.message.includes('Nicht genügend')) {
-        return res.status(400).json({ error: error.message });
-      }
-      
+      // Keine künstliche Blockade bei niedrigem/negativem Bestand
       res.status(500).json({ error: error.message || 'Fehler beim Verkauf' });
     }
   }

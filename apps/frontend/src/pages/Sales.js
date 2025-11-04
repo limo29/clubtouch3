@@ -63,16 +63,26 @@ const Sales = () => {
     }
   });
 
-  const { data: articles = [] } = useQuery({
-    queryKey: ['articles'],
-    queryFn: async () => {
-      const res = await api.get(API_ENDPOINTS.ARTICLES);
-      const list = Array.isArray(res.data?.articles) ? res.data.articles : [];
-      return list
-        .filter(a => a.active)
-        .map(a => ({ ...a, price: num(a.price) }));
-    }
+  // WICHTIG: eigener Key + Normalisierung
+  const { data: articlesRaw } = useQuery({
+    queryKey: ['articles', 'sales'],
+    queryFn: async () => (await api.get(API_ENDPOINTS.ARTICLES)).data
   });
+
+  const articles = useMemo(() => {
+    const raw = Array.isArray(articlesRaw)
+      ? articlesRaw
+      : (articlesRaw?.articles ?? []);
+    return (raw || [])
+      .filter(a => a?.active)
+      .map(a => ({
+        ...a,
+        price: num(a.price),
+        unitsPerPurchase: num(a.unitsPerPurchase),
+        purchaseUnit: a.purchaseUnit || null,
+        unit: a.unit || 'Stück',
+      }));
+  }, [articlesRaw]);
 
   /* ---------------- Mutations ---------------- */
   const topUpMutation = useMutation({
@@ -93,7 +103,7 @@ const Sales = () => {
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
     onSuccess: () => {
       queryClient.invalidateQueries(['customers-sales']);
-      queryClient.invalidateQueries(['articles']);
+      queryClient.invalidateQueries(['articles', 'sales']);
       setCart([]);
     }
   });
@@ -122,8 +132,6 @@ const Sales = () => {
       c.name.toLowerCase().includes(s) ||
       (c.nickname && c.nickname.toLowerCase().includes(s))
     );
-
-    // recent (24h) zuerst, dann nach Aktivität desc
     return matches.sort((a, b) => {
       if (a.isRecent !== b.isRecent) return a.isRecent ? -1 : 1;
       return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime();
@@ -134,18 +142,25 @@ const Sales = () => {
   const boys  = filteredCustomers.filter(c => c.gender === 'MALE');
   const other = filteredCustomers.filter(c => !c.gender || c.gender === 'OTHER');
 
-  const categories = ['all', ...new Set(articles.map(a => a.category))];
+  const categories = useMemo(
+    () => ['all', ...new Set((articles || []).map(a => a.category).filter(Boolean))],
+    [articles]
+  );
 
-  const filteredArticles = articles.filter(a =>
+  const filteredArticles = (articles || []).filter(a =>
     (selectedCategory === 'all' || a.category === selectedCategory) &&
     a.name.toLowerCase().includes(articleSearch.toLowerCase())
   );
 
-  const addToCart = (a) => {
+  // +1 Stück oder +1 Kiste
+  const addToCart = (a, opts = {}) => {
+    const isCrate = !!opts.crate && a.unitsPerPurchase > 1;
+    const addQty = isCrate ? a.unitsPerPurchase : 1;
+
     const exists = cart.find(i => i.id === a.id);
     exists
-      ? setCart(cart.map(i => i.id === a.id ? { ...i, quantity: i.quantity + 1 } : i))
-      : setCart([...cart, { ...a, quantity: 1 }]);
+      ? setCart(cart.map(i => i.id === a.id ? { ...i, quantity: num(i.quantity) + addQty } : i))
+      : setCart([...cart, { ...a, quantity: addQty }]);
   };
 
   const updateQty = (id, qty) =>
@@ -176,7 +191,6 @@ const Sales = () => {
       }}
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 1 }}>
-        {/* links: darf schrumpfen */}
         <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
           <Avatar
             sx={{
@@ -207,7 +221,6 @@ const Sales = () => {
           </Box>
         </Stack>
 
-        {/* rechts: feste Breite */}
         <Typography
           fontWeight={700}
           color={customer.balance < 5 ? 'error' : 'primary'}
@@ -326,7 +339,7 @@ const Sales = () => {
 
           <Box sx={{ p: 2, overflowY: 'auto' }}>
             <Grid container spacing={1.5}>
-              {filteredArticles.map(a => (
+              {(filteredArticles || []).map(a => (
                 <Grid item xs={6} sm={4} md={3} lg={2} key={a.id}>
                   <Card
                     sx={{
@@ -352,6 +365,20 @@ const Sales = () => {
                       </Typography>
                       {num(a.stock) <= num(a.minStock) && (
                         <Chip size="small" color="warning" label="Niedrig" sx={{ mt: 0.5 }} />
+                      )}
+                      {Number(a.stock) <= 0 && (
+                        <Chip size="small" color="error" label="Bestand ≤ 0" sx={{ mt: 0.5 }} />
+                       )}
+
+                      {a.purchaseUnit && a.unitsPerPurchase > 1 && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          sx={{ mt: 0.75 }}
+                          onClick={(e) => { e.stopPropagation(); addToCart(a, { crate: true }); }}
+                        >
+                          +1 {a.purchaseUnit} (×{a.unitsPerPurchase})
+                        </Button>
                       )}
                     </CardContent>
                   </Card>
@@ -382,7 +409,7 @@ const Sales = () => {
                   secondaryAction={
                     <Stack direction="row" spacing={1}>
                       <IconButton
-                        onClick={() => updateQty(i.id, i.quantity - 1)}
+                        onClick={() => updateQty(i.id, num(i.quantity) - 1)}
                         sx={{
                           bgcolor: 'grey.200',
                           width: 40, height: 40, borderRadius: '50%',
@@ -392,7 +419,7 @@ const Sales = () => {
                         –
                       </IconButton>
                       <IconButton
-                        onClick={() => updateQty(i.id, i.quantity + 1)}
+                        onClick={() => updateQty(i.id, num(i.quantity) + 1)}
                         sx={{
                           bgcolor: 'primary.main', color: '#fff',
                           width: 40, height: 40, borderRadius: '50%',
@@ -406,7 +433,25 @@ const Sales = () => {
                 >
                   <ListItemText
                     primary={<Typography fontSize={15} fontWeight={600}>{i.name}</Typography>}
-                    secondary={<Typography fontSize={14}>{i.quantity} × {money(i.price)}</Typography>}
+                    secondary={
+                      <Stack spacing={0.5}>
+                        <Typography fontSize={14}>{num(i.quantity)} × {money(i.price)}</Typography>
+                        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                          <Button size="small" variant="outlined" onClick={() => updateQty(i.id, num(i.quantity) + 1)}>
+                            +1 {i.unit || 'Stück'}
+                          </Button>
+                          {i.purchaseUnit && i.unitsPerPurchase > 1 && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => updateQty(i.id, num(i.quantity) + num(i.unitsPerPurchase))}
+                            >
+                              +1 {i.purchaseUnit} (×{i.unitsPerPurchase})
+                            </Button>
+                          )}
+                        </Stack>
+                      </Stack>
+                    }
                   />
                 </ListItem>
               ))}

@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
+import { Add as AddIcon, Remove as RemoveIcon } from "@mui/icons-material";
+
 
 import {
   Box,
@@ -40,24 +42,20 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
-  // --- Increment/decrement helper ---
+  const baseUnit = article?.unit || "Flasche";
+  const purchaseUnit = article?.purchaseUnit || "Kiste";
+  const factor = Number(article?.unitsPerPurchase) || 0;
+
   const handleIncrement = (field, amount) => {
     const fieldName = `items.${index}.${field}`;
-    const current = getValues(fieldName) || 0;
-    setValue(fieldName, Math.max(0, current + amount), {
-      shouldValidate: true,
-      shouldDirty: true,
-    });
+    const current = Number(getValues(fieldName) || 0);
+    setValue(fieldName, Math.max(0, current + amount), { shouldValidate: true, shouldDirty: true });
   };
 
-  // --- Direct input handler ---
   const handleInputChange = (field, event) => {
     const fieldName = `items.${index}.${field}`;
     const value = parseInt(event.target.value, 10) || 0;
-    setValue(fieldName, Math.max(0, value), {
-      shouldValidate: true,
-      shouldDirty: true,
-    });
+    setValue(fieldName, Math.max(0, value), { shouldValidate: true, shouldDirty: true });
   };
 
   return (
@@ -77,34 +75,16 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
         "&:hover": { boxShadow: 3 },
       }}
     >
-      {/* --- Image --- */}
-      <Box
-        sx={{
-          width: "100%",
-          aspectRatio: "4/3",
-          mb: 1.5,
-          borderRadius: 1,
-          bgcolor: "#fafafa",
-          overflow: "hidden",
-        }}
-      >
+      {/* Bild */}
+      <Box sx={{ width: "100%", aspectRatio: "4/3", mb: 1.5, borderRadius: 1, bgcolor: "#fafafa", overflow: "hidden" }}>
         <img
-          src={
-            article?.imageSmall ||
-            article?.imageThumbnail ||
-            "https://via.placeholder.com/400x300.png?text=Kein+Bild"
-          }
+          src={article?.imageSmall || article?.imageThumbnail || "/logo192.png"}
           alt={article?.name || "Artikel"}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
         />
       </Box>
 
-      {/* --- Title --- */}
+      {/* Titel */}
       <Typography
         variant={isMobile ? "body1" : "subtitle1"}
         fontWeight={600}
@@ -117,46 +97,47 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
           WebkitLineClamp: 2,
           WebkitBoxOrient: "vertical",
           lineHeight: 1.2,
-          mb: 1.5,
+          mb: 1,
           width: "100%",
         }}
       >
         {article?.name || "Unbenannter Artikel"}
       </Typography>
 
-      {/* --- Controls --- */}
-      <Stack spacing={1.5} width="100%">
-        {/* Kisten */}
+ 
+
+      {/* Mengensteuerung */}
+      <Stack spacing={1.75} width="100%">
+        {/* Kisten / Kauf-Einheit mit Faktor */}
         <QuantityRow
-          label={article?.purchaseUnit || "Kisten"}
+          label={
+            factor > 0
+              ? `${purchaseUnit} (×${factor} ${baseUnit})`
+              : purchaseUnit
+          }
           fieldName={`items.${index}.kisten`}
           control={control}
-          handleIncrement={(field, amount) =>
-            handleIncrement(field, amount)
-          }
-          handleInputChange={(field, e) => handleInputChange(field, e)}
+          handleIncrement={handleIncrement}
+          handleInputChange={handleInputChange}
           isMobile={isMobile}
+          //emphasize // macht Buttons dezent größer
         />
 
-        {/* Flaschen */}
+        {/* Basis-Einheit */}
         <QuantityRow
-          label={article?.unit || "Flaschen"}
+          label={baseUnit}
           fieldName={`items.${index}.flaschen`}
           control={control}
-          handleIncrement={(field, amount) =>
-            handleIncrement(field, amount)
-          }
-          handleInputChange={(field, e) => handleInputChange(field, e)}
+          handleIncrement={handleIncrement}
+          handleInputChange={handleInputChange}
           isMobile={isMobile}
+          emphasize
         />
       </Stack>
     </Paper>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*                            QuantityRow helper                              */
-/* -------------------------------------------------------------------------- */
 
 const QuantityRow = ({
   label,
@@ -166,7 +147,6 @@ const QuantityRow = ({
   handleInputChange,
   isMobile,
 }) => {
-  // fieldName is like "items.3.kisten" -> we need the last part as the key for handlers
   const fieldKey = fieldName.split(".").pop();
 
   return (
@@ -211,7 +191,7 @@ const QuantityRow = ({
             type="number"
             size="small"
             onChange={(e) => handleInputChange(fieldKey, e)}
-            value={field.value || 0}
+            value={field.value ?? 0}
             inputProps={{
               min: 0,
               style: {
@@ -255,14 +235,10 @@ export default function PurchaseDocumentCreate() {
 
   const documentType =
     location.state?.type === "LIEFERSCHEIN" ? "LIEFERSCHEIN" : "RECHNUNG";
-
   const isRechnung = documentType === "RECHNUNG";
-  const pageTitle = isRechnung ? "Neue Rechnung" : "Neuer Lieferschein";
-  const pageSubTitle = isRechnung
-    ? "Rechnung mit Wareneingang (Sofortkauf)"
-    : "Wareneingang ohne Rechnung";
 
   const [file, setFile] = useState(null);
+  const initializedRef = useRef(false);
 
   /* ---------------------------- React Hook Form --------------------------- */
   const {
@@ -281,7 +257,7 @@ export default function PurchaseDocumentCreate() {
       totalAmount: "",
       paid: false,
       paymentMethod: "TRANSFER",
-      items: [],
+      items: [], // wichtig: leer; füllen wir nach Artikelladung
     },
   });
 
@@ -295,23 +271,37 @@ export default function PurchaseDocumentCreate() {
   });
   const suppliers = suppliersData?.suppliers || [];
 
-  const { data: articlesData, isLoading: isLoadingArticles } = useQuery({
-    queryKey: ["articles"],
+  // WICHTIG: eigener Key + Normalisierung
+  const { data: articlesRaw, isLoading: isLoadingArticles } = useQuery({
+    queryKey: ["articles", "purchase"],
     queryFn: () => api.get("/articles").then((res) => res.data),
   });
-  const articles = articlesData?.articles || [];
+
+  const articles = useMemo(() => {
+    const raw = Array.isArray(articlesRaw)
+      ? articlesRaw
+      : (articlesRaw?.articles ?? []);
+    return (raw || []).map((a) => ({
+      ...a,
+      // Fallbacks, damit UI stabil bleibt
+      unit: a.unit || "Flasche",
+      purchaseUnit: a.purchaseUnit || "Kiste",
+      unitsPerPurchase: Number(a.unitsPerPurchase) || 0,
+    }));
+  }, [articlesRaw]);
 
   /* ---------------------------- Initialize Items -------------------------- */
   useEffect(() => {
-    if (articles.length > 0) {
+    if (!initializedRef.current && Array.isArray(articles) && articles.length > 0) {
       replace(
         articles.map((a) => ({
           articleId: a.id,
           kisten: 0,
           flaschen: 0,
-          _article: a,
+          _article: a, // nur für Anzeige
         }))
       );
+      initializedRef.current = true;
     }
   }, [articles, replace]);
 
@@ -337,17 +327,7 @@ export default function PurchaseDocumentCreate() {
   const onSubmit = (data) => {
     const supplierValue = data.supplier;
 
-    // Supplier typo check
-    if (typeof supplierValue === "string") {
-      const isNew =
-        !suppliers.some((s) => s.toLowerCase() === supplierValue.toLowerCase());
-      if (isNew) {
-        const confirmed = window.confirm(
-          `Der Lieferant "${supplierValue}" ist neu.\n\nMöchten Sie ihn wirklich anlegen?`
-        );
-        if (!confirmed) return;
-      }
-    } else if (!supplierValue) {
+    if (typeof supplierValue !== "string" || !supplierValue.trim()) {
       alert("Bitte einen Lieferanten auswählen oder eintippen.");
       return;
     }
@@ -367,7 +347,7 @@ export default function PurchaseDocumentCreate() {
 
     if (file) formData.append("nachweis", file);
 
-    const submittedItems = data.items
+    const submittedItems = (data.items || [])
       .filter((i) => (i.kisten || 0) > 0 || (i.flaschen || 0) > 0)
       .map((i) => ({
         articleId: i.articleId,
@@ -393,7 +373,7 @@ export default function PurchaseDocumentCreate() {
       onSubmit={handleSubmit(onSubmit)}
       sx={{ bgcolor: "background.default", pb: showFloatingActions ? 10 : 8 }}
     >
-      {/* ============================= Header ============================= */}
+      {/* Header */}
       <Paper
         square
         elevation={0}
@@ -408,28 +388,22 @@ export default function PurchaseDocumentCreate() {
         }}
       >
         <Stack direction="row" justifyContent="space-between" alignItems="center">
-          {/* Title */}
           <Stack direction="row" alignItems="center" spacing={1}>
             <IconButton color="primary" onClick={() => navigate("/PurchaseDocuments")}>
               <ArrowBackIcon />
             </IconButton>
             <Box>
               <Typography variant="overline" color="text.secondary">
-                {pageSubTitle}
+                {isRechnung ? "Rechnung mit Wareneingang (Sofortkauf)" : "Wareneingang ohne Rechnung"}
               </Typography>
               <Typography variant="h5" fontWeight={700}>
-                {pageTitle}
+                {isRechnung ? "Neue Rechnung" : "Neuer Lieferschein"}
               </Typography>
             </Box>
           </Stack>
 
-          {/* Desktop Action Buttons */}
           <Stack direction="row" spacing={1} sx={{ display: { xs: "none", md: "flex" } }}>
-            <Button
-              startIcon={<CancelIcon />}
-              color="secondary"
-              onClick={() => navigate("/PurchaseDocuments")}
-            >
+            <Button startIcon={<CancelIcon />} color="secondary" onClick={() => navigate("/PurchaseDocuments")}>
               Abbrechen
             </Button>
             <Button
@@ -437,7 +411,7 @@ export default function PurchaseDocumentCreate() {
               startIcon={<SaveIcon />}
               color="primary"
               variant="contained"
-              disabled={mutation.isLoading || isLoadingArticles}
+              disabled={mutation.isLoading || isLoadingArticles || !initializedRef.current}
             >
               {mutation.isLoading ? "Speichert..." : "Speichern"}
             </Button>
@@ -445,7 +419,7 @@ export default function PurchaseDocumentCreate() {
         </Stack>
       </Paper>
 
-      {/* ============================= Content ============================= */}
+      {/* Content */}
       <Box
         sx={{
           maxWidth: 1800,
@@ -457,7 +431,7 @@ export default function PurchaseDocumentCreate() {
           gap: 3,
         }}
       >
-        {/* -------------------- Sidebar Form -------------------- */}
+        {/* Sidebar */}
         <Paper
           elevation={1}
           sx={{
@@ -469,7 +443,6 @@ export default function PurchaseDocumentCreate() {
           }}
         >
           <Stack spacing={2.5}>
-            {/* Date */}
             <Controller
               name="documentDate"
               control={control}
@@ -486,7 +459,6 @@ export default function PurchaseDocumentCreate() {
               )}
             />
 
-            {/* Supplier */}
             <Controller
               name="supplier"
               control={control}
@@ -528,7 +500,6 @@ export default function PurchaseDocumentCreate() {
               )}
             />
 
-            {/* File Upload */}
             <Button
               component="label"
               color={file ? "success" : "primary"}
@@ -546,7 +517,6 @@ export default function PurchaseDocumentCreate() {
               />
             </Button>
 
-            {/* Rechnung-specific fields */}
             {isRechnung && (
               <>
                 <Controller
@@ -600,7 +570,6 @@ export default function PurchaseDocumentCreate() {
               </>
             )}
 
-            {/* Description */}
             <Controller
               name="description"
               control={control}
@@ -618,9 +587,9 @@ export default function PurchaseDocumentCreate() {
           </Stack>
         </Paper>
 
-        {/* -------------------- Articles Grid -------------------- */}
+        {/* Articles Grid */}
         <Box flex={1}>
-          {isLoadingArticles && (
+          {(isLoadingArticles && !initializedRef.current) && (
             <CircularProgress sx={{ display: "block", mx: "auto", my: 4 }} />
           )}
 
@@ -630,9 +599,21 @@ export default function PurchaseDocumentCreate() {
             </Alert>
           )}
 
-          <Grid container spacing={2} sx={{ m: 0, width: "100%", boxSizing: "border-box" }}>
+          <Grid
+            container
+            spacing={2}
+            sx={{ m: 0, width: "100%", boxSizing: "border-box" }}
+          >
             {fields.map((fieldItem, index) => (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={fieldItem.id} sx={{ display: "flex", minWidth: 0 }}>
+              <Grid
+                item
+                xs={12}
+                sm={6}
+                md={4}
+                lg={3}
+                key={fieldItem.id}
+                sx={{ display: "flex", minWidth: 0 }}
+              >
                 <ArtikelCard
                   control={control}
                   index={index}
@@ -646,7 +627,7 @@ export default function PurchaseDocumentCreate() {
         </Box>
       </Box>
 
-      {/* ========================== Floating Action Bar ========================= */}
+      {/* Floating Action Bar */}
       {showFloatingActions && (
         <Paper
           square
@@ -678,7 +659,7 @@ export default function PurchaseDocumentCreate() {
             startIcon={<SaveIcon />}
             color="primary"
             variant="contained"
-            disabled={mutation.isLoading || isLoadingArticles}
+            disabled={mutation.isLoading || isLoadingArticles || !initializedRef.current}
             fullWidth
           >
             {mutation.isLoading ? "Speichert..." : "Speichern"}

@@ -4,98 +4,94 @@ const articleService = require('./articleService');
 
 class TransactionService {
   // Erstelle neue Transaktion (Verkauf)
-  async createSale(data, userId) {
+async createSale(data, userId) {
     const { customerId, paymentMethod, items } = data;
-    
-    // Validiere Items
-    if (!items || items.length === 0) {
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
       throw new Error('Keine Artikel im Warenkorb');
     }
-    
-    // Starte Datenbank-Transaktion
+
+    // DB-Transaktion
     const result = await prisma.$transaction(async (tx) => {
       let totalAmount = 0;
       const processedItems = [];
-      
-      // Verarbeite jeden Artikel
+      const warnings = [];
+
       for (const item of items) {
-        // Hole Artikel
+        // Artikel laden
         const article = await tx.article.findUnique({
           where: { id: item.articleId }
         });
-        
+
         if (!article) {
           throw new Error(`Artikel nicht gefunden: ${item.articleId}`);
         }
-        
         if (!article.active) {
           throw new Error(`Artikel nicht verfügbar: ${article.name}`);
         }
-        
-        // Prüfe Bestand
-        if (article.stock < item.quantity) {
-          throw new Error(`Nicht genügend Bestand für ${article.name}. Verfügbar: ${article.stock}`);
+
+        const qty = Number(item.quantity || 0);
+        if (!(qty > 0)) {
+          throw new Error(`Ungültige Menge für ${article.name}`);
         }
-        
-        // Berechne Preis
-        const itemTotal = article.price * item.quantity;
+
+        // PREIS (als Number – pragmatisch, da Prisma Decimal in JS gut als Number nutzbar ist)
+        const price = Number(article.price || 0);
+        const itemTotal = price * qty;
         totalAmount += itemTotal;
-        
-        // Reduziere Bestand
+
+        // Vorhersage Lager nach Verkauf (nur für Warnung, nicht blockierend)
+        const currentStock = Number(article.stock || 0);
+        const projected = currentStock - qty;
+        if (projected < 0) {
+          warnings.push(`Artikel "${article.name}" fällt auf ${projected}`);
+        }
+
+        // Lager reduzieren (darf negativ werden)
         await tx.article.update({
           where: { id: article.id },
           data: {
-            stock: {
-              decrement: item.quantity
-            }
+            stock: { decrement: qty }
           }
         });
-        
-        // Erstelle Bestandsbewegung
+
+        // StockMovement (SALE; Menge negativ)
         await tx.stockMovement.create({
           data: {
             articleId: article.id,
             type: 'SALE',
-            quantity: -item.quantity,
+            quantity: -qty,
             reason: 'Verkauf'
           }
         });
-        
+
         processedItems.push({
           articleId: article.id,
-          quantity: item.quantity,
-          pricePerUnit: article.price,
+          quantity: qty,
+          pricePerUnit: price,
           totalPrice: itemTotal,
-          article // Für Response
+          article // für Response/Debug
         });
       }
-      
-      // Bei Kundenkonto-Zahlung: Prüfe und buche Guthaben ab
+
+      // Kundenkonto-Prüfung (hier NICHT negativ zulassen!)
       if (paymentMethod === 'ACCOUNT' && customerId) {
         const customer = await tx.customer.findUnique({
           where: { id: customerId }
         });
-        
-        if (!customer) {
-          throw new Error('Kunde nicht gefunden');
+        if (!customer) throw new Error('Kunde nicht gefunden');
+        const balance = Number(customer.balance || 0);
+        if (balance < totalAmount) {
+          throw new Error(`Nicht genügend Guthaben. Verfügbar: €${balance.toFixed(2)}, Benötigt: €${totalAmount.toFixed(2)}`);
         }
-        
-        if (customer.balance < totalAmount) {
-          throw new Error(`Nicht genügend Guthaben. Verfügbar: €${customer.balance}, Benötigt: €${totalAmount}`);
-        }
-        
-        // Buche Guthaben ab
+
         await tx.customer.update({
           where: { id: customerId },
-          data: {
-            balance: {
-              decrement: totalAmount
-            }
-          }
+          data: { balance: { decrement: totalAmount } }
         });
       }
-      
-      // Erstelle Transaktion
+
+      // Transaktion anlegen
       const transaction = await tx.transaction.create({
         data: {
           type: 'SALE',
@@ -104,47 +100,55 @@ class TransactionService {
           userId,
           customerId,
           items: {
-            create: processedItems.map(item => ({
-              articleId: item.articleId,
-              quantity: item.quantity,
-              pricePerUnit: item.pricePerUnit,
-              totalPrice: item.totalPrice
+            create: processedItems.map(it => ({
+              articleId: it.articleId,
+              quantity: it.quantity,
+              pricePerUnit: it.pricePerUnit,
+              totalPrice: it.totalPrice
             }))
           }
         },
         include: {
-          items: {
-            include: {
-              article: true
-            }
-          },
+          items: { include: { article: true } },
           customer: true,
-          user: {
-            select: {
-              id: true,
-              name: true
-            }
-          }
+          user: { select: { id: true, name: true } }
         }
       });
-      
-      return transaction;
-    });
-    
-        // In der createSale Methode, nach return result; hinzufügen:
-        const { emitNewSale } = require('../utils/websocket');
-        const highscoreService = require('./highscoreService');
 
-        // Am Ende der createSale Methode:
-        // Sende WebSocket Events
-        emitNewSale(result);
-
-        // Update Highscore asynchron
-        highscoreService.updateAfterSale(result.id).catch(err => {
-        console.error('Error updating highscore:', err);
+      // Optionale Audits für negative Bestände (best-effort, keine Blockade)
+      for (const note of warnings) {
+        await tx.auditLog.create({
+          data: {
+            userId,
+            action: 'NEGATIVE_STOCK_WARNING',
+            entityType: 'Transaction',
+            entityId: transaction.id,
+            changes: { message: note }
+          }
         });
+      }
+
+      // WARNUNGEN kompatibel zurückgeben:
+      // 1) als separates Array (für den neuen Controller),
+      // 2) UND an das Objekt gehängt (für alten Controller).
+      transaction._warnings = warnings;
+      return { transaction, warnings };
+    });
+
+    // WebSocket Events + Highscore wie gehabt
+    const { emitNewSale } = require('../utils/websocket');
+    const highscoreService = require('./highscoreService');
+
+    emitNewSale(result.transaction);
+    highscoreService.updateAfterSale(result.transaction.id).catch(err => {
+      console.error('Error updating highscore:', err);
+    });
+
+    // Falls dein Controller schon auf { transaction, warnings } angepasst ist:
     return result;
 
+    // Falls du lieber das alte Verhalten brauchst (nur transaction):
+    // return result.transaction;
   }
   
   // Storniere Transaktion

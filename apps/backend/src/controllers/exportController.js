@@ -231,6 +231,20 @@ class ExportController {
       res.status(500).json({ error: 'Fehler beim Abrufen der Export-Liste' });
     }
   }
+  async exportEUR(req, res) {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: 'startDate und endDate erforderlich' });
+    const result = await exportService.exportEURPDF(startDate, endDate);
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.send(result.data);
+  } catch (e) {
+    console.error('Export EUR error', e);
+    res.status(500).json({ error: 'Fehler beim EÜR-Export' });
+  }
+}
+
 }
 
 module.exports = new ExportController();
