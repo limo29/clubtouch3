@@ -34,6 +34,7 @@ app.use('/api/exports', exportRoutes);
 app.use('/api/invoices', invoiceRoutes); 
 app.use('/api/purchase-documents', purchaseDocumentRoutes)
 app.use('/api/accounting', accountingRoutes);
+app.use('/api/highscore', require('./routes/highscore'));
 
 
 // Basis-Route

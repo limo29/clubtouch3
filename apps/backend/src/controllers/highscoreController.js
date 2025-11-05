@@ -1,30 +1,20 @@
 const highscoreService = require('../services/highscoreService');
-const prisma = require('../utils/prisma');
 
 class HighscoreController {
-  // Hole aktuellen Highscore
   async getHighscore(req, res) {
     try {
       const { type = 'DAILY', mode = 'AMOUNT' } = req.query;
-      
-      if (!['DAILY', 'YEARLY'].includes(type)) {
-        return res.status(400).json({ error: 'Ungültiger Typ. Erlaubt: DAILY, YEARLY' });
-      }
-      
-      if (!['AMOUNT', 'COUNT'].includes(mode)) {
-        return res.status(400).json({ error: 'Ungültiger Modus. Erlaubt: AMOUNT, COUNT' });
-      }
-      
+      if (!['DAILY', 'YEARLY'].includes(type)) return res.status(400).json({ error: 'Ungültiger Typ' });
+      if (!['AMOUNT', 'COUNT'].includes(mode)) return res.status(400).json({ error: 'Ungültiger Modus' });
+
       const highscore = await highscoreService.calculateHighscore(type, mode);
-      
       res.json(highscore);
     } catch (error) {
       console.error('Get highscore error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen des Highscores' });
     }
   }
-  
-  // Hole alle Highscores auf einmal
+
   async getAllHighscores(req, res) {
     try {
       const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
@@ -33,86 +23,72 @@ class HighscoreController {
         highscoreService.calculateHighscore('YEARLY', 'AMOUNT'),
         highscoreService.calculateHighscore('YEARLY', 'COUNT')
       ]);
-      
-      res.json({
-        daily: {
-          amount: dailyAmount,
-          count: dailyCount
-        },
-        yearly: {
-          amount: yearlyAmount,
-          count: yearlyCount
-        }
-      });
+      res.json({ daily: { amount: dailyAmount, count: dailyCount }, yearly: { amount: yearlyAmount, count: yearlyCount } });
     } catch (error) {
       console.error('Get all highscores error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Highscores' });
     }
   }
-  
-  // Hole Position eines bestimmten Kunden
+
   async getCustomerPosition(req, res) {
     try {
       const { customerId } = req.params;
       const { type = 'DAILY', mode = 'AMOUNT' } = req.query;
-      
       const position = await highscoreService.getCustomerPosition(customerId, type, mode);
-      
-      if (!position) {
-        return res.status(404).json({ 
-          error: 'Kunde hat noch keine Punkte in diesem Zeitraum' 
-        });
-      }
-      
+      if (!position) return res.status(404).json({ error: 'Kunde hat noch keine Punkte' });
       res.json(position);
     } catch (error) {
       console.error('Get customer position error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Kundenposition' });
     }
   }
-  
-  // Hole Achievements eines Kunden
+
   async getCustomerAchievements(req, res) {
     try {
       const { customerId } = req.params;
-      
       const achievements = await highscoreService.getCustomerAchievements(customerId);
-      
-      res.json({
-        customerId,
-        achievements,
-        count: achievements.length
-      });
+      res.json({ customerId, achievements, count: achievements.length });
     } catch (error) {
       console.error('Get customer achievements error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Achievements' });
     }
   }
-  
-  // Reset Highscore (nur Admins)
+
   async resetHighscore(req, res) {
     try {
       const { type } = req.body;
-      
-      if (!['YEARLY'].includes(type)) {
-        return res.status(400).json({ 
-          error: 'Nur der Jahres-Highscore kann manuell zurückgesetzt werden' 
-        });
-      }
-      
+      if (type !== 'YEARLY') return res.status(400).json({ error: 'Nur YEARLY kann zurückgesetzt werden' });
       await highscoreService.resetHighscore(type, req.user.id);
-      
-      res.json({
-        message: 'Highscore erfolgreich zurückgesetzt',
-        type
-      });
+      res.json({ message: 'Highscore zurückgesetzt', type });
     } catch (error) {
       console.error('Reset highscore error:', error);
-      res.status(500).json({ error: error.message || 'Fehler beim Zurücksetzen des Highscores' });
+      res.status(500).json({ error: error.message || 'Fehler beim Zurücksetzen' });
     }
   }
-  
-  // Hole Highscore-Einstellungen
+
+  // Goals
+  async getGoalsProgress(req, res) {
+    try {
+      const progress = await highscoreService.getGoalsProgress();
+      res.json(progress);
+    } catch (error) {
+      console.error('Get goals progress error:', error);
+      res.status(500).json({ error: 'Fehler beim Abrufen der Ziele' });
+    }
+  }
+
+  async setGoals(req, res) {
+    try {
+      const { goals } = req.body;
+      const saved = await highscoreService.setGoals(goals || [], req.user?.id || 'system');
+      const progress = await highscoreService.getGoalsProgress();
+      res.json({ ...saved, progress });
+    } catch (error) {
+      console.error('Set goals error:', error);
+      res.status(500).json({ error: 'Fehler beim Speichern der Ziele' });
+    }
+  }
+
   async getSettings(req, res) {
     try {
       const settings = await highscoreService.getSettings();

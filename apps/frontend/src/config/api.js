@@ -27,6 +27,7 @@ export const API_ENDPOINTS = {
   // Highscore
   HIGHSCORE: '/highscore',
   HIGHSCORE_ALL: '/highscore/all',
+  HIGHSCORE_GOALS_PROGRESS:'/highscore/goals-progress',
   
   // Exports
   EXPORTS: '/exports'
