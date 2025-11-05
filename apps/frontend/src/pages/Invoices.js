@@ -54,7 +54,7 @@ export default function Invoices() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // Tabelle
+  // Tabelle / Filter
   const [filters, setFilters] = useState({ status: '', search: '', startDate: null, endDate: null });
   const { data: invoicesData, isLoading } = useQuery({
     queryKey: ['invoices', filters],
@@ -88,27 +88,35 @@ export default function Invoices() {
     mutationFn: async ({ id, payload }) => (await api.put(`/invoices/${id}`, payload)).data,
     onSuccess: () => { queryClient.invalidateQueries(['invoices']); setShowCreate(false); }
   });
+  // NEU: Status ändern
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }) => (await api.patch(`/invoices/${id}/status`, { status })).data,
+    onSuccess: () => queryClient.invalidateQueries(['invoices'])
+  });
+  const setStatus = (inv, status) => {
+    if (updateStatusMutation.isLoading) return;
+    updateStatusMutation.mutate({ id: inv.id, status });
+  };
 
   const invoices = invoicesData?.invoices || [];
   const customers = customersData?.customers || [];
   const articles = (articlesData?.articles || [])
-  .filter(a => a.active)
-  .map(a => ({
-    ...a,
-    price: num(a.price),
-    unitsPerPurchase: num(a.unitsPerPurchase),     // NEU
-    purchaseUnit: a.purchaseUnit || null,          // NEU
-  }));
-
+    .filter(a => a.active)
+    .map(a => ({
+      ...a,
+      price: num(a.price),
+      unitsPerPurchase: num(a.unitsPerPurchase),
+      purchaseUnit: a.purchaseUnit || null,
+    }));
 
   const getStatusColor = (s) => (s === 'PAID' ? 'success' : s === 'SENT' ? 'info' : s === 'CANCELLED' ? 'error' : 'default');
   const getStatusLabel = (s) => (s === 'PAID' ? 'Bezahlt' : s === 'SENT' ? 'Versendet' : s === 'CANCELLED' ? 'Storniert' : 'Entwurf');
 
-  // POS „Dialog“ (Desktop als Drawer)
+  // POS UI
   const [showCreate, setShowCreate] = useState(false);
-  const [editInvoice, setEditInvoice] = useState(null); // invoice oder null
+  const [editInvoice, setEditInvoice] = useState(null);
 
-  // Empfänger-Freitext – IMMER sichtbar & editierbar
+  // Empfänger-Freitext
   const [recipientName, setRecipientName] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
 
@@ -118,6 +126,11 @@ export default function Invoices() {
   const [cart, setCart] = useState([]); // {id,name,price,quantity,isFree}
   const [dueDate, setDueDate] = useState(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
   const [description, setDescription] = useState('');
+
+  // MOBILE: Bottom Sheet für Statuswechsel
+  const [statusSheet, setStatusSheet] = useState({ open: false, inv: null });
+  const openStatusSheet = (inv) => setStatusSheet({ open: true, inv });
+  const closeStatusSheet = () => setStatusSheet({ open: false, inv: null });
 
   const categories = useMemo(() => ['all', ...uniq(articles.map(a => a.category).filter(Boolean))], [articles]);
   const filteredCustomers = useMemo(() => {
@@ -129,18 +142,17 @@ export default function Invoices() {
   const filteredArticles = articles.filter(a => (selectedCategory === 'all' || a.category === selectedCategory) && a.name.toLowerCase().includes(articleSearch.toLowerCase()));
 
   const addToCart = (a) => {
-  const isCrate = a.__crate && a.unitsPerPurchase > 1;
-  const addQty = isCrate ? a.unitsPerPurchase : 1;
-
-  const exists = cart.find(i => i.id === a.id && !i.isFree);
-  if (exists) {
-    setCart(cart.map(i => i.id === a.id && !i.isFree
-      ? { ...i, quantity: num(i.quantity) + addQty }
-      : i));
-  } else {
-    setCart([...cart, { ...a, quantity: addQty }]);
-  }
-};
+    const isCrate = a.__crate && a.unitsPerPurchase > 1;
+    const addQty = isCrate ? a.unitsPerPurchase : 1;
+    const exists = cart.find(i => i.id === a.id && !i.isFree);
+    if (exists) {
+      setCart(cart.map(i => i.id === a.id && !i.isFree
+        ? { ...i, quantity: num(i.quantity) + addQty }
+        : i));
+    } else {
+      setCart([...cart, { ...a, quantity: addQty }]);
+    }
+  };
 
   const updateQty = (id, q) => {
     const val = Math.max(0, q);
@@ -217,9 +229,15 @@ export default function Invoices() {
     const a = document.createElement('a'); a.href = url; a.download = `Rechnung_${id}.pdf`; a.click(); window.URL.revokeObjectURL(url);
   };
 
-  /* ========= Tabelle (Liste) ========= */
+  /* ========= UI ========= */
   return (
-    <Box>
+    <Box
+      // Touch-Ziele & iOS-Input-Zoom
+      sx={{
+        '& button, & .MuiIconButton-root': { minHeight: 44, minWidth: 44 },
+        '& input': { fontSize: { xs: 16, sm: 14 } }
+      }}
+    >
       <Typography variant="h4" gutterBottom>Rechnungen</Typography>
 
       <Box component={Card} sx={{ p: 2, mb: 2 }}>
@@ -242,68 +260,142 @@ export default function Invoices() {
               <MenuItem value="CANCELLED">Storniert</MenuItem>
             </TextField>
           </Grid>
-          <Grid item xs={12} sm={6} md={2}><DatePicker label="Von" value={filters.startDate} onChange={(d) => setFilters({ ...filters, startDate: d })} slotProps={{ textField: { size: 'small', fullWidth: true } }} /></Grid>
-          <Grid item xs={12} sm={6} md={2}><DatePicker label="Bis" value={filters.endDate} onChange={(d) => setFilters({ ...filters, endDate: d })} slotProps={{ textField: { size: 'small', fullWidth: true } }} /></Grid>
-          <Grid item xs={12} sm={6} md={3}><Button variant="contained" startIcon={<Add />} onClick={openCreate}>Neue Rechnung</Button></Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <DatePicker
+              label="Von"
+              value={filters.startDate}
+              onChange={(d) => setFilters({ ...filters, startDate: d })}
+              slotProps={{ textField: { size: 'small', fullWidth: true } }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <DatePicker
+              label="Bis"
+              value={filters.endDate}
+              onChange={(d) => setFilters({ ...filters, endDate: d })}
+              slotProps={{ textField: { size: 'small', fullWidth: true } }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3} sx={{ display: { xs: 'none', sm: 'block' } }}>
+            <Button variant="contained" startIcon={<Add />} onClick={openCreate}>Neue Rechnung</Button>
+          </Grid>
         </Grid>
       </Box>
 
-      <Card>
-        <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
-          <Box component="thead" sx={{ bgcolor: 'action.hover' }}>
-            <Box component="tr">
-              <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Rechnungsnr.</Box>
-              <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Datum</Box>
-              <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Kunde</Box>
-              <Box component="th" sx={{ p: 1.5, textAlign: 'right' }}>Betrag</Box>
-              <Box component="th" sx={{ p: 1.5 }}>Status</Box>
-              <Box component="th" sx={{ p: 1.5 }}>Fällig</Box>
-              <Box component="th" sx={{ p: 1.5, textAlign: 'right' }}>Aktionen</Box>
+      {/* Desktop: Tabelle | Mobile: Karten */}
+      {!isMobile ? (
+        <Card>
+          <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
+            <Box component="thead" sx={{ bgcolor: 'action.hover', position: 'sticky', top: 0, zIndex: 1 }}>
+              <Box component="tr">
+                <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Rechnungsnr.</Box>
+                <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Datum</Box>
+                <Box component="th" sx={{ p: 1.5, textAlign: 'left' }}>Kunde</Box>
+                <Box component="th" sx={{ p: 1.5, textAlign: 'right' }}>Betrag</Box>
+                <Box component="th" sx={{ p: 1.5 }}>Status</Box>
+                <Box component="th" sx={{ p: 1.5 }}>Fällig</Box>
+                <Box component="th" sx={{ p: 1.5, textAlign: 'right', position: 'sticky', right: 0, bgcolor: 'background.paper' }}>Aktionen</Box>
+              </Box>
+            </Box>
+            <Box component="tbody">
+              {isLoading && (<Box component="tr"><Box component="td" colSpan={7} sx={{ p: 2 }}>Lade…</Box></Box>)}
+              {!isLoading && invoices.map(inv => (
+                <Box component="tr" key={inv.id} sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Box component="td" sx={{ p: 1.5, fontWeight: 700 }}>{inv.invoiceNumber}</Box>
+                  <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })}</Box>
+                  <Box component="td" sx={{ p: 1.5 }}>{inv.customerName}</Box>
+                  <Box component="td" sx={{ p: 1.5, textAlign: 'right' }}>{money(inv.totalAmount)}</Box>
+                  <Box component="td" sx={{ p: 1.5 }}><Chip size="small" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} /></Box>
+                  <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.dueDate), 'dd.MM.yyyy', { locale: de })}</Box>
+                  <Box component="td" sx={{ p: 1.5, textAlign: 'right', position: 'sticky', right: 0, bgcolor: 'background.paper' }}>
+                    <IconButton size="small" onClick={() => handleDownloadPDF(inv.id)} title="PDF" aria-label="PDF herunterladen"><Download /></IconButton>
+                    {inv.status === 'DRAFT' && (
+                      <IconButton size="small" color="primary" title="Bearbeiten" aria-label="Bearbeiten" onClick={() => openEdit(inv)}>
+                        <Edit />
+                      </IconButton>
+                    )}
+                    {/* Status-Aktionen (kompakt) */}
+                    <Stack direction="row" spacing={0.5} sx={{ display: 'inline-flex', ml: 1 }}>
+                      {inv.status === 'DRAFT' && (
+                        <Button size="small" variant="outlined" onClick={() => setStatus(inv, 'SENT')}>
+                          Versenden
+                        </Button>
+                      )}
+                      {!['PAID', 'CANCELLED'].includes(inv.status) && (
+                        <Button size="small" variant="outlined" color="success" onClick={() => setStatus(inv, 'PAID')}>
+                          Bezahlt
+                        </Button>
+                      )}
+                      {inv.status !== 'CANCELLED' && (
+                        <Button size="small" variant="outlined" color="error" onClick={() => setStatus(inv, 'CANCELLED')}>
+                          Stornieren
+                        </Button>
+                      )}
+                    </Stack>
+                    {updateStatusMutation.isLoading && (
+                      <Typography role="status" aria-live="polite" variant="caption" sx={{ ml: 1 }} color="text.secondary">
+                        Status wird aktualisiert…
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              ))}
             </Box>
           </Box>
-          <Box component="tbody">
-            {isLoading && (<Box component="tr"><Box component="td" colSpan={7} sx={{ p: 2 }}>Lade…</Box></Box>)}
-            {!isLoading && invoices.map(inv => (
-              <Box component="tr" key={inv.id} sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
-                <Box component="td" sx={{ p: 1.5, fontWeight: 700 }}>{inv.invoiceNumber}</Box>
-                <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })}</Box>
-                <Box component="td" sx={{ p: 1.5 }}>{inv.customerName}</Box>
-                <Box component="td" sx={{ p: 1.5, textAlign: 'right' }}>{money(inv.totalAmount)}</Box>
-                <Box component="td" sx={{ p: 1.5 }}><Chip size="small" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} /></Box>
-                <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.dueDate), 'dd.MM.yyyy', { locale: de })}</Box>
-                <Box component="td" sx={{ p: 1.5, textAlign: 'right' }}>
-                  <IconButton size="small" onClick={() => handleDownloadPDF(inv.id)} title="PDF" aria-label="PDF herunterladen"><Download /></IconButton>
-                  {inv.status === 'DRAFT' &&
-                    <IconButton size="small" color="primary" title="Bearbeiten" aria-label="Bearbeiten" onClick={() => openEdit(inv)}><Edit /></IconButton>}
-                </Box>
-              </Box>
-            ))}
+        </Card>
+      ) : (
+        <Stack spacing={1.25} sx={{ pb: 8 }}>
+          {isLoading && <Card sx={{ p: 2 }}>Lade…</Card>}
+          {!isLoading && invoices.map(inv => (
+            <Card key={inv.id}>
+              <CardContent sx={{ pb: 1.5 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography fontWeight={700}>{inv.invoiceNumber}</Typography>
+                  <Chip size="small" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} />
+                </Stack>
+                <Typography variant="body2" color="text.secondary">
+                  {format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })} • {inv.customerName}
+                </Typography>
+                <Typography variant="h6" sx={{ mt: .5, fontWeight: 800, textAlign: 'right' }}>
+                  {money(inv.totalAmount)}
+                </Typography>
+              </CardContent>
+              <Stack direction="row" spacing={1} sx={{ px: 2, pb: 1.5, flexWrap: 'wrap' }}>
+                <Button size="small" variant="outlined" onClick={() => handleDownloadPDF(inv.id)} startIcon={<Download />}>PDF</Button>
+                {inv.status === 'DRAFT' && (
+                  <Button size="small" variant="outlined" onClick={() => openEdit(inv)} startIcon={<Edit />}>Bearbeiten</Button>
+                )}
+                <Button size="small" variant="contained" onClick={() => openStatusSheet(inv)}>
+                  Status
+                </Button>
+              </Stack>
+            </Card>
+          ))}
+          {/* FAB für „Neu“ */}
+          <Box sx={{ position: 'fixed', right: 16, bottom: 16, zIndex: 10 }}>
+            <Button variant="contained" onClick={openCreate} startIcon={<Add />} sx={{ borderRadius: 999 }}>
+              Neu
+            </Button>
           </Box>
-        </Box>
-      </Card>
+        </Stack>
+      )}
 
       {/* ================== Erstellen/Bearbeiten: Drawer (Desktop) / Dialog (Mobile) ================== */}
 
-      {/* DESKTOP: rechte Seitenscheibe – Navigation links bleibt bestehen */}
+      {/* DESKTOP: rechte Seitenscheibe */}
       {!isMobile && (
         <Drawer
           anchor="right"
           open={showCreate}
           onClose={() => setShowCreate(false)}
           ModalProps={{ keepMounted: true }}
-          PaperProps={{ sx: { width: 2100, maxWidth: '100vw', overflow: 'hidden' } }}
+          PaperProps={{ sx: { width: { xs: '100vw', md: '980px', lg: '1200px' }, maxWidth: '100vw', overflow: 'hidden' } }}
         >
           <Box sx={{ height: '100%', display: 'grid', gridTemplateRows: 'auto 1fr' }}>
             <DialogTitle sx={{ position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
                 <span>{editInvoice ? `Rechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Rechnung'}</span>
-                <Button
-                  color="error"
-                  startIcon={<CloseIcon />}
-                  onClick={() => setShowCreate(false)}
-                >
-                  Abbrechen
-                </Button>
+                <Button color="error" startIcon={<CloseIcon />} onClick={() => setShowCreate(false)}>Abbrechen</Button>
               </Box>
             </DialogTitle>
             <DialogContent sx={{ p: 2 }}>
@@ -350,19 +442,13 @@ export default function Invoices() {
         </Drawer>
       )}
 
-      {/* MOBILE: Fullscreen-Dialog (Sektionen untereinander) */}
+      {/* MOBILE: Fullscreen-Dialog */}
       {isMobile && (
         <Dialog open={showCreate} onClose={() => setShowCreate(false)} fullScreen>
           <DialogTitle sx={{ position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
               <span>{editInvoice ? `Rechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Rechnung'}</span>
-              <Button
-                color="error"
-                startIcon={<CloseIcon />}
-                onClick={() => setShowCreate(false)}
-              >
-                Abbrechen
-              </Button>
+              <Button color="error" startIcon={<CloseIcon />} onClick={() => setShowCreate(false)}>Abbrechen</Button>
             </Box>
           </DialogTitle>
           <DialogContent sx={{ p: 0 }}>
@@ -407,6 +493,41 @@ export default function Invoices() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Mobile Bottom-Sheet: Status ändern */}
+      <Dialog
+        open={statusSheet.open}
+        onClose={closeStatusSheet}
+        fullWidth
+        PaperProps={{ sx: { alignSelf: 'flex-end', m: 0 } }}
+      >
+        <DialogTitle>Rechnungsstatus ändern</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1}>
+            {statusSheet.inv && statusSheet.inv.status === 'DRAFT' && (
+              <Button fullWidth variant="outlined" onClick={() => { setStatus(statusSheet.inv, 'SENT'); closeStatusSheet(); }}>
+                Auf „Versendet“ setzen
+              </Button>
+            )}
+            {statusSheet.inv && !['PAID', 'CANCELLED'].includes(statusSheet.inv.status) && (
+              <Button fullWidth variant="outlined" color="success" onClick={() => { setStatus(statusSheet.inv, 'PAID'); closeStatusSheet(); }}>
+                Als „Bezahlt“ markieren
+              </Button>
+            )}
+            {statusSheet.inv && statusSheet.inv.status !== 'CANCELLED' && (
+              <Button fullWidth variant="outlined" color="error" onClick={() => { setStatus(statusSheet.inv, 'CANCELLED'); closeStatusSheet(); }}>
+                Stornieren
+              </Button>
+            )}
+            <Button fullWidth onClick={closeStatusSheet}>Abbrechen</Button>
+          </Stack>
+          {updateStatusMutation.isLoading && (
+            <Typography role="status" aria-live="polite" variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
+              Status wird aktualisiert…
+            </Typography>
+          )}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }
@@ -518,14 +639,14 @@ function ThreeColumnPOS(props) {
                       <Typography fontWeight={800} color="primary" fontSize={16}>{money(a.price)}</Typography>
                       {a.purchaseUnit && a.unitsPerPurchase > 1 && (
                         <Button
-                         size="small"
+                          size="small"
                           variant="outlined"
                           sx={{ mt: 0.5 }}
-                         onClick={(e)=>{ e.stopPropagation(); addToCart({ ...a, __crate: true }); }}
-                         >
-                        +1 {a.purchaseUnit} (×{a.unitsPerPurchase})
-                         </Button>
-                         )}
+                          onClick={(e) => { e.stopPropagation(); addToCart({ ...a, __crate: true }); }}
+                        >
+                          +1 {a.purchaseUnit} (×{a.unitsPerPurchase})
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 </Grid>
@@ -590,27 +711,26 @@ function ThreeColumnPOS(props) {
                   </Grid>
 
                   {!i.isFree && (
-  <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
-    <Button
-      size="small"
-      variant="outlined"
-      onClick={() => updateQty(i.id, num(i.quantity) + 1)}
-    >
-      +1 {i.unit || 'Stück'}
-    </Button>
+                    <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => updateQty(i.id, num(i.quantity) + 1)}
+                      >
+                        +1 {i.unit || 'Stück'}
+                      </Button>
 
-    {i.purchaseUnit && i.unitsPerPurchase > 1 && (
-      <Button
-        size="small"
-        variant="outlined"
-        onClick={() => updateQty(i.id, num(i.quantity) + num(i.unitsPerPurchase))}
-      >
-        +1 {i.purchaseUnit} (×{i.unitsPerPurchase})
-      </Button>
-    )}
-  </Stack>
-)}
-
+                      {i.purchaseUnit && i.unitsPerPurchase > 1 && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => updateQty(i.id, num(i.quantity) + num(i.unitsPerPurchase))}
+                        >
+                          +1 {i.purchaseUnit} (×{i.unitsPerPurchase})
+                        </Button>
+                      )}
+                    </Stack>
+                  )}
 
                   {/* Löschen */}
                   <Grid item xs={12} sm={2} md={2} sx={{ textAlign: { xs: 'left', sm: 'right' } }}>

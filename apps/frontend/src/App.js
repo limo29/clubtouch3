@@ -1,13 +1,10 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { de } from 'date-fns/locale';
 
-import theme from './theme';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import Layout from './components/layout/Layout';
@@ -28,16 +25,13 @@ import ProfitLoss from './pages/ProfitLoss';
 import Invoices from './pages/Invoices';
 import PurchaseDocumentEdit from './pages/PurchaseDocumentEdit';
 
-
-
-
-// Create a client
+// React Query Client
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: 5 * 60 * 1000,
     },
   },
 });
@@ -45,39 +39,47 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={theme}>
-        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={de}>
-          <CssBaseline />
-          <AuthProvider>
-            <Router>
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                
-                <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-                  <Route index element={<Navigate to="/dashboard" replace />} />
-                  <Route path="dashboard" element={<Dashboard />} />
-                  <Route path="sales" element={<Sales />} />
-                  <Route path="articles" element={<Articles />} />
-                  <Route path="customers" element={<Customers />} />
-                  <Route path="transactions" element={<Transactions />} />
-                  <Route path="highscore" element={<Highscore />} />
-                  <Route path="users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
-                  <Route path="reports" element={<Reports />} />
-                  <Route path="PurchaseDocuments" element={<PurchaseDocuments />} />
-                  <Route path="PurchaseDocumentsCreate" element={<PurchaseDocumentsCreate />} />
-                  <Route path="profit-loss" element={<ProfitLoss />} />
-                  <Route path="invoices" element={<Invoices />} />
-                  <Route path="/PurchaseDocuments/edit/:id" element={<PurchaseDocumentEdit />} />
+      <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={de}>
+        <AuthProvider>
+          {/* KEIN <Router> HIER! Router ist bereits in index.js */}
+          <Routes>
+            <Route path="/login" element={<Login />} />
 
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="sales" element={<Sales />} />
+              <Route path="articles" element={<Articles />} />
+              <Route path="customers" element={<Customers />} />
+              <Route path="transactions" element={<Transactions />} />
+              <Route path="highscore" element={<Highscore />} />
+              <Route
+                path="users"
+                element={
+                  <ProtectedRoute roles={['ADMIN']}>
+                    <Users />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="reports" element={<Reports />} />
+              <Route path="PurchaseDocuments" element={<PurchaseDocuments />} />
+              <Route path="PurchaseDocumentsCreate" element={<PurchaseDocumentsCreate />} />
+              <Route path="profit-loss" element={<ProfitLoss />} />
+              <Route path="invoices" element={<Invoices />} />
+              <Route path="/PurchaseDocuments/edit/:id" element={<PurchaseDocumentEdit />} />
+            </Route>
 
-                </Route>
-                
-                <Route path="*" element={<Navigate to="/dashboard" replace />} />
-              </Routes>
-            </Router>
-          </AuthProvider>
-        </LocalizationProvider>
-      </ThemeProvider>
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </AuthProvider>
+      </LocalizationProvider>
     </QueryClientProvider>
   );
 }

@@ -20,6 +20,7 @@ import {
   CircularProgress,
   Alert,
   Tooltip,
+  Divider,
 } from "@mui/material";
 import {
   CheckCircle as CheckIcon,
@@ -27,277 +28,321 @@ import {
   Delete as DeleteIcon,
   Add as AddIcon,
   FileUpload as UploadIcon,
+  ExpandMore,
+  ExpandLess,
 } from "@mui/icons-material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
+import { useTheme, alpha } from "@mui/material/styles";
 
-// --- Helper: Format Currency ---
-const formatCurrency = (amount) => {
-  const num = parseFloat(amount);
-  if (isNaN(num) || num === 0) return "–";
-  return new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  }).format(num);
+/* ---------------- helpers ---------------- */
+const num = (v) => {
+  const n = typeof v === "number" ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
 };
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(
+    num(amount)
+  );
 
-// --- StatCard ---
-function StatCard({ title, value, ...props }) {
+function themeTint(theme, color, fallback) {
+  // dezente Kartenhintergründe je nach Theme
+  const map = {
+    success: theme.palette.success.main,
+    warning: theme.palette.warning.main,
+    info: theme.palette.info.main,
+    error: theme.palette.error.main,
+    primary: theme.palette.primary.main,
+  };
+  const base = map[color] || fallback || theme.palette.primary.main;
+  return theme.palette.mode === "dark"
+    ? alpha(base, 0.12)
+    : alpha(base, 0.08);
+}
+
+/* ---------------- StatCard ---------------- */
+function StatCard({ title, value, color = "primary" }) {
+  const theme = useTheme();
   return (
     <Paper
-      elevation={1}
+      elevation={0}
       sx={{
         p: 3,
         textAlign: "center",
         borderRadius: 2,
-        border: "1px solid #f0f0f0",
-        minHeight: 120,
+        border: `1px solid ${alpha(theme.palette.divider, 0.8)}`,
+        bgcolor: themeTint(theme, color),
+        height: "100%",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
-        bgcolor: props.bgColor || "background.paper",
       }}
     >
       <Typography
         variant="h2"
-        sx={{
-          fontSize: { xs: "2.5rem", sm: "3rem" },
-          fontWeight: 700,
-          color:
-            props.color === "success"
-              ? "success.main"
-              : props.color === "error"
-              ? "error.main"
-              : "text.primary",
-          mb: 0.5,
-        }}
+        sx={{ fontSize: { xs: "2.4rem", sm: "3rem" }, fontWeight: 800, mb: 0.5 }}
       >
         {value}
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
         {title}
       </Typography>
     </Paper>
   );
 }
 
-// --- StatusChip (toggle paid/unpaid) ---
+/* ---------------- StatusChip ---------------- */
 function StatusChip({ document, onToggle, disabled }) {
-  if (document.type === "LIEFERSCHEIN") {
-    return <Typography variant="body2" color="text.secondary">–</Typography>;
-  }
-
-  const isPaid = document.paid;
-  const props = isPaid
-    ? { label: "bezahlt", color: "success", title: "Klicken, um als 'nicht bezahlt' zu markieren" }
-    : { label: "nicht bezahlt", color: "error", title: "Klicken, um als 'bezahlt' zu markieren" };
-
+  if (document.type === "LIEFERSCHEIN") return <span>–</span>;
+  const isPaid = !!document.paid;
   return (
-    <Tooltip title={props.title}>
-      <Chip
-        size="small"
-        label={props.label}
-        color={props.color}
-        onClick={onToggle}
-        disabled={disabled}
-        sx={{ cursor: disabled ? "default" : "pointer", "&:hover": { opacity: disabled ? 1 : 0.8 } }}
-      />
+    <Tooltip
+      title={
+        disabled
+          ? ""
+          : isPaid
+          ? "Klicken, um als »nicht bezahlt« zu markieren"
+          : "Klicken, um als »bezahlt« zu markieren"
+      }
+    >
+      <span>
+        <Chip
+          size="small"
+          clickable
+          onClick={disabled ? undefined : onToggle}
+          color={isPaid ? "success" : "error"}
+          label={isPaid ? "bezahlt" : "nicht bezahlt"}
+          sx={{ cursor: disabled ? "default" : "pointer" }}
+        />
+      </span>
     </Tooltip>
   );
 }
 
-// --- NachweisIcon (view/upload proof) ---
+/* ---------------- NachweisIcon ---------------- */
 function NachweisIcon({ nachweisUrl, onClickUpload }) {
   return nachweisUrl ? (
     <Tooltip title="Nachweis ansehen">
-      <IconButton href={nachweisUrl} target="_blank" size="small" color="success">
-        <CheckIcon />
+      <IconButton
+        href={nachweisUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        size="small"
+        color="success"
+        aria-label="Nachweis ansehen"
+      >
+        <CheckIcon fontSize="small" />
       </IconButton>
     </Tooltip>
   ) : (
     <Tooltip title="Nachweis hochladen/bearbeiten">
-      <IconButton size="small" color="default" onClick={onClickUpload}>
+      <IconButton
+        size="small"
+        color="default"
+        onClick={onClickUpload}
+        aria-label="Nachweis hochladen"
+      >
         <UploadIcon fontSize="small" />
       </IconButton>
     </Tooltip>
   );
 }
 
+/* ================== Page ================== */
 export default function PurchaseDocuments() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const theme = useTheme();
 
   const [filters, setFilters] = useState({ startDate: null, endDate: null });
   const [expandedRows, setExpandedRows] = useState(new Set());
-  const [deletingId, setDeletingId] = useState(null); // track which row is deleting
+  const [deletingId, setDeletingId] = useState(null);
 
-  const { data: documentsData, isLoading, isError, error } = useQuery({
-    queryKey: ["purchaseDocuments", filters],
+  /* -------- Query -------- */
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["purchase-documents", filters],
     queryFn: async () => {
       const params = {};
       if (filters.startDate) params.startDate = format(filters.startDate, "yyyy-MM-dd");
       if (filters.endDate) params.endDate = format(filters.endDate, "yyyy-MM-dd");
-      const response = await api.get("/purchase-documents", { params });
-      return response.data;
+      const res = await api.get("/purchase-documents", { params });
+      const docs = Array.isArray(res.data?.documents) ? res.data.documents : [];
+      // Sort: newest first
+      docs.sort(
+        (a, b) =>
+          new Date(b.documentDate || b.createdAt || 0) -
+          new Date(a.documentDate || a.createdAt || 0)
+      );
+      return { documents: docs };
     },
+    keepPreviousData: true,
   });
 
-  const documents = documentsData?.documents || [];
+  const documents = data?.documents || [];
 
-  // --- Mutations ---
-  const markAsPaidMutation = useMutation({
-    mutationFn: ({ id, paymentMethod }) => api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod }),
-    onSuccess: () => queryClient.invalidateQueries(["purchaseDocuments"]),
-    onError: (err) => alert("Fehler: " + (err.response?.data?.error || err.message)),
+  /* -------- Mutations -------- */
+  const markPaid = useMutation({
+    mutationFn: ({ id, paymentMethod }) =>
+      api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod }),
+    onSuccess: () => queryClient.invalidateQueries(["purchase-documents"]),
   });
 
-  const markAsUnpaidMutation = useMutation({
+  const markUnpaid = useMutation({
     mutationFn: (id) => api.post(`/purchase-documents/${id}/mark-unpaid`),
-    onSuccess: () => queryClient.invalidateQueries(["purchaseDocuments"]),
-    onError: (err) => alert("Fehler: " + (err.response?.data?.error || err.message)),
+    onSuccess: () => queryClient.invalidateQueries(["purchase-documents"]),
   });
 
-  const deleteMutation = useMutation({
+  const del = useMutation({
     mutationFn: (id) => api.delete(`/purchase-documents/${id}`),
     onSuccess: () => {
       setDeletingId(null);
-      queryClient.invalidateQueries(["purchaseDocuments"]);
+      queryClient.invalidateQueries(["purchase-documents"]);
     },
-    onError: (err) => {
-      setDeletingId(null);
-      alert("Fehler: " + (err.response?.data?.error || err.message));
-    },
+    onError: () => setDeletingId(null),
   });
 
-  // --- Toggle Paid/Unpaid ---
-  const handleTogglePaidStatus = (document) => {
-    if (document.type !== "RECHNUNG") return;
-    if (deletingId) return; // do not toggle while deleting any row
+  const isAnyMutating = markPaid.isLoading || markUnpaid.isLoading || del.isLoading;
 
-    if (document.paid) {
-      if (window.confirm("Soll dieser Beleg wirklich als 'nicht bezahlt' markiert werden?")) {
-        markAsUnpaidMutation.mutate(document.id);
-      }
+  /* -------- Handlers -------- */
+  const togglePaidStatus = (doc) => {
+    if (doc.type !== "RECHNUNG" || isAnyMutating || deletingId) return;
+    if (doc.paid) {
+      if (window.confirm("Als »nicht bezahlt« markieren?")) markUnpaid.mutate(doc.id);
     } else {
-      markAsPaidMutation.mutate({ id: document.id, paymentMethod: "TRANSFER" });
+      // Standard: Überweisung – passe an, wenn Barzahlung möglich sein soll
+      markPaid.mutate({ id: doc.id, paymentMethod: "TRANSFER" });
     }
   };
 
-  // --- Edit / Upload ---
-  const handleEdit = (documentId) => {
-    if (deletingId) return;
-    navigate(`/PurchaseDocuments/edit/${documentId}`);
+  const edit = (id) => {
+    if (!isAnyMutating && !deletingId) navigate(`/PurchaseDocuments/edit/${id}`);
   };
 
-  // --- Delete with smart warning ---
-  const handleDelete = (document) => {
-    if (deletingId) return;
-
-    const hasItems = (document?._count?.items || 0) > 0 || document.type === "LIEFERSCHEIN";
-    const linkedCount = document?.lieferscheine?.length || 0;
-
-    let warning = `Soll der Beleg "${document.documentNumber}" wirklich endgültig gelöscht werden?\n\n`;
-    if (linkedCount > 0) {
-      warning += `Es sind ${linkedCount} Lieferscheine verknüpft. Die Verknüpfungen werden aufgehoben.\n`;
-    }
-    if (hasItems) {
-      warning += `\nACHTUNG: Alle zugehörigen Wareneingänge werden aus dem Lagerbestand storniert!`;
-    }
-
-    if (window.confirm(warning)) {
-      setDeletingId(document.id);
-      deleteMutation.mutate(document.id);
+  const removeDoc = (doc) => {
+    if (isAnyMutating || deletingId) return;
+    const linkedLs = doc?.lieferscheine?.length || 0;
+    const hasStock = (doc?._count?.items || 0) > 0 || doc.type === "LIEFERSCHEIN";
+    let text = `Beleg „${doc.documentNumber}“ wirklich endgültig löschen?\n\n`;
+    if (linkedLs > 0) text += `Es sind ${linkedLs} Lieferscheine verknüpft (Verknüpfungen werden aufgehoben).\n`;
+    if (hasStock) text += `ACHTUNG: Zugehörige Wareneingänge werden aus dem Lagerbestand storniert!\n`;
+    if (window.confirm(text)) {
+      setDeletingId(doc.id);
+      del.mutate(doc.id);
     }
   };
 
-  // --- Statistics ---
-  const statistics = useMemo(() => {
-    if (!documents) return { offeneRechnungen: 0, ohneNachweis: 0, lieferscheineOhneRechnung: 0 };
+  const toggleRow = (id) => {
+    const s = new Set(expandedRows);
+    s.has(id) ? s.delete(id) : s.add(id);
+    setExpandedRows(s);
+  };
 
-    const rechnungen = documents.filter((d) => d.type === "RECHNUNG");
-    const offeneRechnungen = rechnungen.filter((r) => !r.paid).length;
+  const handleFilterChange = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
+  const resetFilters = () => {
+    setFilters({ startDate: null, endDate: null });
+    queryClient.invalidateQueries(["purchase-documents"]);
+  };
+
+  const fmtDate = (d) => {
+    try {
+      return format(new Date(d), "dd.MM.yyyy", { locale: de });
+    } catch {
+      return "—";
+    }
+  };
+
+  /* -------- Stats -------- */
+  const stats = useMemo(() => {
+    const re = documents.filter((d) => d.type === "RECHNUNG");
+    const offeneRechnungen = re.filter((r) => !r.paid).length;
     const ohneNachweis = documents.filter((d) => !d.nachweisUrl).length;
-    const lieferscheineOhneRechnung = documents.filter((d) => d.type === "LIEFERSCHEIN").length;
-
+    // „nicht zugeordnet“ = Lieferscheine ohne verknüpfte Rechnung
+    const lieferscheineOhneRechnung = documents
+      .filter((d) => d.type === "LIEFERSCHEIN" && !d.invoiceId)
+      .length;
     return { offeneRechnungen, ohneNachweis, lieferscheineOhneRechnung };
   }, [documents]);
 
-  // --- Helpers ---
-  const toggleRow = (id) => {
-    const newExpanded = new Set(expandedRows);
-    newExpanded.has(id) ? newExpanded.delete(id) : newExpanded.add(id);
-    setExpandedRows(newExpanded);
-  };
-
-  const handleFilterChange = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
-  const resetFilters = () => setFilters({ startDate: null, endDate: null });
-
-  const formatDocumentDate = (dateString) => {
-    try {
-      return format(new Date(dateString), "dd.MM.yyyy", { locale: de });
-    } catch {
-      return "Ungültiges Datum";
-    }
-  };
-
-  const isAnyMutationLoading =
-    markAsPaidMutation.isLoading || markAsUnpaidMutation.isLoading || deleteMutation.isLoading;
-
+  /* -------- Render -------- */
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1400, mx: "auto" }}>
       {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" fontWeight={700} gutterBottom>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" fontWeight={800} gutterBottom>
           Einkäufe & Lieferscheine
         </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Übersicht über alle Rechnungen und zugehörige Lieferscheine
+        <Typography variant="body2" color="text.secondary">
+          Übersicht über alle Einkäufe und zugehörige Lieferscheine
         </Typography>
       </Box>
 
       {/* Stats */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard title="offene Rechnungen" value={isLoading ? "..." : statistics.offeneRechnungen} color="error" bgColor="#fef2f2" />
+          <StatCard title="Unbezahlt" value={isLoading ? "…" : stats.offeneRechnungen} color="error" />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard title="ohne Nachweis" value={isLoading ? "..." : statistics.ohneNachweis} color="warning" bgColor="#fffbeb" />
+          <StatCard title="ohne Nachweis" value={isLoading ? "…" : stats.ohneNachweis} color="warning" />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard title="Lieferscheine nicht zugeordnet" value={isLoading ? "..." : statistics.lieferscheineOhneRechnung} color="info" bgColor="#eff6ff" />
+          <StatCard
+            title="Lieferscheine nicht zugeordnet"
+            value={isLoading ? "…" : stats.lieferscheineOhneRechnung}
+            color="info"
+          />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, height: "100%", justifyContent: "center" }}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              height: "100%",
+              borderRadius: 2,
+              border: `1px solid ${alpha(theme.palette.divider, 0.8)}`,
+              display: "grid",
+              gap: 1,
+              alignContent: "center",
+            }}
+          >
             <Button
-              variant="outlined"
+              variant="contained"
               color="success"
               startIcon={<AddIcon />}
               fullWidth
-              sx={{ py: 1.5 }}
               onClick={() => navigate("/PurchaseDocumentsCreate", { state: { type: "RECHNUNG" } })}
             >
-              neue Rechnung
+              neuer Einkauf
             </Button>
             <Button
               variant="outlined"
-              color="primary"
               startIcon={<AddIcon />}
               fullWidth
-              sx={{ py: 1.5 }}
               onClick={() => navigate("/PurchaseDocumentsCreate", { state: { type: "LIEFERSCHEIN" } })}
             >
               neuer Lieferschein
             </Button>
-          </Box>
+          </Paper>
         </Grid>
       </Grid>
 
       {/* Filter */}
-      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2, border: `1px solid ${alpha(theme.palette.divider, 0.8)}` }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ xs: "stretch", sm: "center" }}>
-          <DatePicker label="Von" value={filters.startDate} onChange={(d) => handleFilterChange("startDate", d)} slotProps={{ textField: { size: "small" } }} sx={{ minWidth: 150 }} />
-          <DatePicker label="Bis" value={filters.endDate} onChange={(d) => handleFilterChange("endDate", d)} slotProps={{ textField: { size: "small" } }} sx={{ minWidth: 150 }} />
+          <DatePicker
+            label="Von"
+            value={filters.startDate}
+            onChange={(d) => handleFilterChange("startDate", d)}
+            slotProps={{ textField: { size: "small" } }}
+            sx={{ minWidth: 160 }}
+          />
+          <DatePicker
+            label="Bis"
+            value={filters.endDate}
+            onChange={(d) => handleFilterChange("endDate", d)}
+            slotProps={{ textField: { size: "small" } }}
+            sx={{ minWidth: 160 }}
+          />
           <Button variant="outlined" onClick={resetFilters}>
             Filter zurücksetzen
           </Button>
@@ -305,78 +350,106 @@ export default function PurchaseDocuments() {
       </Paper>
 
       {isLoading && <CircularProgress sx={{ display: "block", mx: "auto", my: 4 }} />}
-      {isError && <Alert severity="error">Fehler beim Laden der Belege: {error.response?.data?.error || error.message}</Alert>}
+      {isError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Fehler beim Laden der Belege: {error?.response?.data?.error || error?.message}
+        </Alert>
+      )}
 
       {/* Table */}
-      <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, overflowX: "auto" }}>
-        <Table sx={{ minWidth: 800 }}>
+      <TableContainer
+        component={Paper}
+        elevation={0}
+        sx={{
+          borderRadius: 2,
+          border: `1px solid ${alpha(theme.palette.divider, 0.8)}`,
+          overflowX: "auto",
+        }}
+      >
+        <Table stickyHeader sx={{ minWidth: 860 }}>
           <TableHead>
-            <TableRow sx={{ bgcolor: "grey.50" }}>
-              <TableCell sx={{ fontWeight: 600, width: "20%" }}>Belegnummer</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: "20%" }}>Lieferant</TableCell>
-              <TableCell sx={{ fontWeight: 600, textAlign: "center", width: "10%" }}>Nachweis</TableCell>
-              <TableCell sx={{ fontWeight: 600, textAlign: "right", width: "15%" }}>Betrag</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: "15%" }}>Status</TableCell>
-              <TableCell sx={{ fontWeight: 600, width: "10%" }}>Datum</TableCell>
-              <TableCell sx={{ fontWeight: 600, textAlign: "center", width: "10%" }}>Aktionen</TableCell>
+            <TableRow
+              sx={{
+                bgcolor:
+                  theme.palette.mode === "dark"
+                    ? alpha("#fff", 0.06)
+                    : alpha(theme.palette.background.paper, 1),
+                "& th": { fontWeight: 700 },
+                borderBottom: `1px solid ${theme.palette.divider}`,
+              }}
+            >
+              <TableCell width="22%">Belegnummer</TableCell>
+              <TableCell width="22%">Lieferant</TableCell>
+              <TableCell align="center" width="10%">
+                Nachweis
+              </TableCell>
+              <TableCell align="right" width="14%">
+                Betrag
+              </TableCell>
+              <TableCell width="14%">Status</TableCell>
+              <TableCell width="10%">Datum</TableCell>
+              <TableCell align="center" width="8%">
+                Aktionen
+              </TableCell>
             </TableRow>
           </TableHead>
 
           <TableBody>
-            {documents.map((item) => {
-              const isRowDeleting = deletingId === item.id;
+            {documents.map((doc) => {
+              const isRowDeleting = deletingId === doc.id;
+              const hasChildren = (doc.lieferscheine || []).length > 0;
+              const expanded = expandedRows.has(doc.id);
 
               return (
-                <React.Fragment key={item.id}>
+                <React.Fragment key={doc.id}>
                   <TableRow
                     hover
                     sx={{
                       "& > *": { borderBottom: "unset" },
-                      cursor: item.lieferscheine?.length > 0 ? "pointer" : "default",
-                      bgcolor: item.type === "LIEFERSCHEIN" ? "grey.50" : "inherit",
                       opacity: isRowDeleting ? 0.6 : 1,
-                    }}
-                    onClick={(e) => {
-                      if (e.target.closest("button") || e.target.closest("a") || e.target.closest(".MuiChip-root")) return;
-                      item.lieferscheine?.length > 0 && toggleRow(item.id);
+                      transition: "background 120ms ease",
+                      bgcolor:
+                        doc.type === "LIEFERSCHEIN"
+                          ? themeTint(theme, "info")
+                          : "inherit",
                     }}
                   >
                     <TableCell>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        {item.lieferscheine?.length > 0 && (
-                          <Typography variant="body2" sx={{ width: "10px" }}>
-                            {expandedRows.has(item.id) ? "−" : "+"}
-                          </Typography>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        {hasChildren ? (
+                          <IconButton
+                            size="small"
+                            onClick={() => toggleRow(doc.id)}
+                            aria-label={expanded ? "Zuklappen" : "Aufklappen"}
+                          >
+                            {expanded ? <ExpandLess /> : <ExpandMore />}
+                          </IconButton>
+                        ) : (
+                          <Box sx={{ width: 40 }} />
                         )}
-                        <Typography variant="body2" fontWeight={item.type === "RECHNUNG" ? 600 : 400}>
-                          {item.documentNumber}
+                        <Typography variant="body2" fontWeight={doc.type === "RECHNUNG" ? 700 : 500}>
+                          {doc.documentNumber}
                         </Typography>
-                      </Box>
+                      </Stack>
                     </TableCell>
 
-                    <TableCell>{item.supplier}</TableCell>
+                    <TableCell>{doc.supplier}</TableCell>
 
                     <TableCell align="center">
-                      <NachweisIcon nachweisUrl={item.nachweisUrl} onClickUpload={() => handleEdit(item.id)} />
+                      <NachweisIcon nachweisUrl={doc.nachweisUrl} onClickUpload={() => edit(doc.id)} />
                     </TableCell>
 
                     <TableCell align="right">
-                      <Typography variant="body2" fontWeight={item.type === "RECHNUNG" ? 600 : 400}>
-                        {formatCurrency(item.totalAmount)}
+                      <Typography variant="body2" fontWeight={doc.type === "RECHNUNG" ? 700 : 500}>
+                        {formatCurrency(doc.totalAmount)}
                       </Typography>
                     </TableCell>
 
                     <TableCell>
-                      <StatusChip
-                        document={item}
-                        onToggle={() => handleTogglePaidStatus(item)}
-                        disabled={isAnyMutationLoading || !!deletingId}
-                      />
+                      <StatusChip document={doc} onToggle={() => togglePaidStatus(doc)} disabled={isAnyMutating || !!deletingId} />
                     </TableCell>
 
-                    <TableCell>
-                      <Typography variant="body2">{formatDocumentDate(item.documentDate)}</Typography>
-                    </TableCell>
+                    <TableCell>{fmtDate(doc.documentDate)}</TableCell>
 
                     <TableCell align="center">
                       <Stack direction="row" spacing={0.5} justifyContent="center">
@@ -385,8 +458,8 @@ export default function PurchaseDocuments() {
                             <IconButton
                               size="small"
                               color="primary"
-                              onClick={() => handleEdit(item.id)}
-                              disabled={isAnyMutationLoading || !!deletingId}
+                              onClick={() => edit(doc.id)}
+                              disabled={isAnyMutating || !!deletingId}
                               aria-label="Bearbeiten"
                             >
                               <EditIcon fontSize="small" />
@@ -394,13 +467,13 @@ export default function PurchaseDocuments() {
                           </span>
                         </Tooltip>
 
-                        <Tooltip title={isRowDeleting ? "Löschen..." : "Löschen"}>
+                        <Tooltip title={isRowDeleting ? "Löschen…" : "Löschen"}>
                           <span>
                             <IconButton
                               size="small"
                               color="error"
-                              onClick={() => handleDelete(item)}
-                              disabled={isAnyMutationLoading || !!deletingId}
+                              onClick={() => removeDoc(doc)}
+                              disabled={isAnyMutating || !!deletingId}
                               aria-label="Löschen"
                             >
                               {isRowDeleting ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
@@ -411,65 +484,54 @@ export default function PurchaseDocuments() {
                     </TableCell>
                   </TableRow>
 
-                  {/* Lieferschein rows */}
-                  {expandedRows.has(item.id) &&
-                    item.lieferscheine?.map((lieferschein) => {
-                      const isChildDeleting = deletingId === lieferschein.id;
+                  {/* Lieferscheine (Kinder) */}
+                  {expanded &&
+                    (doc.lieferscheine || []).map((ls) => {
+                      const isChildDeleting = deletingId === ls.id;
                       return (
-                        <TableRow key={lieferschein.id} sx={{ bgcolor: "grey.50", opacity: isChildDeleting ? 0.6 : 1 }}>
-                          <TableCell>
-                            <Box sx={{ display: "flex", alignItems: "center", pl: 3, gap: 1 }}>
-                              <Typography variant="body2" color="text.secondary" sx={{ opacity: 0.5 }}>
-                                └
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {lieferschein.documentNumber}
-                              </Typography>
-                            </Box>
+                        <TableRow key={ls.id} sx={{ opacity: isChildDeleting ? 0.6 : 1 }}>
+                          <TableCell colSpan={1} sx={{ pl: 8 }}>
+                            <Typography variant="body2" color="text.secondary">
+                              {ls.documentNumber}
+                            </Typography>
                           </TableCell>
-                          <TableCell>{lieferschein.supplier}</TableCell>
+                          <TableCell>{ls.supplier}</TableCell>
                           <TableCell align="center">
-                            <NachweisIcon
-                              nachweisUrl={lieferschein.nachweisUrl}
-                              onClickUpload={() => handleEdit(lieferschein.id)}
-                            />
+                            <NachweisIcon nachweisUrl={ls.nachweisUrl} onClickUpload={() => edit(ls.id)} />
                           </TableCell>
                           <TableCell align="right">
                             <Typography variant="body2" color="text.secondary">
-                              {formatCurrency(lieferschein.totalAmount)}
+                              {formatCurrency(ls.totalAmount)}
                             </Typography>
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2" color="text.secondary">
-                              –{/* Lieferscheine haben keinen Status */}
+                              –{/* Lieferscheine haben keinen Zahlungsstatus */}
                             </Typography>
                           </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">{formatDocumentDate(lieferschein.documentDate)}</Typography>
-                          </TableCell>
+                          <TableCell>{fmtDate(ls.documentDate)}</TableCell>
                           <TableCell align="center">
                             <Stack direction="row" spacing={0.5} justifyContent="center">
                               <Tooltip title="Bearbeiten">
                                 <span>
                                   <IconButton
-                                    size="small"
-                                    color="primary"
-                                    onClick={() => handleEdit(lieferschein.id)}
-                                    disabled={isAnyMutationLoading || !!deletingId}
-                                    aria-label="Bearbeiten"
+                                      size="small"
+                                      color="primary"
+                                      onClick={() => edit(ls.id)}
+                                      disabled={isAnyMutating || !!deletingId}
+                                      aria-label="Bearbeiten"
                                   >
                                     <EditIcon fontSize="small" />
                                   </IconButton>
                                 </span>
                               </Tooltip>
-
-                              <Tooltip title={isChildDeleting ? "Löschen..." : "Löschen"}>
+                              <Tooltip title={isChildDeleting ? "Löschen…" : "Löschen"}>
                                 <span>
                                   <IconButton
                                     size="small"
                                     color="error"
-                                    onClick={() => handleDelete(lieferschein)}
-                                    disabled={isAnyMutationLoading || !!deletingId}
+                                    onClick={() => removeDoc(ls)}
+                                    disabled={isAnyMutating || !!deletingId}
                                     aria-label="Löschen"
                                   >
                                     {isChildDeleting ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
@@ -481,6 +543,13 @@ export default function PurchaseDocuments() {
                         </TableRow>
                       );
                     })}
+                  {expanded && hasChildren && (
+                    <TableRow>
+                      <TableCell colSpan={7} sx={{ py: 0.5 }}>
+                        <Divider />
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </React.Fragment>
               );
             })}
