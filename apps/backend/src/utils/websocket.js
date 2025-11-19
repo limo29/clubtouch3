@@ -19,11 +19,9 @@ function initializeWebSocket(server) {
 
         // In production, strictly check against allowed origin
         const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
-        // Allow Railway domains, localhost, or exact match
-        if (origin === allowedOrigin || (origin && origin.includes('railway.app')) || (origin && origin.includes('localhost'))) {
+        if (origin === allowedOrigin) {
           callback(null, true);
         } else {
-          console.warn('Blocked CORS origin:', origin);
           callback(new Error('Not allowed by CORS'));
         }
       },
