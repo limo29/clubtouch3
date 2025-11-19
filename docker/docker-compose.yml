@@ -1,7 +1,10 @@
+version: "3.9"
 
+x-health-interval: &health-interval 30s
+x-health-timeout: &health-timeout 10s
+x-health-retries: &health-retries 5
 
 services:
-  # PostgreSQL Database
   db:
     image: postgres:15-alpine
     container_name: clubtouch3-db
@@ -11,132 +14,106 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-clubtouch3}
       POSTGRES_DB: ${DB_NAME:-clubtouch3}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+      - pg_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-clubtouch3}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - clubtouch3-network
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-clubtouch3} -d ${DB_NAME:-clubtouch3}"]
+      interval: *health-interval
+      timeout: *health-timeout
+      retries: *health-retries
+    networks: [ct3]
 
-  # Backend API
   backend:
     build:
-      context: ../apps/backend
+      context: ./apps/backend
       dockerfile: Dockerfile
     container_name: clubtouch3-backend
     restart: unless-stopped
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      PORT: 3001
+      # --- DB ---
       DATABASE_URL: postgresql://${DB_USER:-clubtouch3}:${DB_PASSWORD:-clubtouch3}@db:5432/${DB_NAME:-clubtouch3}?schema=public
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-key-change-this}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-your-refresh-secret-key-change-this}
+
+      # --- Auth / Server ---
+      PORT: ${API_PORT:-3001}
+      NODE_ENV: ${BACKEND_NODE_ENV:-development}   # development im LAN vermeidet secure Cookies
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-too}
       JWT_EXPIRE_TIME: ${JWT_EXPIRE_TIME:-15m}
       JWT_REFRESH_EXPIRE_TIME: ${JWT_REFRESH_EXPIRE_TIME:-7d}
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+
+      # --- CORS/Origin ---
+      FRONTEND_URL: ${PUBLIC_FRONTEND_URL:-http://localhost}
+
+      # optional – nur wenn du sie im Code nutzt
+      PUBLIC_BASE_URL: http://${PUBLIC_HOST:-localhost}:${API_PORT:-3001}
+
+      # deine bestehenden Flags
+      ALLOW_NEGATIVE_STOCK: ${ALLOW_NEGATIVE_STOCK:-true}
     volumes:
-      - ../apps/backend/exports:/app/exports
-      - ../apps/backend/uploads:/app/uploads
+      - ./apps/backend/exports:/app/exports
+      - ./apps/backend/uploads:/app/uploads
     ports:
-      - "3001:3001"
+      - "${API_PORT:-3001}:3001"
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - clubtouch3-network
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: *health-interval
+      timeout: *health-timeout
+      retries: *health-retries
     command: >
       sh -c "
-        echo 'Waiting for database...' &&
+        echo '⏳ Waiting a bit for DB…' &&
         sleep 5 &&
         npx prisma migrate deploy &&
-        npx prisma db seed &&
+        node prisma/seed.js &&
         node src/server.js
       "
+    networks: [ct3]
 
-  # Frontend
   frontend:
     build:
-      context: ../apps/frontend
+      context: ./apps/frontend
       dockerfile: Dockerfile
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:3001/api}
-        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:3001}
+        # Das Frontend wird mit der öffentlichen Host-Adresse gebaut
+        REACT_APP_API_URL: /api
+        REACT_APP_WS_URL: /
     container_name: clubtouch3-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "${WEB_PORT:-80}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - clubtouch3-network
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost"]
+      interval: *health-interval
+      timeout: *health-timeout
+      retries: *health-retries
+    networks: [ct3]
 
-  # Adminer for database management (optional, nur für Development)
+  # optional
   adminer:
     image: adminer:latest
     container_name: clubtouch3-adminer
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${ADMINER_PORT:-8080}:8080"
     environment:
       ADMINER_DEFAULT_SERVER: db
     depends_on:
-      - db
-    networks:
-      - clubtouch3-network
-    profiles:
-      - dev
-
-  # Backup Service (optional)
-  backup:
-    image: postgres:15-alpine
-    container_name: clubtouch3-backup
-    environment:
-      PGUSER: ${DB_USER:-clubtouch3}
-      PGPASSWORD: ${DB_PASSWORD:-clubtouch3}
-      PGHOST: db
-      PGDATABASE: ${DB_NAME:-clubtouch3}
-    volumes:
-      - ./backups:/backups
-    command: >
-      sh -c "
-        while true; do
-          echo 'Creating backup...' &&
-          pg_dump -h db -U ${DB_USER:-clubtouch3} ${DB_NAME:-clubtouch3} > /backups/backup_$$(date +%Y%m%d_%H%M%S).sql &&
-          echo 'Backup created' &&
-          find /backups -name 'backup_*.sql' -mtime +7 -delete &&
-          echo 'Old backups cleaned' &&
-          sleep 86400
-        done
-      "
-    depends_on:
       db:
         condition: service_healthy
-    networks:
-      - clubtouch3-network
-    profiles:
-      - backup
+    networks: [ct3]
+    profiles: ["dev"]
 
 volumes:
-  postgres_data:
-    name: clubtouch3_postgres_data
+  pg_data:
 
 networks:
-  clubtouch3-network:
-    name: clubtouch3_network
+  ct3:
     driver: bridge

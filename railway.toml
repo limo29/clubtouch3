@@ -1,0 +1,32 @@
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# --- Backend Service ---
+[[services]]
+name = "backend"
+root = "apps/backend"
+
+[services.build]
+dockerfile = "Dockerfile"
+
+[services.env]
+PORT = "3001"
+NODE_ENV = "production"
+
+# --- Frontend Service ---
+[[services]]
+name = "frontend"
+root = "apps/frontend"
+
+[services.build]
+dockerfile = "Dockerfile"
+args = { REACT_APP_API_URL = "/api", REACT_APP_WS_URL = "/" }
+
+[services.env]
+# This will be set by Railway automatically if you link services, 
+# but we need to ensure Nginx gets it.
+# We will set BACKEND_URL in the Railway Dashboard to the internal backend URL.

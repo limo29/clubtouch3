@@ -7,12 +7,17 @@ function initializeWebSocket(server) {
   io = new Server(server, {
     cors: {
       origin: (origin, callback) => {
-        // Erlaube Requests ohne Origin (z.B. Anfragen von file://, mobile Apps oder Tools wie Postman)
+        // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin || origin === 'null') {
           return callback(null, true);
         }
-        
-        // Definiere erlaubte Origins – zum Beispiel den Frontend-URL aus der Umgebung oder den lokalen Webserver
+
+        // In development, allow all origins (e.g. LAN IPs)
+        if (process.env.NODE_ENV === 'development') {
+          return callback(null, true);
+        }
+
+        // In production, strictly check against allowed origin
         const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
         if (origin === allowedOrigin) {
           callback(null, true);
@@ -23,8 +28,8 @@ function initializeWebSocket(server) {
       credentials: true  // Nur setzen, wenn du wirklich Credentials benötigst
     }
   });
-  
-  
+
+
   // Authentifizierung für WebSocket
   io.use(async (socket, next) => {
     try {
@@ -32,7 +37,7 @@ function initializeWebSocket(server) {
       if (!token) {
         return next(new Error('Authentication error'));
       }
-      
+
       const decoded = verifyAccessToken(token);
       socket.userId = decoded.userId;
       next();
@@ -40,18 +45,18 @@ function initializeWebSocket(server) {
       next(new Error('Authentication error'));
     }
   });
-  
+
   io.on('connection', (socket) => {
     console.log(`✅ User connected: ${socket.userId}`);
-    
+
     // User tritt dem Highscore-Raum bei
     socket.join('highscore');
-    
+
     socket.on('disconnect', () => {
       console.log(`👋 User disconnected: ${socket.userId}`);
     });
   });
-  
+
   return io;
 }
 
