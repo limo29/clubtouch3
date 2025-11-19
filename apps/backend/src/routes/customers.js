@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const customerController = require('../controllers/customerController');
 const { authenticate, authorize } = require('../middleware/auth');
-const { 
+const {
   validateCustomer,
   validateCustomerUpdate,
   validateTopUp,
-  handleValidationErrors 
+  handleValidationErrors
 } = require('../middleware/validation');
 
 // Alle Kunden-Routes benötigen Authentifizierung
@@ -28,7 +28,7 @@ router.get('/:id/stats', customerController.getCustomerStats);
 router.get('/:id/statement', customerController.getAccountStatement);
 
 // Neuen Kunden erstellen (nur Admins und Kassierer)
-router.post('/', 
+router.post('/',
   authorize('ADMIN', 'CASHIER'),
   validateCustomer,
   handleValidationErrors,
@@ -49,6 +49,15 @@ router.post('/:id/topup',
   validateTopUp,
   handleValidationErrors,
   customerController.topUpAccount
+);
+
+// Historie abrufen
+router.get('/:id/history', customerController.getHistory);
+
+// Aufladung stornieren
+router.post('/:id/topup/:topUpId/cancel',
+  authorize('ADMIN', 'CASHIER'),
+  customerController.reverseTopUp
 );
 
 module.exports = router;

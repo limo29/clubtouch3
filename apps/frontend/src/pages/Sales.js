@@ -61,6 +61,14 @@ const Sales = () => {
   const queryClient = useQueryClient();
 
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+
+  // Fix: Update selectedCustomer when customersData changes (e.g. after topup)
+  useEffect(() => {
+    if (selectedCustomer && customersData?.customers) {
+      const updated = customersData.customers.find(c => c.id === selectedCustomer.id);
+      if (updated) setSelectedCustomer(updated);
+    }
+  }, [customersData, selectedCustomer?.id]);
   const [customerSearch, setCustomerSearch] = useState('');
   const [articleSearch, setArticleSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -101,9 +109,24 @@ const Sales = () => {
     queryKey: ['customer-history', historyCustomer?.id],
     enabled: false,
     queryFn: async () => {
-      const res = await api.get(API_ENDPOINTS.TRANSACTIONS, { params: { customerId: historyCustomer.id, limit: 50, order: 'desc' } });
-      const tx = Array.isArray(res.data?.transactions) ? res.data.transactions : [];
-      return tx.map(t => ({ id: t.id, date: t.createdAt || t.date, amount: num(t.totalAmount || t.amount || 0), method: t.paymentMethod || t.method, items: t.items || [] }));
+      const res = await api.get(`/customers/${historyCustomer.id}/history`, { params: { limit: 50 } });
+      return Array.isArray(res.data) ? res.data : [];
+    }
+  });
+
+  const cancelTransactionMutation = useMutation({
+    mutationFn: async (id) => api.post(`/transactions/${id}/cancel`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['customers-sales']);
+      refetchHistory();
+    }
+  });
+
+  const cancelTopUpMutation = useMutation({
+    mutationFn: async (topUpId) => api.post(`/customers/${historyCustomer.id}/topup/${topUpId}/cancel`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['customers-sales']);
+      refetchHistory();
     }
   });
 
@@ -129,7 +152,7 @@ const Sales = () => {
   }, [customersData.customers, customerSearch]);
 
   const girls = filteredCustomers.filter(c => c.gender === 'FEMALE');
-  const boys  = filteredCustomers.filter(c => c.gender === 'MALE');
+  const boys = filteredCustomers.filter(c => c.gender === 'MALE');
   const other = filteredCustomers.filter(c => !c.gender || c.gender === 'OTHER');
 
   const categories = useMemo(() => ['all', ...new Set((articles || []).map(a => a.category).filter(Boolean))], [articles]);
@@ -150,7 +173,7 @@ const Sales = () => {
   const handleOpenHistory = async (customer) => { setHistoryCustomer(customer); setShowHistory(true); await refetchHistory(); };
 
   const CustomerCard = ({ customer }) => (
-    <Card onClick={() => setSelectedCustomer(customer)} sx={{ p: 1, border: selectedCustomer?.id === customer.id ? '2px solid #1976d2' : '1px solid #e0e0e0', cursor: 'pointer', '&:hover': { boxShadow: 3 }, backgroundColor: customer.isRecent ? 'rgba(76, 175, 80, 0.08)' : 'background.paper' }}>
+    <Card id={`customer-${customer.id}`} onClick={() => setSelectedCustomer(customer)} sx={{ p: 1, border: selectedCustomer?.id === customer.id ? '2px solid #1976d2' : '1px solid #e0e0e0', cursor: 'pointer', '&:hover': { boxShadow: 3 }, backgroundColor: customer.isRecent ? 'rgba(76, 175, 80, 0.08)' : 'background.paper' }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 1 }}>
         <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
           <Avatar sx={{ bgcolor: customer.gender === 'FEMALE' ? 'pink.main' : customer.gender === 'MALE' ? 'blue.main' : 'grey.500', flexShrink: 0 }}>
@@ -187,13 +210,63 @@ const Sales = () => {
     );
   };
 
+  const alphabet = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const scrollToLetter = (letter) => {
+    const target = filteredCustomers.find(c => {
+      const name = c.nickname || c.name;
+      if (letter === '#') return !/^[A-Z]/i.test(name);
+      return name.toUpperCase().startsWith(letter);
+    });
+    if (target) {
+      // Simple scroll implementation - in a real app might need refs
+      const el = document.getElementById(`customer-${target.id}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   return (
-    <Box sx={{ pb: 2 }}>
+    <Box sx={{ pb: 2, display: 'flex', gap: 2 }}>
+      {/* Alphabet Navigation Sidebar */}
+      <Card sx={{
+        display: { xs: 'none', lg: 'flex' },
+        flexDirection: 'column',
+        alignItems: 'center',
+        py: 2,
+        px: 1,
+        position: 'sticky',
+        top: 88,
+        height: 'calc(100vh - 120px)',
+        overflowY: 'auto',
+        width: 40
+      }}>
+        <Stack spacing={0.5}>
+          {alphabet.map(char => (
+            <Typography
+              key={char}
+              variant="caption"
+              sx={{
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                color: 'text.secondary',
+                '&:hover': { color: 'primary.main', transform: 'scale(1.2)' },
+                transition: 'all 0.2s',
+                textAlign: 'center',
+                width: 20
+              }}
+              onClick={() => scrollToLetter(char)}
+            >
+              {char}
+            </Typography>
+          ))}
+        </Stack>
+      </Card>
+
       <Box
         sx={{
           display: 'grid',
           gap: 2,
           gridTemplateColumns: { xs: '1fr', md: '360px 1fr 400px', lg: '380px 1fr 420px' },
+          flex: 1
         }}
       >
         {/* Kunden */}
@@ -344,14 +417,57 @@ const Sales = () => {
           {!historyLoading && (!historyData || historyData.length === 0) && (<Typography color="text.secondary">Keine Transaktionen gefunden.</Typography>)}
           {!historyLoading && historyData && (
             <List dense>
-              {historyData.map(t => (
-                <ListItem key={t.id} sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
-                  <ListItemText
-                    primary={<Stack direction="row" justifyContent="space-between" sx={{ width: '100%' }}><Typography>{new Date(t.date).toLocaleString('de-DE')}</Typography><Typography fontWeight={700}>{money(t.amount)}</Typography></Stack>}
-                    secondary={<Typography variant="caption" color="text.secondary">{t.method === 'CASH' ? 'Bar' : 'Konto'} • {t.items.length} Pos.</Typography>}
-                  />
-                </ListItem>
-              ))}
+              {historyData.map(t => {
+                const isTopUp = t.type === 'TOPUP';
+                const isCancelled = t.cancelled || (isTopUp && t.reference?.startsWith('STORNO:'));
+                // Check if this is a reversal entry itself
+                const isReversalEntry = isTopUp && t.amount < 0;
+
+                return (
+                  <ListItem key={t.id} sx={{
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                    opacity: isCancelled ? 0.6 : 1,
+                    bgcolor: isReversalEntry ? 'error.lighter' : 'transparent'
+                  }}>
+                    <ListItemText
+                      primary={
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: '100%' }}>
+                          <Typography variant="body2">
+                            {new Date(t.date).toLocaleString('de-DE')}
+                            {isCancelled && <Chip size="small" label="Storniert" color="error" variant="outlined" sx={{ ml: 1, height: 20 }} />}
+                            {isReversalEntry && <Chip size="small" label="Storno-Buchung" color="error" sx={{ ml: 1, height: 20 }} />}
+                          </Typography>
+                          <Typography fontWeight={700} color={t.amount > 0 ? 'success.main' : 'text.primary'}>
+                            {t.amount > 0 ? '+' : ''}{money(t.amount)}
+                          </Typography>
+                        </Stack>
+                      }
+                      secondary={
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            {isTopUp ? `Aufladung (${t.method === 'CASH' ? 'Bar' : 'Überweisung'})` : `Einkauf (${t.items?.length || 0} Pos.)`}
+                          </Typography>
+                          {!isCancelled && !isReversalEntry && (
+                            <Button
+                              size="small"
+                              color="error"
+                              onClick={() => {
+                                if (window.confirm('Wirklich stornieren?')) {
+                                  if (isTopUp) cancelTopUpMutation.mutate(t.id);
+                                  else cancelTransactionMutation.mutate(t.id);
+                                }
+                              }}
+                            >
+                              Stornieren
+                            </Button>
+                          )}
+                        </Stack>
+                      }
+                    />
+                  </ListItem>
+                );
+              })}
             </List>
           )}
         </DialogContent>
