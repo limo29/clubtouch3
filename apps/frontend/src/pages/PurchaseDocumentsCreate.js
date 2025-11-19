@@ -321,6 +321,22 @@ export default function PurchaseDocumentCreate() {
     onError: (err) => console.error("Fehler beim Erstellen:", err),
   });
 
+  /* ---------------------------- Delivery Notes ---------------------------- */
+  const [selectedLieferscheine, setSelectedLieferscheine] = useState([]);
+  const supplierValue = watch("supplier");
+
+  const { data: unassignedLieferscheine = [] } = useQuery({
+    queryKey: ["unassigned-lieferscheine", supplierValue],
+    queryFn: async () => {
+      if (!supplierValue) return [];
+      const res = await api.get("/purchase-documents/unassigned", {
+        params: { supplier: supplierValue },
+      });
+      return res.data.documents || [];
+    },
+    enabled: !!supplierValue && isRechnung,
+  });
+
   /* ------------------------------ Submit ---------------------------------- */
   const onSubmit = (data) => {
     const supplierValue = data.supplier;
@@ -341,6 +357,12 @@ export default function PurchaseDocumentCreate() {
       formData.append("paid", data.paid);
       if (data.paid) formData.append("paymentMethod", data.paymentMethod);
       if (data.dueDate) formData.append("dueDate", data.dueDate.toISOString());
+
+      // Lieferscheine hinzufügen
+      if (selectedLieferscheine.length > 0) {
+        const ids = selectedLieferscheine.map(l => l.id);
+        formData.append("lieferscheinIds", JSON.stringify(ids));
+      }
     }
 
     if (file) formData.append("nachweis", file);
@@ -464,7 +486,10 @@ export default function PurchaseDocumentCreate() {
               render={({ field, fieldState }) => (
                 <Autocomplete
                   value={field.value || null}
-                  onChange={(e, newVal) => field.onChange(newVal)}
+                  onChange={(e, newVal) => {
+                    field.onChange(newVal);
+                    setSelectedLieferscheine([]); // Reset selection on supplier change
+                  }}
                   onInputChange={(e, val) =>
                     e && e.type === "change" && field.onChange(val)
                   }
@@ -497,6 +522,28 @@ export default function PurchaseDocumentCreate() {
                 />
               )}
             />
+
+            {/* Delivery Note Selection (Only for Invoices) */}
+            {isRechnung && unassignedLieferscheine.length > 0 && (
+              <Autocomplete
+                multiple
+                options={unassignedLieferscheine}
+                getOptionLabel={(option) => `${option.documentNumber} (${new Date(option.documentDate).toLocaleDateString()})`}
+                value={selectedLieferscheine}
+                onChange={(event, newValue) => {
+                  setSelectedLieferscheine(newValue);
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    variant="outlined"
+                    label="Offene Lieferscheine zuordnen"
+                    placeholder="Lieferscheine wählen"
+                    size="small"
+                  />
+                )}
+              />
+            )}
 
             <Button
               component="label"

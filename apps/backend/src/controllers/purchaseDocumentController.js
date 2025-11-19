@@ -7,7 +7,7 @@ class PurchaseDocumentController {
   async createDocument(req, res) {
     try {
       const data = req.body;
-      
+
       // Datei-Upload verarbeiten
       let nachweisUrl = null;
       if (req.file) {
@@ -27,14 +27,26 @@ class PurchaseDocumentController {
           return res.status(400).json({ error: "Ungültiges 'items' Format." });
         }
       }
-      
+
+      // 'lieferscheinIds' wird als JSON-String übermittelt
+      if (data.lieferscheinIds) {
+        try {
+          data.lieferscheinIds = JSON.parse(data.lieferscheinIds);
+        } catch (e) {
+          console.error("Konnte 'lieferscheinIds' nicht parsen:", data.lieferscheinIds);
+          // Wir ignorieren den Fehler hier und machen ohne Lieferscheine weiter, oder werfen Fehler?
+          // Besser Fehler, damit der User merkt, dass was nicht stimmt.
+          return res.status(400).json({ error: "Ungültiges 'lieferscheinIds' Format." });
+        }
+      }
+
       // Datentypen konvertieren (aus FormData sind alles Strings)
       data.totalAmount = data.totalAmount ? parseFloat(data.totalAmount) : null;
       data.paid = data.paid === 'true';
 
       const document = await purchaseDocumentService.createDocument(
-        data, 
-        req.user.id, 
+        data,
+        req.user.id,
         nachweisUrl
       );
 
@@ -52,13 +64,13 @@ class PurchaseDocumentController {
           }
         }
       });
-      
+
       res.status(201).json(document);
     } catch (error) {
       console.error('Create document error:', error);
       // Prisma-Transaktionsfehler abfangen
       if (error.message.includes('Artikel mit ID')) {
-         return res.status(404).json({ error: error.message });
+        return res.status(404).json({ error: error.message });
       }
       res.status(500).json({ error: 'Fehler beim Erstellen des Belegs' });
     }
@@ -73,9 +85,9 @@ class PurchaseDocumentController {
         paid: req.query.paid,
         search: req.query.search
       };
-      
+
       const documents = await purchaseDocumentService.listDocuments(filters);
-      
+
       res.json({
         documents,
         count: documents.length
@@ -91,11 +103,11 @@ class PurchaseDocumentController {
     try {
       const { id } = req.params;
       const document = await purchaseDocumentService.getDocumentById(id);
-      
+
       if (!document) {
         return res.status(404).json({ error: 'Beleg nicht gefunden' });
       }
-      
+
       res.json(document);
     } catch (error) {
       console.error('Get document error:', error);
@@ -119,7 +131,7 @@ class PurchaseDocumentController {
       if (!supplier) {
         return res.status(400).json({ error: 'Ein Lieferant (supplier) ist erforderlich.' });
       }
-      
+
       const documents = await purchaseDocumentService.getUnassignedLieferscheine(supplier);
       res.json({ documents });
     } catch (error) {
@@ -138,7 +150,7 @@ class PurchaseDocumentController {
       }
 
       const result = await purchaseDocumentService.linkLieferscheineToRechnung(
-        rechnungId, 
+        rechnungId,
         lieferscheinIds,
         req.user.id
       );
@@ -152,7 +164,7 @@ class PurchaseDocumentController {
       res.status(500).json({ error: 'Fehler beim Verknüpfen der Belege' });
     }
   }
- // POST /:id/mark-paid
+  // POST /:id/mark-paid
   async markAsPaid(req, res) {
     try {
       const { id } = req.params;
@@ -163,7 +175,7 @@ class PurchaseDocumentController {
       }
 
       const document = await purchaseDocumentService.markAsPaid(
-        id, 
+        id,
         paymentMethod,
         req.user.id
       );
@@ -178,9 +190,9 @@ class PurchaseDocumentController {
   async markAsUnpaid(req, res) {
     try {
       const { id } = req.params;
-      
+
       const document = await purchaseDocumentService.markAsUnpaid(
-        id, 
+        id,
         req.user.id
       );
 
@@ -220,7 +232,7 @@ class PurchaseDocumentController {
       const { id } = req.params;
       const data = req.body;
 
-      let nachweisUrl = undefined; 
+      let nachweisUrl = undefined;
       if (req.file) {
         nachweisUrl = req.file.path.replace(process.cwd(), '').replace(/\\/g, '/');
       }
@@ -236,18 +248,18 @@ class PurchaseDocumentController {
           return res.status(400).json({ error: "Ungültiges 'items' Format." });
         }
       }
-      
+
       // Datentypen aus FormData konvertieren
       if (data.totalAmount) data.totalAmount = parseFloat(data.totalAmount);
       if (data.paid !== undefined) data.paid = data.paid === 'true';
 
       const document = await purchaseDocumentService.updateDocument(
-        id, 
+        id,
         data, // Enthält jetzt 'items'
-        req.user.id, 
+        req.user.id,
         nachweisUrl
       );
-      
+
       res.json(document);
     } catch (error) {
       console.error('Update document error:', error);
@@ -258,12 +270,12 @@ class PurchaseDocumentController {
   async deleteDocument(req, res) {
     try {
       const { id } = req.params;
-      
+
       const document = await purchaseDocumentService.deleteDocument(
-        id, 
+        id,
         req.user.id
       );
-      
+
       res.json({ message: `Beleg ${document.documentNumber} erfolgreich gelöscht.` });
     } catch (error) {
       console.error('Delete document error:', error);

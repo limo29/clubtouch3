@@ -2,7 +2,7 @@ const prisma = require('../utils/prisma');
 const { Prisma } = require('@prisma/client');
 
 class PurchaseDocumentService {
-  
+
   /**
    * Generiert eine neue Belegnummer (z.B. RE-2025-0001)
    */
@@ -37,22 +37,23 @@ class PurchaseDocumentService {
    * und bucht optional den Wareneingang.
    */
   async createDocument(data, userId, nachweisUrl) {
-    const { 
-      type, 
-      supplier, 
-      documentDate, 
+    const {
+      type,
+      supplier,
+      documentDate,
       description,
       totalAmount,
       paid,
       dueDate,
       paymentMethod,
-      items // Erwartet: [{ articleId, kisten, flaschen, ... }]
+      items, // Erwartet: [{ articleId, kisten, flaschen, ... }]
+      lieferscheinIds // Optional: IDs von Lieferscheinen zum Verknüpfen
     } = data;
 
     return prisma.$transaction(async (tx) => {
       // 1. Dokumenten-Kopf erstellen
       const documentNumber = await this.generateDocumentNumber(type);
-      
+
       const document = await tx.purchaseDocument.create({
         data: {
           type,
@@ -69,6 +70,20 @@ class PurchaseDocumentService {
           userId: userId,
         }
       });
+
+      // 1b. Lieferscheine verknüpfen (falls vorhanden)
+      if (type === 'RECHNUNG' && lieferscheinIds && Array.isArray(lieferscheinIds) && lieferscheinIds.length > 0) {
+        await tx.purchaseDocument.updateMany({
+          where: {
+            id: { in: lieferscheinIds },
+            type: 'LIEFERSCHEIN',
+            rechnungId: null // Nur unverknüpfte
+          },
+          data: {
+            rechnungId: document.id
+          }
+        });
+      }
 
       // 2. Positionen verarbeiten & Lagerbestand buchen (falls vorhanden)
       if (items && items.length > 0) {
@@ -134,7 +149,7 @@ class PurchaseDocumentService {
           });
         }
       }
-      
+
       return document;
     }, {
       maxWait: 10000, // 10s
@@ -152,7 +167,7 @@ class PurchaseDocumentService {
       // - Alle Lieferscheine, die *keiner* Rechnung zugeordnet sind
       // - Alle Rechnungen
       OR: [
-        { 
+        {
           type: 'LIEFERSCHEIN',
           rechnungId: null
         },
@@ -167,7 +182,7 @@ class PurchaseDocumentService {
       if (startDate) where.documentDate.gte = new Date(startDate);
       if (endDate) where.documentDate.lte = new Date(endDate);
     }
-    
+
     // TODO: Filter für 'paid', 'search' etc. hinzufügen
 
     return prisma.purchaseDocument.findMany({
@@ -195,7 +210,7 @@ class PurchaseDocumentService {
     // TODO: Prüfen, ob rechnungId wirklich eine RECHNUNG ist
     // TODO: Prüfen, ob Lieferscheine vom selben Lieferanten sind
     // TODO: Prüfen, ob Lieferscheine noch nicht verknüpft sind
-    
+
     const count = await prisma.purchaseDocument.updateMany({
       where: {
         id: { in: lieferscheinIds },
@@ -241,9 +256,9 @@ class PurchaseDocumentService {
       }
     });
   }
-/**
-   * Holt eine Liste aller einzigartigen Lieferantennamen
-   */
+  /**
+     * Holt eine Liste aller einzigartigen Lieferantennamen
+     */
   async getUniqueSuppliers() {
     const suppliers = await prisma.purchaseDocument.groupBy({
       by: ['supplier'],
@@ -389,9 +404,9 @@ class PurchaseDocumentService {
    * und korrigiert den Lagerbestand.
    */
   async updateDocument(documentId, data, userId, nachweisUrl) {
-    const { 
-      supplier, 
-      documentDate, 
+    const {
+      supplier,
+      documentDate,
       description,
       totalAmount,
       paid,
@@ -401,7 +416,7 @@ class PurchaseDocumentService {
     } = data;
 
     return prisma.$transaction(async (tx) => {
-      
+
       // 1. Hole den alten Beleg INKLUSIVE seiner alten Positionen
       const oldDocument = await tx.purchaseDocument.findUnique({
         where: { id: documentId },
@@ -429,7 +444,7 @@ class PurchaseDocumentService {
       if (items && items.length > 0) {
         for (const newItem of items) {
           if (!newItem.articleId) continue;
-          
+
           const article = await tx.article.findUnique({ where: { id: newItem.articleId } });
           if (!article) throw new Error(`Artikel ${newItem.articleId} nicht gefunden.`);
 
@@ -438,7 +453,7 @@ class PurchaseDocumentService {
           const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
 
           const totalNewQuantity = kistenQty.times(unitsPerKiste).plus(flaschenQty);
-          
+
           // Wir addieren den *positiven* Wert, um den Bestand zu erhöhen
           const currentCorrection = stockCorrections.get(newItem.articleId) || new Prisma.Decimal(0);
           stockCorrections.set(newItem.articleId, currentCorrection.plus(totalNewQuantity));
@@ -513,7 +528,7 @@ class PurchaseDocumentService {
           create: newItemCreations // Neue Items hier erstellen
         }
       };
-      
+
       if (oldDocument.type === 'RECHNUNG') {
         updateData.totalAmount = totalAmount ? new Prisma.Decimal(totalAmount) : oldDocument.totalAmount;
         updateData.paid = paid;
@@ -534,7 +549,7 @@ class PurchaseDocumentService {
         where: { id: documentId },
         data: updateData
       });
-      
+
       // Audit-Log
       await tx.auditLog.create({
         data: {
@@ -554,11 +569,11 @@ class PurchaseDocumentService {
    */
   async deleteDocument(documentId, userId) {
     return prisma.$transaction(async (tx) => {
-      
+
       // 1. Hole den Beleg und seine Positionen
       const document = await tx.purchaseDocument.findUnique({
         where: { id: documentId },
-        include: { 
+        include: {
           items: true,
           // Wir brauchen auch die Lieferscheine, um sie zu loggen
           lieferscheine: { select: { id: true } }
@@ -603,7 +618,7 @@ class PurchaseDocumentService {
 
       // 4. Positionen (Items) löschen
       //    Das Schema (onDelete: Cascade) löscht diese automatisch.
-      
+
       // 5. Beleg löschen
       await tx.purchaseDocument.delete({
         where: { id: documentId }
