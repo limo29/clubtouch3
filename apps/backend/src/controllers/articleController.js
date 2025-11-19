@@ -6,12 +6,30 @@ const prisma = require('../utils/prisma');
 const toDecimalString = (v) =>
   v === undefined || v === null || v === '' ? undefined : String(v).replace(',', '.');
 
+// Helper to sanitize URLs (remove internal backend host)
+const sanitizeUrl = (url) => {
+  if (!url) return url;
+  return url.replace(/^http:\/\/(backend|localhost):\d+/, '');
+};
+
+const sanitizeArticle = (article) => {
+  if (!article) return article;
+  return {
+    ...article,
+    imageUrl: sanitizeUrl(article.imageUrl),
+    imageThumbnail: sanitizeUrl(article.imageThumbnail),
+    imageSmall: sanitizeUrl(article.imageSmall),
+    imageMedium: sanitizeUrl(article.imageMedium),
+    imageLarge: sanitizeUrl(article.imageLarge),
+  };
+};
+
 class ArticleController {
   // Liste alle Artikel
   async listArticles(req, res) {
     try {
       const includeInactive = req.query.includeInactive === 'true';
-      const articles = await articleService.listArticles(includeInactive);
+      const articles = (await articleService.listArticles(includeInactive)).map(sanitizeArticle);
       res.json({ articles, count: articles.length });
     } catch (error) {
       console.error('List articles error:', error);
@@ -25,7 +43,7 @@ class ArticleController {
       const { id } = req.params;
       const article = await articleService.findById(id);
       if (!article) return res.status(404).json({ error: 'Artikel nicht gefunden' });
-      res.json({ article });
+      res.json({ article: sanitizeArticle(article) });
     } catch (error) {
       console.error('Get article error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen des Artikels' });
@@ -69,7 +87,7 @@ class ArticleController {
         },
       });
 
-      res.status(201).json({ message: 'Artikel erfolgreich erstellt', article });
+      res.status(201).json({ message: 'Artikel erfolgreich erstellt', article: sanitizeArticle(article) });
     } catch (error) {
       console.error('Create article error:', error);
       res.status(500).json({ error: 'Fehler beim Erstellen des Artikels' });
@@ -124,7 +142,7 @@ class ArticleController {
         },
       });
 
-      res.json({ message: 'Artikel erfolgreich aktualisiert', article });
+      res.json({ message: 'Artikel erfolgreich aktualisiert', article: sanitizeArticle(article) });
     } catch (error) {
       console.error('Update article error:', error);
       res.status(500).json({ error: 'Fehler beim Aktualisieren des Artikels' });
@@ -148,7 +166,7 @@ class ArticleController {
 
       res.json({
         message: `Artikel erfolgreich ${article.active ? 'aktiviert' : 'deaktiviert'}`,
-        article,
+        article: sanitizeArticle(article),
       });
     } catch (error) {
       console.error('Toggle article status error:', error);
@@ -159,7 +177,7 @@ class ArticleController {
   // Bestandswarnung
   async checkLowStock(req, res) {
     try {
-      const articles = await articleService.checkLowStock();
+      const articles = (await articleService.checkLowStock()).map(sanitizeArticle);
       res.json({ articles, count: articles.length, hasWarnings: articles.length > 0 });
     } catch (error) {
       console.error('Check low stock error:', error);
@@ -173,7 +191,7 @@ class ArticleController {
       const { id } = req.params;
       const stats = await articleService.getArticleStats(id);
       if (!stats.article) return res.status(404).json({ error: 'Artikel nicht gefunden' });
-      res.json(stats);
+      res.json({ ...stats, article: sanitizeArticle(stats.article) });
     } catch (error) {
       console.error('Get article stats error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Statistiken' });

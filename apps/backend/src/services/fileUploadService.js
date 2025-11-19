@@ -37,6 +37,10 @@ class FileUploadService {
   _absUrl(...segments) {
     // ergibt z.B. "http://localhost:3001/uploads/articles/thumbnail/abc.webp"
     const rel = this._relUrl(...segments);
+    // Fix: Wenn baseUrl intern ist (z.B. "http://backend:8080"), lieber relative URL zurückgeben
+    if (this.baseUrl && (this.baseUrl.includes('backend') || this.baseUrl.includes('localhost'))) {
+      return rel;
+    }
     return this.baseUrl ? `${this.baseUrl}${rel}` : rel;
   }
   _fromAnyUrlToFsPath(anyUrlOrPath) {
@@ -92,9 +96,9 @@ class FileUploadService {
     const filename = `${uuidv4()}.webp`;
     const sizes = [
       { name: 'thumbnail', width: 150, height: 150 },
-      { name: 'small',     width: 300, height: 300 },
-      { name: 'medium',    width: 600, height: 600 },
-      { name: 'large',     width: 1200, height: 1200 },
+      { name: 'small', width: 300, height: 300 },
+      { name: 'medium', width: 600, height: 600 },
+      { name: 'large', width: 1200, height: 1200 },
     ];
 
     // Original speichern (nicht skaliert, aber in WebP)
