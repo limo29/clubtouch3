@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import {
   Box, Card, CardContent, Typography, Grid, Button, TextField, MenuItem, Alert, List,
-  ListItem, ListItemText, ListItemIcon, ListItemSecondaryAction, IconButton, Divider, Chip
+  ListItem, ListItemText, ListItemIcon, ListItemSecondaryAction, Divider, Chip
 } from '@mui/material';
 import {
-  Download, Description, TableChart, PictureAsPdf, DateRange, Receipt, Inventory,
+  Download, Description, TableChart, PictureAsPdf, Receipt, Inventory,
   People, Assessment, AccountBalance, CalendarToday
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -79,6 +79,8 @@ const Reports = () => {
         case 'eur':
           if (parameters.startDate) params.append('startDate', format(parameters.startDate, 'yyyy-MM-dd'));
           if (parameters.endDate) params.append('endDate', format(parameters.endDate, 'yyyy-MM-dd'));
+          break;
+        default:
           break;
       }
 
@@ -199,10 +201,10 @@ const Reports = () => {
                 fullWidth
               >
                 {[
-                  'Januar','Februar','März','April','Mai','Juni',
-                  'Juli','August','September','Oktober','November','Dezember'
+                  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+                  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'
                 ].map((m, i) => (
-                  <MenuItem key={i+1} value={i+1}>{m}</MenuItem>
+                  <MenuItem key={i + 1} value={i + 1}>{m}</MenuItem>
                 ))}
               </TextField>
             </Grid>

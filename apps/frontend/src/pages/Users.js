@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import {
   Box,
   Button,
-  Card,
-  CardContent,
   Dialog,
   DialogActions,
   DialogContent,
@@ -48,11 +46,11 @@ const Users = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
-  
+
   const { control, handleSubmit, reset, formState: { errors } } = useForm();
 
   // Fetch users
-  const { data: usersData, isLoading } = useQuery({
+  const { data: usersData } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
       const response = await api.get(API_ENDPOINTS.USERS);
@@ -122,7 +120,7 @@ const Users = () => {
     if (editingUser && !data.password) {
       delete data.password;
     }
-    
+
     userMutation.mutate(data);
   };
 
@@ -248,8 +246,8 @@ const Users = () => {
                         color={user.active ? 'error' : 'success'}
                         onClick={() => toggleStatusMutation.mutate(user.id)}
                         disabled={
-                          user.role === 'ADMIN' && 
-                          user.active && 
+                          user.role === 'ADMIN' &&
+                          user.active &&
                           users.filter(u => u.role === 'ADMIN' && u.active).length === 1
                         }
                       >
@@ -291,7 +289,7 @@ const Users = () => {
                 <Controller
                   name="email"
                   control={control}
-                  rules={{ 
+                  rules={{
                     required: 'E-Mail ist erforderlich',
                     pattern: {
                       value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
@@ -346,7 +344,7 @@ const Users = () => {
                 <Controller
                   name="password"
                   control={control}
-                  rules={{ 
+                  rules={{
                     required: editingUser ? false : 'Passwort ist erforderlich',
                     minLength: {
                       value: 8,

@@ -6,7 +6,6 @@ import {
   CardContent,
   Typography,
   Box,
-  Paper,
   List,
   ListItem,
   ListItemText,
@@ -127,9 +126,9 @@ export default function Dashboard() {
   const pieData =
     sum.cashRevenue + sum.accountRevenue > 0
       ? [
-          { name: "Bar", value: sum.cashRevenue, color: theme.palette.success.main },
-          { name: "Kundenkonto", value: sum.accountRevenue, color: theme.palette.primary.main },
-        ]
+        { name: "Bar", value: sum.cashRevenue, color: theme.palette.success.main },
+        { name: "Kundenkonto", value: sum.accountRevenue, color: theme.palette.primary.main },
+      ]
       : [];
 
   const avgTicket = useMemo(() => {

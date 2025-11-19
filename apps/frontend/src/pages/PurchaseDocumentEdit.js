@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
-import { Add as AddIcon, Remove as RemoveIcon } from "@mui/icons-material";
+
 
 
 import {
@@ -132,7 +132,7 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
           handleIncrement={handleIncrement}
           handleInputChange={handleInputChange}
           isMobile={isMobile}
-          //emphasize // macht Buttons dezent größer
+        //emphasize // macht Buttons dezent größer
         />
 
         {/* Basis-Einheit */}
@@ -143,7 +143,7 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
           handleIncrement={handleIncrement}
           handleInputChange={handleInputChange}
           isMobile={isMobile}
-          //emphasize
+        //emphasize
         />
       </Stack>
     </Paper>
@@ -192,7 +192,7 @@ export default function PurchaseDocumentEdit() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+
   const showFloatingActions = useMediaQuery(theme.breakpoints.down("md"));
 
   const [file, setFile] = useState(null);

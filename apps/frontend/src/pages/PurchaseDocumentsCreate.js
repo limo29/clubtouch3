@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
-import { Add as AddIcon, Remove as RemoveIcon } from "@mui/icons-material";
+
 
 
 import {
@@ -104,7 +104,7 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
         {article?.name || "Unbenannter Artikel"}
       </Typography>
 
- 
+
 
       {/* Mengensteuerung */}
       <Stack spacing={1.75} width="100%">
@@ -120,7 +120,7 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
           handleIncrement={handleIncrement}
           handleInputChange={handleInputChange}
           isMobile={isMobile}
-          //emphasize // macht Buttons dezent größer
+        //emphasize // macht Buttons dezent größer
         />
 
         {/* Basis-Einheit */}
@@ -244,11 +244,9 @@ export default function PurchaseDocumentCreate() {
   const {
     control,
     handleSubmit,
-    reset,
     watch,
     getValues,
     setValue,
-    formState: { errors },
   } = useForm({
     defaultValues: {
       documentDate: new Date(),
@@ -360,7 +358,7 @@ export default function PurchaseDocumentCreate() {
   };
 
   /* ---------------------------- Layout states ----------------------------- */
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+
   const showFloatingActions = useMediaQuery(theme.breakpoints.down("md"));
 
   /* ------------------------------------------------------------------------ */

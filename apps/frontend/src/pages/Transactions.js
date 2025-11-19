@@ -17,7 +17,6 @@ import {
   DialogActions,
   Button,
   TextField,
-  InputAdornment,
   Grid,
   Card,
   CardContent,
@@ -30,10 +29,9 @@ import {
   Tooltip,
 } from '@mui/material';
 import {
-  Search,
+
   Cancel,
   Receipt,
-  CalendarToday,
   AttachMoney,
   AccountBalanceWallet,
   Info,
@@ -59,13 +57,13 @@ const Transactions = () => {
   });
 
   // Fetch transactions
-  const { data: transactionsData, isLoading } = useQuery({
+  const { data: transactionsData } = useQuery({
     queryKey: ['transactions', filters],
     queryFn: async () => {
       const params = {
         includeItems: filters.includeItems,
       };
-      
+
       if (filters.startDate) {
         params.startDate = format(filters.startDate, 'yyyy-MM-dd');
       }
@@ -75,7 +73,7 @@ const Transactions = () => {
       if (filters.paymentMethod) {
         params.paymentMethod = filters.paymentMethod;
       }
-      
+
       const response = await api.get(API_ENDPOINTS.TRANSACTIONS, { params });
       return response.data;
     },
@@ -287,10 +285,10 @@ const Transactions = () => {
           </TableHead>
           <TableBody>
             {transactions.map((transaction) => (
-              <TableRow 
+              <TableRow
                 key={transaction.id}
                 hover
-                sx={{ 
+                sx={{
                   cursor: 'pointer',
                   opacity: transaction.cancelled ? 0.6 : 1,
                 }}
@@ -392,14 +390,14 @@ const Transactions = () => {
                 <Typography variant="body1" gutterBottom>
                   {selectedTransaction.id}
                 </Typography>
-                
+
                 <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
                   Datum & Zeit
                 </Typography>
                 <Typography variant="body1" gutterBottom>
                   {format(new Date(selectedTransaction.createdAt), 'dd.MM.yyyy HH:mm:ss', { locale: de })}
                 </Typography>
-                
+
                 <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
                   Kassierer
                 </Typography>
@@ -407,7 +405,7 @@ const Transactions = () => {
                   {selectedTransaction.user?.name || '-'}
                 </Typography>
               </Grid>
-              
+
               <Grid item xs={12} md={6}>
                 <Typography variant="subtitle2" color="text.secondary">
                   Kunde
@@ -415,7 +413,7 @@ const Transactions = () => {
                 <Typography variant="body1" gutterBottom>
                   {selectedTransaction.customer?.name || 'Bar-Zahlung'}
                 </Typography>
-                
+
                 <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
                   Zahlungsart
                 </Typography>
@@ -425,7 +423,7 @@ const Transactions = () => {
                     {getPaymentMethodLabel(selectedTransaction.paymentMethod)}
                   </Typography>
                 </Box>
-                
+
                 <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
                   Gesamtbetrag
                 </Typography>
@@ -433,7 +431,7 @@ const Transactions = () => {
                   {formatCurrency(selectedTransaction.totalAmount)}
                 </Typography>
               </Grid>
-              
+
               <Grid item xs={12}>
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="h6" gutterBottom>
@@ -450,7 +448,7 @@ const Transactions = () => {
                   ))}
                 </List>
               </Grid>
-              
+
               {selectedTransaction.cancelled && (
                 <Grid item xs={12}>
                   <Alert severity="error">
