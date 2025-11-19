@@ -7,12 +7,12 @@ const path = require('path');
 // Route imports
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
-const articleRoutes = require('./routes/articles'); 
+const articleRoutes = require('./routes/articles');
 const customerRoutes = require('./routes/customers');
 const transactionRoutes = require('./routes/transactions');
 const highscoreRoutes = require('./routes/highscore');
-const exportRoutes = require('./routes/exports');   
-const invoiceRoutes = require('./routes/invoices'); 
+const exportRoutes = require('./routes/exports');
+const invoiceRoutes = require('./routes/invoices');
 const purchaseDocumentRoutes = require('./routes/purchaseDocuments');
 const accountingRoutes = require('./routes/accountingRoutes');
 
@@ -22,16 +22,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes); 
+app.use('/api/users', userRoutes);
 app.use('/api/articles', articleRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/highscore', highscoreRoutes);
-app.use('/api/exports', exportRoutes); 
-app.use('/api/invoices', invoiceRoutes); 
+app.use('/api/exports', exportRoutes);
+app.use('/api/invoices', invoiceRoutes);
 app.use('/api/purchase-documents', purchaseDocumentRoutes)
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/highscore', require('./routes/highscore'));
@@ -39,7 +39,7 @@ app.use('/api/highscore', require('./routes/highscore'));
 
 // Basis-Route
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Clubtouch3 Backend läuft!',
     version: '1.0.0',
     timestamp: new Date()
@@ -50,12 +50,12 @@ app.get('/', (req, res) => {
 app.get('/health', async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ 
+    res.json({
       status: 'ok',
       database: 'connected'
     });
   } catch (error) {
-    res.status(500).json({ 
+    res.status(500).json({
       status: 'error',
       database: 'disconnected'
     });
@@ -70,7 +70,7 @@ app.use((req, res) => {
 // Error Handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(err.status || 500).json({ 
+  res.status(err.status || 500).json({
     error: err.message || 'Etwas ist schiefgelaufen!',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
