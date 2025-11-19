@@ -49,18 +49,18 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
+
     if (error.response?.status === 401 && !originalRequest._retry && refreshToken) {
       originalRequest._retry = true;
-      
+
       try {
         const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
           refreshToken
         });
-        
+
         const { accessToken, refreshToken: newRefreshToken } = response.data;
         setTokens(accessToken, newRefreshToken);
-        
+
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
@@ -69,7 +69,7 @@ api.interceptors.response.use(
         return Promise.reject(refreshError);
       }
     }
-    
+
     return Promise.reject(error);
   }
 );
