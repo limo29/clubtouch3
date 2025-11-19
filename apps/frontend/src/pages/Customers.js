@@ -26,7 +26,6 @@ import {
   List,
   ListItem,
   ListItemText,
-  ListItemText,
   Avatar,
 } from '@mui/material';
 import {
