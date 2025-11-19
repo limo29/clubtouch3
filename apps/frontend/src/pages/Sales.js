@@ -63,12 +63,7 @@ const Sales = () => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
 
   // Fix: Update selectedCustomer when customersData changes (e.g. after topup)
-  useEffect(() => {
-    if (selectedCustomer && customersData?.customers) {
-      const updated = customersData.customers.find(c => c.id === selectedCustomer.id);
-      if (updated) setSelectedCustomer(updated);
-    }
-  }, [customersData, selectedCustomer?.id]);
+
   const [customerSearch, setCustomerSearch] = useState('');
   const [articleSearch, setArticleSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -97,6 +92,14 @@ const Sales = () => {
     queryKey: ['articles', 'sales'],
     queryFn: async () => (await api.get(API_ENDPOINTS.ARTICLES)).data
   });
+
+  // Fix: Update selectedCustomer when customersData changes (e.g. after topup)
+  useEffect(() => {
+    if (selectedCustomer && customersData?.customers) {
+      const updated = customersData.customers.find(c => c.id === selectedCustomer.id);
+      if (updated) setSelectedCustomer(updated);
+    }
+  }, [customersData, selectedCustomer?.id]);
 
   const articles = useMemo(() => {
     const raw = Array.isArray(articlesRaw) ? articlesRaw : (articlesRaw?.articles ?? []);
