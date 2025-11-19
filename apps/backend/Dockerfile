@@ -37,8 +37,8 @@ COPY --chown=nodejs:nodejs . .
 USER nodejs
 
 # Expose port
-EXPOSE 3001
-
+#EXPOSE 3001
+EXPOSE 8080
 # Start the application
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "src/server.js"]
