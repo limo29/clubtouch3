@@ -1,5 +1,4 @@
-﻿// src/pages/Invoices.jsx
-import React, { useMemo, useState, useEffect } from 'react';
+﻿import React, { useMemo, useState, useEffect } from 'react';
 import {
   Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
   Avatar, Stack, IconButton, List, ListItem, ListItemText, Button, Dialog, DialogTitle,
