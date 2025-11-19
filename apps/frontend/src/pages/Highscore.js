@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
-  Box, Card, CardContent, Chip, CssBaseline, Divider, Grid, IconButton, Stack,
+  Box, Card, CardContent, Chip, CssBaseline, Divider, IconButton, Stack,
   Switch, Tooltip, Typography, alpha, GlobalStyles, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Checkbox, FormControlLabel, Autocomplete
@@ -8,7 +8,6 @@ import {
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
-import Lightning from '@mui/icons-material/FlashOn';
 import TimerIcon from '@mui/icons-material/AccessTime';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
@@ -225,8 +224,8 @@ export default function Highscore() {
 
   // Fullscreen
   const [isFull, setIsFull] = useState(!!document.fullscreenElement);
-  const enterFull = async () => { try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen(); } catch {} };
-  const toggleFull = async () => { try { document.fullscreenElement ? await document.exitFullscreen() : await enterFull(); } catch {} };
+  const enterFull = async () => { try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen(); } catch { } };
+  const toggleFull = async () => { try { document.fullscreenElement ? await document.exitFullscreen() : await enterFull(); } catch { } };
   useEffect(() => {
     const onChange = () => setIsFull(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', onChange);
@@ -302,7 +301,7 @@ export default function Highscore() {
         const arr = new Array(4).fill(0).map((_, i) => {
           const g = serverCfg[i];
           return g ? { enabled: true, articleId: g.articleId, label: g.label || '', targetUnits: Number(g.targetUnits) }
-                   : { enabled: false, articleId: '', label: '', targetUnits: 0 };
+            : { enabled: false, articleId: '', label: '', targetUnits: 0 };
         });
         setGoalDraft(arr);
       }
@@ -334,7 +333,7 @@ export default function Highscore() {
         });
         setGoalProgress((gp) => ({ ...gp, goals: progress?.data?.goals || [], meta: progress?.data?.meta || gp.meta, loading: false }));
         setLastUpdated(new Date());
-      } catch {}
+      } catch { }
     };
     s.on('highscore:update', refresh);
     s.on('sale:new', refresh);
@@ -345,7 +344,7 @@ export default function Highscore() {
 
   const LiveBadge = () =>
     live ? <Chip size="small" color="success" icon={<CheckCircleIcon />} label="Live" sx={{ fontWeight: 700 }} />
-         : <Chip size="small" label="Offline" />;
+      : <Chip size="small" label="Offline" />;
 
   const SectionHeader = ({ icon, title, extra }) => (
     <Stack direction="row" spacing={1.5} alignItems="center" sx={{ pb: 1 }}>
@@ -390,7 +389,7 @@ export default function Highscore() {
           {entry.transactionCount} Transaktion{entry.transactionCount === 1 ? '' : 'en'}
           {mode === 'AMOUNT' && entry.totalItems ? ` • ${entry.totalItems} Stück`
             : mode === 'COUNT' && entry.totalAmount ? ` • ${money(entry.totalAmount)}`
-            : ''}
+              : ''}
         </Typography>
         <Typography
           sx={{
@@ -410,31 +409,31 @@ export default function Highscore() {
   );
 
   const Board = ({ title, data }) => (
-      <Card
-    variant="outlined"
-    sx={{
-      display: 'flex',
-      flexDirection: 'column',
-      /* WICHTIG: */
-      width: '100%',
-      minWidth: 0,
-      minHeight: 0,
-      height: '100%',
-      backgroundImage: 'none'
-    }}
-  >
-    <CardContent
+    <Card
+      variant="outlined"
       sx={{
-        /* WICHTIG: */
-        p: { xs: 2, md: 3 },
         display: 'flex',
         flexDirection: 'column',
-        flex: 1,
+        /* WICHTIG: */
         width: '100%',
         minWidth: 0,
-        minHeight: 0
+        minHeight: 0,
+        height: '100%',
+        backgroundImage: 'none'
       }}
     >
+      <CardContent
+        sx={{
+          /* WICHTIG: */
+          p: { xs: 2, md: 3 },
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          width: '100%',
+          minWidth: 0,
+          minHeight: 0
+        }}
+      >
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
           <SectionHeader icon={<TrophyIcon color="primary" sx={{ fontSize: clamp('24px', '2.8vw', '36px') }} />} title={title} />
           <Chip size="small" icon={mode === 'AMOUNT' ? <EuroIcon /> : <ShoppingCartIcon />} label={`Nach ${mode === 'AMOUNT' ? 'Umsatz' : 'Anzahl'}`} sx={{ fontWeight: 700 }} />
@@ -458,8 +457,7 @@ export default function Highscore() {
     </Card>
   );
 
-  const dailyData = mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count;
-  const yearlyData = mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count;
+
 
   /* ---------- Ziele ---------- */
   const openGoals = () => setGoalsOpen(true);
@@ -564,27 +562,27 @@ export default function Highscore() {
           </Card>
         </Box>
 
-{/* Content – zwei Spalten füllen die Breite */}
-<Box sx={{ flex: 1, minHeight: 0, px: { xs: 2, md: 3 }, py: { xs: 2, md: 3 } }}>
-  <Box
-    sx={{
-      display: 'grid',
-      gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, // -> 2 gleich breite Spalten ab md
-      gap: 2.5,
-      alignItems: 'stretch',
-      width: '100%',
-      minHeight: 0,
-    }}
-  >
-    <Box sx={{ minWidth: 0, minHeight: 0 }}>
-      <Board title="Heute" data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count} />
-    </Box>
+        {/* Content – zwei Spalten füllen die Breite */}
+        <Box sx={{ flex: 1, minHeight: 0, px: { xs: 2, md: 3 }, py: { xs: 2, md: 3 } }}>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, // -> 2 gleich breite Spalten ab md
+              gap: 2.5,
+              alignItems: 'stretch',
+              width: '100%',
+              minHeight: 0,
+            }}
+          >
+            <Box sx={{ minWidth: 0, minHeight: 0 }}>
+              <Board title="Heute" data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count} />
+            </Box>
 
-    <Box sx={{ minWidth: 0, minHeight: 0 }}>
-      <Board title="Saison" data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count} />
-    </Box>
-  </Box>
-</Box>
+            <Box sx={{ minWidth: 0, minHeight: 0 }}>
+              <Board title="Saison" data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count} />
+            </Box>
+          </Box>
+        </Box>
 
 
 
@@ -629,7 +627,7 @@ export default function Highscore() {
                       value={allArticles.find(a => a.id === g.articleId) || null}
                       onChange={(_, val) => {
                         const cp = [...goalDraft];
-                        cp[idx] = { ...cp[idx], articleId: val?.id || '', label: cp[idx].label || (val?.name || '' ) };
+                        cp[idx] = { ...cp[idx], articleId: val?.id || '', label: cp[idx].label || (val?.name || '') };
                         setGoalDraft(cp);
                       }}
                       sx={{ flex: 1, minWidth: 220 }}

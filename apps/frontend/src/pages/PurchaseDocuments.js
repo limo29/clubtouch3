@@ -102,8 +102,8 @@ function StatusChip({ document, onToggle, disabled }) {
         disabled
           ? ""
           : isPaid
-          ? "Klicken, um als »nicht bezahlt« zu markieren"
-          : "Klicken, um als »bezahlt« zu markieren"
+            ? "Klicken, um als »nicht bezahlt« zu markieren"
+            : "Klicken, um als »bezahlt« zu markieren"
       }
     >
       <span>
@@ -179,7 +179,7 @@ export default function PurchaseDocuments() {
     keepPreviousData: true,
   });
 
-  const documents = data?.documents || [];
+  const documents = useMemo(() => data?.documents || [], [data]);
 
   /* -------- Mutations -------- */
   const markPaid = useMutation({
@@ -515,11 +515,11 @@ export default function PurchaseDocuments() {
                               <Tooltip title="Bearbeiten">
                                 <span>
                                   <IconButton
-                                      size="small"
-                                      color="primary"
-                                      onClick={() => edit(ls.id)}
-                                      disabled={isAnyMutating || !!deletingId}
-                                      aria-label="Bearbeiten"
+                                    size="small"
+                                    color="primary"
+                                    onClick={() => edit(ls.id)}
+                                    disabled={isAnyMutating || !!deletingId}
+                                    aria-label="Bearbeiten"
                                   >
                                     <EditIcon fontSize="small" />
                                   </IconButton>

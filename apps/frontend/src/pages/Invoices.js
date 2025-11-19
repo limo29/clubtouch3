@@ -99,7 +99,7 @@ export default function Invoices() {
   };
 
   const invoices = invoicesData?.invoices || [];
-  const customers = customersData?.customers || [];
+  const customers = useMemo(() => customersData?.customers || [], [customersData]);
   const articles = (articlesData?.articles || [])
     .filter(a => a.active)
     .map(a => ({

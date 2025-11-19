@@ -26,7 +26,7 @@ import {
   List,
   ListItem,
   ListItemText,
-  Divider,
+  ListItemText,
   Avatar,
 } from '@mui/material';
 import {
@@ -35,7 +35,6 @@ import {
   AccountBalanceWallet,
   Search,
   Person,
-  AttachMoney,
   Receipt,
   EmojiEvents,
   TrendingUp,
@@ -53,12 +52,12 @@ const Customers = () => {
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   const { control, handleSubmit, reset, formState: { errors } } = useForm();
   const { control: topUpControl, handleSubmit: handleTopUpSubmit, reset: resetTopUp } = useForm();
 
   // Fetch customers
-  const { data: customersData, isLoading } = useQuery({
+  const { data: customersData } = useQuery({
     queryKey: ['customers', searchTerm],
     queryFn: async () => {
       const response = await api.get(API_ENDPOINTS.CUSTOMERS, {
@@ -131,24 +130,24 @@ const Customers = () => {
 
   const customers = customersData?.customers || [];
 
-// In der handleOpenDialog Funktion
-const handleOpenDialog = (customer = null) => {
-  setEditingCustomer(customer);
-  if (customer) {
-    reset({
-      name: customer.name,
-      nickname: customer.nickname || '',
-      gender: customer.gender || 'OTHER', // NEU
-    });
-  } else {
-    reset({
-      name: '',
-      nickname: '',
-      gender: 'OTHER', // NEU
-    });
-  }
-  setOpenDialog(true);
-};
+  // In der handleOpenDialog Funktion
+  const handleOpenDialog = (customer = null) => {
+    setEditingCustomer(customer);
+    if (customer) {
+      reset({
+        name: customer.name,
+        nickname: customer.nickname || '',
+        gender: customer.gender || 'OTHER', // NEU
+      });
+    } else {
+      reset({
+        name: '',
+        nickname: '',
+        gender: 'OTHER', // NEU
+      });
+    }
+    setOpenDialog(true);
+  };
 
 
   const handleCloseDialog = () => {
@@ -241,7 +240,7 @@ const handleOpenDialog = (customer = null) => {
                 Durchschn. Guthaben
               </Typography>
               <Typography variant="h4">
-                {customers.length > 0 
+                {customers.length > 0
                   ? formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0) / customers.length)
                   : formatCurrency(0)
                 }
@@ -316,7 +315,7 @@ const handleOpenDialog = (customer = null) => {
           </TableHead>
           <TableBody>
             {customers.map((customer) => (
-              <TableRow 
+              <TableRow
                 key={customer.id}
                 hover
                 sx={{ cursor: 'pointer' }}
@@ -410,24 +409,24 @@ const handleOpenDialog = (customer = null) => {
                 />
               </Grid>
               <Grid item xs={12}>
-  <Controller
-    name="gender"
-    control={control}
-    defaultValue="OTHER"
-    render={({ field }) => (
-      <TextField
-        {...field}
-        label="Geschlecht"
-        select
-        fullWidth
-      >
-        <MenuItem value="FEMALE">Weiblich</MenuItem>
-        <MenuItem value="MALE">Männlich</MenuItem>
-        <MenuItem value="OTHER">Andere/Nicht angegeben</MenuItem>
-      </TextField>
-    )}
-  />
-</Grid>
+                <Controller
+                  name="gender"
+                  control={control}
+                  defaultValue="OTHER"
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Geschlecht"
+                      select
+                      fullWidth
+                    >
+                      <MenuItem value="FEMALE">Weiblich</MenuItem>
+                      <MenuItem value="MALE">Männlich</MenuItem>
+                      <MenuItem value="OTHER">Andere/Nicht angegeben</MenuItem>
+                    </TextField>
+                  )}
+                />
+              </Grid>
 
             </Grid>
           </DialogContent>
@@ -461,7 +460,7 @@ const handleOpenDialog = (customer = null) => {
                 <Controller
                   name="amount"
                   control={topUpControl}
-                  rules={{ 
+                  rules={{
                     required: 'Betrag ist erforderlich',
                     min: { value: 0.01, message: 'Betrag muss größer als 0 sein' },
                     max: { value: 500, message: 'Maximalbetrag ist €500' }
@@ -587,7 +586,7 @@ const handleOpenDialog = (customer = null) => {
                           Durchschnitt pro Kauf
                         </Typography>
                         <Typography variant="h6">
-                          {customerStats.transactionCount > 0 
+                          {customerStats.transactionCount > 0
                             ? formatCurrency(customerStats.totalSpent / customerStats.transactionCount)
                             : formatCurrency(0)
                           }
