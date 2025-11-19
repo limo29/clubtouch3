@@ -8,17 +8,24 @@ const accountingService = require('./accountingService');
 
 class ExportService {
   constructor() {
-    this.exportDir = path.join(process.cwd(), 'exports');
+    // Nutze /tmp statt /app
+    this.exportDir = process.env.EXPORT_DIR || path.join('/tmp', 'exports');
     this.ensureExportDir();
     this.currencyFmt = new Intl.NumberFormat('de-DE', {
-      style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2
+      style: 'currency', currency: 'EUR',
+      minimumFractionDigits: 2, maximumFractionDigits: 2
     });
   }
 
   async ensureExportDir() {
-    try { await fs.mkdir(this.exportDir, { recursive: true }); }
-    catch (e) { console.error('Error creating export directory:', e); }
+    try {
+      await fs.mkdir(this.exportDir, { recursive: true });
+    } catch (e) {
+      console.error('Error creating export directory:', e);
+    }
   }
+
+
 
   /* ========= THEME & UTIL ========= */
   getTheme() {
@@ -239,7 +246,7 @@ class ExportService {
       Kassierer: t.user.name
     })));
 
-    const fields = ['Transaktions_ID','Datum','Kunde','Artikel','Kategorie','Menge','Einheit','Einzelpreis','Gesamtpreis','Zahlungsart','Kassierer'];
+    const fields = ['Transaktions_ID', 'Datum', 'Kunde', 'Artikel', 'Kategorie', 'Menge', 'Einheit', 'Einzelpreis', 'Gesamtpreis', 'Zahlungsart', 'Kassierer'];
     const csv = parse(rows, { fields, delimiter: ';' });
     return { data: csv, filename: `transaktionen_${new Date().toISOString().split('T')[0]}.csv`, mimeType: 'text/csv' };
   }
@@ -251,7 +258,7 @@ class ExportService {
       Mindestbestand: a.minStock, Einheit: a.unit, Aktiv: a.active ? 'Ja' : 'Nein',
       'Zählt für Highscore': a.countsForHighscore ? 'Ja' : 'Nein'
     }));
-    const fields = ['ID','Name','Kategorie','Preis','Bestand','Mindestbestand','Einheit','Aktiv','Zählt für Highscore'];
+    const fields = ['ID', 'Name', 'Kategorie', 'Preis', 'Bestand', 'Mindestbestand', 'Einheit', 'Aktiv', 'Zählt für Highscore'];
     const csv = parse(data, { fields, delimiter: ';' });
     return { data: csv, filename: `bestand_${new Date().toISOString().split('T')[0]}.csv`, mimeType: 'text/csv' };
   }
@@ -265,7 +272,7 @@ class ExportService {
       ID: c.id, Name: c.name, Spitzname: c.nickname || '', Guthaben: c.balance,
       'Anzahl Transaktionen': c._count.transactions, 'Erstellt am': c.createdAt.toLocaleString('de-DE')
     }));
-    const fields = ['ID','Name','Spitzname','Guthaben','Anzahl Transaktionen','Erstellt am'];
+    const fields = ['ID', 'Name', 'Spitzname', 'Guthaben', 'Anzahl Transaktionen', 'Erstellt am'];
     const csv = parse(data, { fields, delimiter: ';' });
     return { data: csv, filename: `kunden_${new Date().toISOString().split('T')[0]}.csv`, mimeType: 'text/csv' };
   }
@@ -390,7 +397,7 @@ class ExportService {
         this._writeFooters(doc, theme);
         doc.end();
         done.then(pdf => resolve({
-          data: pdf, filename: `monatsbericht_${year}_${String(month).padStart(2,'0')}.pdf`, mimeType: 'application/pdf'
+          data: pdf, filename: `monatsbericht_${year}_${String(month).padStart(2, '0')}.pdf`, mimeType: 'application/pdf'
         }));
       } catch (e) { reject(e); }
     });
@@ -399,7 +406,7 @@ class ExportService {
   async exportEURPDF(startDate, endDate) {
     const eur = await accountingService.getProfitLoss(startDate, endDate);
     const start = new Date(startDate);
-    const end = new Date(endDate); end.setHours(23,59,59,999);
+    const end = new Date(endDate); end.setHours(23, 59, 59, 999);
 
     const [soldArticles, paidInvoices, expenseDocs] = await Promise.all([
       prisma.$queryRaw`
@@ -460,13 +467,13 @@ class ExportService {
         });
 
         this._section(doc, theme, 'Verkaufte Artikel');
-        const soldSumAmount = (soldArticles || []).reduce((a,r)=>a+Number(r.amount||0),0);
-        const soldSumQty = (soldArticles || []).reduce((a,r)=>a+Number(r.quantity||0),0);
+        const soldSumAmount = (soldArticles || []).reduce((a, r) => a + Number(r.amount || 0), 0);
+        const soldSumQty = (soldArticles || []).reduce((a, r) => a + Number(r.quantity || 0), 0);
         this._table(doc, theme, {
           columns: [
             { header: 'Artikel', width: 260, render: r => r.article },
             { header: 'Kategorie', width: 160, render: r => r.category || '-' },
-            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity||0).toFixed(0) },
+            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
             { header: 'Betrag', width: 120, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
           ],
           rows: soldArticles || [],
@@ -476,7 +483,7 @@ class ExportService {
         });
 
         this._section(doc, theme, 'Bezahlte Ausgangsrechnungen');
-        const paidInvSum = (paidInvoices || []).reduce((a,r)=>a+Number(r.totalAmount||0),0);
+        const paidInvSum = (paidInvoices || []).reduce((a, r) => a + Number(r.totalAmount || 0), 0);
         this._table(doc, theme, {
           columns: [
             { header: 'Empfänger', width: 220, render: r => r.customerName || '-' },
@@ -491,7 +498,7 @@ class ExportService {
         });
 
         this._section(doc, theme, 'Ausgabenbelege (bezahlt)');
-        const expenseSum = (expenseDocs || []).reduce((a,r)=>a+Number(r.totalAmount||0),0);
+        const expenseSum = (expenseDocs || []).reduce((a, r) => a + Number(r.totalAmount || 0), 0);
         this._table(doc, theme, {
           columns: [
             { header: 'Datum', width: 100, render: r => this._fmtDate(r.documentDate) },
@@ -536,14 +543,14 @@ class ExportService {
 
     const sum = (arr, sel) => arr.reduce((acc, r) => acc + Number(sel(r) || 0), 0);
     const soldSumAmount = sum(soldArticles, r => r.amount);
-    const soldSumQty    = sum(soldArticles, r => r.quantity);
-    const paidInvSum    = sum(paidInvoices, r => r.totalAmount);
-    const expenseSum    = sum(expenseDocs, r => r.totalAmount);
-    const unpaidSum     = sum(unpaidInvoices, r => r.totalAmount);
-    const systemQtySum  = sum(system, r => r.systemQty);
-    const physQtySum    = sum(diffRows, r => r.physicalQty);
-    const diffQtySum    = sum(diffRows, r => r.diff);
-    const banksTotal    = sum((report.bankAccountsJson || []), b => b.balance);
+    const soldSumQty = sum(soldArticles, r => r.quantity);
+    const paidInvSum = sum(paidInvoices, r => r.totalAmount);
+    const expenseSum = sum(expenseDocs, r => r.totalAmount);
+    const unpaidSum = sum(unpaidInvoices, r => r.totalAmount);
+    const systemQtySum = sum(system, r => r.systemQty);
+    const physQtySum = sum(diffRows, r => r.physicalQty);
+    const diffQtySum = sum(diffRows, r => r.diff);
+    const banksTotal = sum((report.bankAccountsJson || []), b => b.balance);
 
     return new Promise((resolve, reject) => {
       try {
@@ -555,7 +562,7 @@ class ExportService {
             width: doc.page.width - theme.page.margin * 2, align: 'left'
           });
 
-        const sub = `Geschäftsjahr: ${fiscalYear.name} (${new Date(fiscalYear.startDate).toISOString().slice(0,10)} – ${new Date(fiscalYear.endDate).toISOString().slice(0,10)})`;
+        const sub = `Geschäftsjahr: ${fiscalYear.name} (${new Date(fiscalYear.startDate).toISOString().slice(0, 10)} – ${new Date(fiscalYear.endDate).toISOString().slice(0, 10)})`;
         doc.moveDown(0.5);
         doc.font(theme.font.regular).fontSize(12).fillColor(theme.color.subtext)
           .text(sub, { width: doc.page.width - theme.page.margin * 2 });
@@ -603,7 +610,7 @@ class ExportService {
         // INHALT ab Seite 2
         const headerInfo = {
           title: `Jahresabschluss – ${theme.brandName}`,
-          subtitle: `Geschäftsjahr: ${fiscalYear.name} (${new Date(fiscalYear.startDate).toISOString().slice(0,10)} – ${new Date(fiscalYear.endDate).toISOString().slice(0,10)})`
+          subtitle: `Geschäftsjahr: ${fiscalYear.name} (${new Date(fiscalYear.startDate).toISOString().slice(0, 10)} – ${new Date(fiscalYear.endDate).toISOString().slice(0, 10)})`
         };
         this._addPageDecorated(doc, theme, headerInfo);
 
@@ -626,7 +633,7 @@ class ExportService {
           columns: [
             { header: 'Artikel', width: 260, render: r => r.article },
             { header: 'Kategorie', width: 180, render: r => r.category || '-' },
-            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity||0).toFixed(0) },
+            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
             { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.amount), color: () => this.getTheme().color.success }
           ],
           rows: soldArticles || [],
@@ -668,7 +675,7 @@ class ExportService {
           columns: [
             { header: 'Artikel', width: 320, render: r => r.name },
             { header: 'Einheit', width: 120, render: r => r.unit || '-' },
-            { header: 'System', width: 120, align: 'right', render: r => Number(r.systemQty||0).toFixed(2) }
+            { header: 'System', width: 120, align: 'right', render: r => Number(r.systemQty || 0).toFixed(2) }
           ],
           rows: system || [],
           sumRow: ['Summe', '', Number(systemQtySum).toFixed(2)],
@@ -681,9 +688,9 @@ class ExportService {
           columns: [
             { header: 'Artikel', width: 260, render: r => r.name },
             { header: 'Einheit', width: 120, render: r => r.unit || '-' },
-            { header: 'System', width: 100, align: 'right', render: r => Number(r.systemQty||0).toFixed(2) },
-            { header: 'Echt', width: 100, align: 'right', render: r => Number(r.physicalQty||0).toFixed(2) },
-            { header: 'Δ', width: 80, align: 'right', render: r => Number(r.diff||0).toFixed(2), color: (r) => r.diff < 0 ? theme.color.danger : theme.color.success }
+            { header: 'System', width: 100, align: 'right', render: r => Number(r.systemQty || 0).toFixed(2) },
+            { header: 'Echt', width: 100, align: 'right', render: r => Number(r.physicalQty || 0).toFixed(2) },
+            { header: 'Δ', width: 80, align: 'right', render: r => Number(r.diff || 0).toFixed(2), color: (r) => r.diff < 0 ? theme.color.danger : theme.color.success }
           ],
           rows: diffRows || [],
           sumRow: ['Summe', '', Number(systemQtySum).toFixed(2), Number(physQtySum).toFixed(2), Number(diffQtySum).toFixed(2)],
@@ -711,7 +718,7 @@ class ExportService {
         this._writeFooters(doc, theme);
         doc.end();
         done.then(pdf => resolve({
-          data: pdf, filename: `jahresabschluss_${fiscalYear.name.replace(/\s+/g,'_')}.pdf`, mimeType: 'application/pdf'
+          data: pdf, filename: `jahresabschluss_${fiscalYear.name.replace(/\s+/g, '_')}.pdf`, mimeType: 'application/pdf'
         }));
       } catch (e) { reject(e); }
     });
@@ -724,7 +731,7 @@ class ExportService {
   }
 
   getMonthName(month) {
-    const months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+    const months = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
     return months[month - 1];
   }
 }
