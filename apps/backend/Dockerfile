@@ -31,7 +31,11 @@ RUN adduser -S nodejs -u 1001
 # Copy from builder
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
 COPY --chown=nodejs:nodejs . .
+
+# Create uploads directory and set permissions
+RUN mkdir -p uploads && chown -R nodejs:nodejs uploads
 
 # Switch to non-root user
 USER nodejs

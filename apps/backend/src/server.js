@@ -7,8 +7,9 @@ const PORT = process.env.PORT || 8080;
 
 async function main() {
   try {
+    console.log('⏳ Connecting to database...');
     await prisma.$connect();
-    console.log('✅ Datenbankverbindung hergestellt');
+    console.log('✅ Database connection established');
 
     // Erstelle HTTP Server
     const server = createServer(app);
@@ -17,12 +18,13 @@ async function main() {
     initializeWebSocket(server);
     console.log('✅ WebSocket-Server initialisiert');
 
-    server.listen(PORT, () => {
-      console.log(`🚀 Server läuft auf Port ${PORT}`);
-      console.log(`📍 http://localhost:${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📍 Environment: ${process.env.NODE_ENV}`);
+      console.log(`📂 Working Directory: ${process.cwd()}`);
     });
   } catch (error) {
-    console.error('❌ Fehler beim Serverstart:', error);
+    console.error('❌ Error starting server:', error);
     await prisma.$disconnect();
     process.exit(1);
   }
