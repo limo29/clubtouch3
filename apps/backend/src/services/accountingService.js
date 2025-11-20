@@ -15,7 +15,7 @@ class AccountingService {
     end.setHours(23, 59, 59, 999);
 
     // Verkäufe (POS)
-    const [txAgg, incomeByCategoryRaw, txCash, txAccount] = await Promise.all([
+    const [txAgg, incomeByCategoryRaw, txCash, txAccount, expiredRaw, ownerUseRaw] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', cancelled: false, createdAt: { gte: start, lte: end } },
         _sum: { totalAmount: true }, _count: true
@@ -38,6 +38,28 @@ class AccountingService {
         where: { type: 'SALE', cancelled: false, paymentMethod: 'ACCOUNT', createdAt: { gte: start, lte: end } },
         _sum: { totalAmount: true }
       }),
+      // Abgelaufene Artikel (Menge)
+      prisma.$queryRaw`
+        SELECT a.name as article, SUM(ti.quantity) as quantity
+        FROM "TransactionItem" ti
+        JOIN "Transaction" t ON ti."transactionId" = t.id
+        JOIN "Article" a ON ti."articleId" = a.id
+        WHERE t."createdAt" >= ${start} AND t."createdAt" <= ${end}
+          AND t.cancelled = false AND t.type = 'EXPIRED'
+        GROUP BY a.id, a.name
+        ORDER BY quantity DESC
+      `,
+      // Eigenverbrauch (Menge)
+      prisma.$queryRaw`
+        SELECT a.name as article, SUM(ti.quantity) as quantity
+        FROM "TransactionItem" ti
+        JOIN "Transaction" t ON ti."transactionId" = t.id
+        JOIN "Article" a ON ti."articleId" = a.id
+        WHERE t."createdAt" >= ${start} AND t."createdAt" <= ${end}
+          AND t.cancelled = false AND t.type = 'OWNER_USE'
+        GROUP BY a.id, a.name
+        ORDER BY quantity DESC
+      `
     ]);
 
     // Einnahmen nach Artikel (für Top-10 Chart)
@@ -100,6 +122,16 @@ class AccountingService {
       amount: Number(r.amount || 0)
     }));
 
+    const expiredItems = expiredRaw.map(r => ({
+      article: r.article || '—',
+      quantity: Number(r.quantity || 0)
+    }));
+
+    const ownerUseItems = ownerUseRaw.map(r => ({
+      article: r.article || '—',
+      quantity: Number(r.quantity || 0)
+    }));
+
     return {
       summary: {
         totalIncome: incomeTotal,
@@ -113,7 +145,9 @@ class AccountingService {
         incomeByType: {
           transactions: dec(txCash._sum.totalAmount) + dec(txAccount._sum.totalAmount),
           invoices: incomeInvoices // <— neu
-        }
+        },
+        expiredItems,
+        ownerUseItems
       }
     };
   }
@@ -211,13 +245,13 @@ class AccountingService {
     });
   }
   // Liefert alle Tabellen-Daten für die Abschluss-Preview eines Geschäftsjahres
- /**
-   * Vorschau-Daten für einen Jahresabschluss (Zeitraum = Geschäftsjahr):
-   * - Alle Einnahmen nach Artikel
-   * - Bezahlte Ausgangsrechnungen
-   * - Ausgaben (bezahlte Einkaufsrechnungen)
-   * - Offene Ausgangsrechnungen (unbezahlt)
-   */
+  /**
+    * Vorschau-Daten für einen Jahresabschluss (Zeitraum = Geschäftsjahr):
+    * - Alle Einnahmen nach Artikel
+    * - Bezahlte Ausgangsrechnungen
+    * - Ausgaben (bezahlte Einkaufsrechnungen)
+    * - Offene Ausgangsrechnungen (unbezahlt)
+    */
   async getFiscalYearPreview(fiscalYearId) {
     const fy = await prisma.fiscalYear.findUnique({ where: { id: fiscalYearId } });
     if (!fy) throw new Error('Geschäftsjahr nicht gefunden');
@@ -243,6 +277,38 @@ class AccountingService {
         AND t.type = 'SALE'
       GROUP BY a.id, a.name, a.category
       ORDER BY amount DESC
+    `;
+
+    // Abgelaufene Artikel
+    const expiredArticles = await prisma.$queryRaw`
+      SELECT 
+        a.name AS article,
+        SUM(ti.quantity) AS quantity
+      FROM "TransactionItem" ti
+      JOIN "Transaction" t ON ti."transactionId" = t.id
+      JOIN "Article" a ON ti."articleId" = a.id
+      WHERE t."createdAt" >= ${start}
+        AND t."createdAt" <= ${end}
+        AND t.cancelled = false
+        AND t.type = 'EXPIRED'
+      GROUP BY a.id, a.name
+      ORDER BY quantity DESC
+    `;
+
+    // Eigenverbrauch
+    const ownerUseArticles = await prisma.$queryRaw`
+      SELECT 
+        a.name AS article,
+        SUM(ti.quantity) AS quantity
+      FROM "TransactionItem" ti
+      JOIN "Transaction" t ON ti."transactionId" = t.id
+      JOIN "Article" a ON ti."articleId" = a.id
+      WHERE t."createdAt" >= ${start}
+        AND t."createdAt" <= ${end}
+        AND t.cancelled = false
+        AND t.type = 'OWNER_USE'
+      GROUP BY a.id, a.name
+      ORDER BY quantity DESC
     `;
 
     // Bezahlte Ausgangsrechnungen (Erlöse aus AR)
@@ -273,7 +339,7 @@ class AccountingService {
       select: { customerName: true, description: true, createdAt: true, dueDate: true, status: true, totalAmount: true }
     });
 
-    return { soldArticles, paidInvoices, expenseDocs, unpaidInvoices };
+    return { soldArticles, paidInvoices, expenseDocs, unpaidInvoices, expiredArticles, ownerUseArticles };
   }
 
 }

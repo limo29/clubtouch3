@@ -24,6 +24,10 @@ import PurchaseDocumentsCreate from './pages/PurchaseDocumentsCreate';
 import ProfitLoss from './pages/ProfitLoss';
 import Invoices from './pages/Invoices';
 import PurchaseDocumentEdit from './pages/PurchaseDocumentEdit';
+import PublicHighscore from './pages/PublicHighscore';
+import PublicAds from './pages/PublicAds';
+import AdminAds from './pages/AdminAds';
+import CheckBalance from './pages/CheckBalance';
 
 // React Query Client
 const queryClient = new QueryClient({
@@ -74,7 +78,16 @@ function App() {
               <Route path="profit-loss" element={<ProfitLoss />} />
               <Route path="invoices" element={<Invoices />} />
               <Route path="/PurchaseDocuments/edit/:id" element={<PurchaseDocumentEdit />} />
+              <Route path="profit-loss" element={<ProfitLoss />} />
+              <Route path="invoices" element={<Invoices />} />
+              <Route path="/PurchaseDocuments/edit/:id" element={<PurchaseDocumentEdit />} />
+              <Route path="ads" element={<AdminAds />} />
             </Route>
+
+            {/* Public Routes */}
+            <Route path="/public/highscore" element={<PublicHighscore />} />
+            <Route path="/public/ads" element={<PublicAds />} />
+            <Route path="/check-balance" element={<CheckBalance />} />
 
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

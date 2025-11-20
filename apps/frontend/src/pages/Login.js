@@ -38,13 +38,13 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    
+
     const result = await login(formData.email, formData.password);
-    
+
     if (result.success) {
       navigate('/dashboard');
     }
-    
+
     setLoading(false);
   };
 
@@ -88,7 +88,7 @@ const Login = () => {
               autoFocus
               autoComplete="email"
             />
-            
+
             <TextField
               name="password"
               label="Passwort"
@@ -123,6 +123,20 @@ const Login = () => {
               {loading ? 'Anmelden...' : 'Anmelden'}
             </Button>
           </form>
+
+          <Box sx={{ mt: 4 }}>
+            <Divider sx={{ mb: 2 }}>
+              <Typography variant="caption" color="text.secondary">ÖFFENTLICHER BEREICH</Typography>
+            </Divider>
+            <Stack spacing={1}>
+              <Button variant="outlined" onClick={() => navigate('/public/highscore')}>
+                Zum Highscore
+              </Button>
+              <Button variant="outlined" onClick={() => navigate('/check-balance')}>
+                Guthaben prüfen
+              </Button>
+            </Stack>
+          </Box>
         </CardContent>
       </Card>
     </Box>

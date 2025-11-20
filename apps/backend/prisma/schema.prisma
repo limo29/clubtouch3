@@ -204,6 +204,8 @@ enum Role {
 enum TransactionType {
   SALE
   REFUND
+  EXPIRED
+  OWNER_USE
 }
 
 enum PaymentMethod {
@@ -223,6 +225,8 @@ enum StockMovementType {
   INVENTORY // Inventur 
   CORRECTION // Korrektur 
   SALE // Verkauf (automatisch) 
+  EXPIRED // Abgelaufen
+  OWNER_USE // Eigenverbrauch
 }
 
 enum HighscoreType {
@@ -399,4 +403,23 @@ model YearEndReport {
   inventoryPhysical Json     @default("[]")// [{articleId,name,physicalStock,unit}]
   inventoryDiff    Json      @default("[]")// [{articleId,name,diff,unit}]
   createdAt        DateTime  @default(now())
+}
+
+// Werbe-Slides für Digital Signage
+model AdSlide {
+  id          String           @id @default(uuid())
+  imageUrl    String
+  duration    Int              @default(10) // Sekunden
+  transition  AdTransitionType @default(FADE)
+  order       Int              @default(0)
+  active      Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+enum AdTransitionType {
+  FADE
+  SLIDE
+  ZOOM
+  NONE
 }

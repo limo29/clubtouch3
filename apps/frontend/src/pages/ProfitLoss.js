@@ -322,6 +322,8 @@ function CloseYearDialog({ open, onClose, fy, onSubmit }) {
                 <Tab label="Ausgaben (Einkäufe)" value="expenses" />
                 <Tab label="Systembestand" value="systemInv" />
                 <Tab label="Offene Rechnungen" value="unpaidInv" />
+                <Tab label="Abgelaufen" value="expired" />
+                <Tab label="Eigenverbrauch" value="ownerUse" />
               </Tabs>
 
               <Paper sx={{ mt: 1, p: 1 }}>
@@ -447,6 +449,44 @@ function CloseYearDialog({ open, onClose, fy, onSubmit }) {
                         </TableBody>
                       </Table>
                     )}
+
+                    {tab === 'expired' && (
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Artikel</TableCell>
+                            <TableCell align="right">Menge</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {(previewData?.expiredArticles || []).map((r, i) => (
+                            <TableRow key={i}>
+                              <TableCell>{r.article}</TableCell>
+                              <TableCell align="right">{Number(r.quantity || 0)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+
+                    {tab === 'ownerUse' && (
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Artikel</TableCell>
+                            <TableCell align="right">Menge</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {(previewData?.ownerUseArticles || []).map((r, i) => (
+                            <TableRow key={i}>
+                              <TableCell>{r.article}</TableCell>
+                              <TableCell align="right">{Number(r.quantity || 0)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
                   </>
                 )}
               </Paper>
@@ -501,6 +541,8 @@ export default function ProfitLoss() {
     totalIncome: asNum(plData?.summary?.totalIncome),
     totalExpenses: asNum(plData?.summary?.totalExpenses),
     profit: asNum(plData?.summary?.profit),
+    expiredItems: plData?.summary?.expiredItems || [],
+    ownerUseItems: plData?.summary?.ownerUseItems || [],
   };
 
   const incomeByCategory = (plData?.details?.incomeByCategory || []).map(x => ({
@@ -714,6 +756,43 @@ export default function ProfitLoss() {
                 <Bar dataKey="Einnahmen" fill="#4caf50" />
               </BarChart>
             </ResponsiveContainer>
+          </CardContent></Card>
+        </Grid>
+
+        {/* Abgelaufen & Eigenverbrauch */}
+        <Grid item xs={12} md={6}>
+          <Card><CardContent>
+            <Typography variant="h6" gutterBottom>Abgelaufene Artikel (Menge)</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead><TableRow><TableCell>Artikel</TableCell><TableCell align="right">Menge</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {summary.expiredItems.length === 0 ? (
+                    <TableRow><TableCell colSpan={2}>Keine Einträge</TableCell></TableRow>
+                  ) : summary.expiredItems.map((row, i) => (
+                    <TableRow key={i}><TableCell>{row.article}</TableCell><TableCell align="right">{row.quantity}</TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent></Card>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Card><CardContent>
+            <Typography variant="h6" gutterBottom>Eigenverbrauch (Menge)</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead><TableRow><TableCell>Artikel</TableCell><TableCell align="right">Menge</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {summary.ownerUseItems.length === 0 ? (
+                    <TableRow><TableCell colSpan={2}>Keine Einträge</TableCell></TableRow>
+                  ) : summary.ownerUseItems.map((row, i) => (
+                    <TableRow key={i}><TableCell>{row.article}</TableCell><TableCell align="right">{row.quantity}</TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </CardContent></Card>
         </Grid>
       </Grid>
