@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Box, Button, Card, CardContent, CardMedia, Chip, Container,
+    Box, Button, Card, CardContent, CardMedia, Container,
     Dialog, DialogActions, DialogContent, DialogTitle, IconButton,
     Stack, TextField, Typography, MenuItem, Select, FormControl, InputLabel,
     Grid, Switch, FormControlLabel
 } from '@mui/material';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteIcon from '@mui/icons-material/Delete';
-import SaveIcon from '@mui/icons-material/Save';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import api from '../services/api';
 
 export default function AdminAds() {
     const [ads, setAds] = useState([]);
-    const [loading, setLoading] = useState(true);
     const [uploadOpen, setUploadOpen] = useState(false);
     const [newImageUrl, setNewImageUrl] = useState('');
     const [newDuration, setNewDuration] = useState(10);
@@ -25,8 +23,6 @@ export default function AdminAds() {
             setAds(res.data || []);
         } catch (err) {
             console.error(err);
-        } finally {
-            setLoading(false);
         }
     };
 

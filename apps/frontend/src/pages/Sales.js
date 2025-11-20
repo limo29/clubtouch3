@@ -99,6 +99,7 @@ const Sales = () => {
       const updated = customersData.customers.find(c => c.id === selectedCustomer.id);
       if (updated) setSelectedCustomer(updated);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customersData, selectedCustomer?.id]);
 
   const articles = useMemo(() => {

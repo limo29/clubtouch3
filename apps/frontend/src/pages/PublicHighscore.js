@@ -1,22 +1,19 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
     Box, Card, CardContent, Chip, CssBaseline, Divider, Stack,
-    Typography, alpha, GlobalStyles
+    Typography, alpha, GlobalStyles, createTheme, ThemeProvider
 } from '@mui/material';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
-import TimerIcon from '@mui/icons-material/AccessTime';
 import EuroIcon from '@mui/icons-material/Euro';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-
+import TimerIcon from '@mui/icons-material/Timer';
 import { io } from 'socket.io-client';
-import api from '../services/api'; // We might need a public api instance or just use the existing one if it handles public routes
-import { API_ENDPOINTS, WS_URL } from '../config/api';
+import api from '../services/api';
+import { WS_URL } from '../config/api';
 
-// Helper for clamp
-const clamp = (min, preferred, max) => `clamp(${min}, ${preferred}, ${max})`;
+// Helper functions
+const clamp = (min, val, max) => `clamp(${min}, ${val}, ${max})`;
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 
 export default function PublicHighscore() {

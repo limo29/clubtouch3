@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-    Box, Button, Card, CardContent, Container, TextField, Typography,
-    Stack, Divider, Chip, CircularProgress, Alert
+    Box, Container, Button, Card, CardContent, Stack, Typography,
+    TextField, CircularProgress, Alert, Divider
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import HistoryIcon from '@mui/icons-material/History';
-import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
