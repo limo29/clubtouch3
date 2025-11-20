@@ -33,6 +33,7 @@ import {
   Warning,
   Search,
   CloudUpload,
+  EventBusy,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
@@ -44,6 +45,11 @@ const Articles = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [editingArticle, setEditingArticle] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // State für "Abgelaufen" Dialog
+  const [openExpiredDialog, setOpenExpiredDialog] = useState(false);
+  const [expiredArticle, setExpiredArticle] = useState(null);
+  const [expiredQuantity, setExpiredQuantity] = useState(1);
 
   const { control, handleSubmit, reset, formState: { errors } } = useForm();
   const [imageFile, setImageFile] = useState(null);
@@ -88,6 +94,21 @@ const Articles = () => {
     mutationFn: async (articleId) =>
       (await api.patch(`${API_ENDPOINTS.ARTICLES}/${articleId}/toggle-status`)).data,
     onSuccess: () => queryClient.invalidateQueries(['articles']),
+  });
+
+  const expiredMutation = useMutation({
+    mutationFn: async (data) => {
+      return (await api.post(API_ENDPOINTS.TRANSACTIONS, {
+        type: 'EXPIRED',
+        items: [{ articleId: data.articleId, quantity: data.quantity }],
+        paymentMethod: 'CASH', // Dummy, wird im Backend ignoriert
+        customerId: null
+      })).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['articles']);
+      handleCloseExpiredDialog();
+    },
   });
 
   const articles = articlesData?.articles || [];
@@ -141,36 +162,58 @@ const Articles = () => {
     reset();
   };
 
-  // --- Submit (multipart + Zahlen normalisieren) ---
-const onSubmit = async (data) => {
-  const formData = new FormData();
+  // --- Expired Dialog Handlers ---
+  const handleOpenExpiredDialog = (article) => {
+    setExpiredArticle(article);
+    setExpiredQuantity(1);
+    setOpenExpiredDialog(true);
+  };
 
-  const safe = { ...data };
-  if (safe.price != null) safe.price = String(safe.price).replace(',', '.');
-  if (safe.minStock != null) safe.minStock = String(safe.minStock);
-  if (!editingArticle && safe.initialStock != null) safe.initialStock = String(safe.initialStock);
+  const handleCloseExpiredDialog = () => {
+    setOpenExpiredDialog(false);
+    setExpiredArticle(null);
+    setExpiredQuantity(1);
+  };
 
-  Object.entries(safe).forEach(([k, v]) => {
-    if (v !== undefined && v !== '') formData.append(k, v);
-  });
-
-  if (imageFile) formData.append('image', imageFile); // << Feldname MUSS "image" heißen
-
-  try {
-    const cfg = { headers: { 'Content-Type': 'multipart/form-data' } };
-
-    if (editingArticle) {
-      await api.put(`${API_ENDPOINTS.ARTICLES}/${editingArticle.id}`, formData, cfg);
-    } else {
-      await api.post(API_ENDPOINTS.ARTICLES, formData, cfg);
+  const handleExpiredSubmit = () => {
+    if (expiredArticle && expiredQuantity > 0) {
+      expiredMutation.mutate({
+        articleId: expiredArticle.id,
+        quantity: Number(expiredQuantity)
+      });
     }
+  };
 
-    queryClient.invalidateQueries(['articles']);
-    handleCloseDialog();
-  } catch (err) {
-    console.error('Upload failed', err);
-  }
-};
+  // --- Submit (multipart + Zahlen normalisieren) ---
+  const onSubmit = async (data) => {
+    const formData = new FormData();
+
+    const safe = { ...data };
+    if (safe.price != null) safe.price = String(safe.price).replace(',', '.');
+    if (safe.minStock != null) safe.minStock = String(safe.minStock);
+    if (!editingArticle && safe.initialStock != null) safe.initialStock = String(safe.initialStock);
+
+    Object.entries(safe).forEach(([k, v]) => {
+      if (v !== undefined && v !== '') formData.append(k, v);
+    });
+
+    if (imageFile) formData.append('image', imageFile); // << Feldname MUSS "image" heißen
+
+    try {
+      const cfg = { headers: { 'Content-Type': 'multipart/form-data' } };
+
+      if (editingArticle) {
+        await api.put(`${API_ENDPOINTS.ARTICLES}/${editingArticle.id}`, formData, cfg);
+      } else {
+        await api.post(API_ENDPOINTS.ARTICLES, formData, cfg);
+      }
+
+      queryClient.invalidateQueries(['articles']);
+      handleCloseDialog();
+    } catch (err) {
+      console.error('Upload failed', err);
+    }
+  };
 
 
   const categories = [...new Set(articles.map(a => a.category).filter(Boolean))];
@@ -281,8 +324,8 @@ const onSubmit = async (data) => {
                         <Typography variant="caption" color="text.secondary">
                           {article.unit}
                           {article.purchaseUnit && article.unitsPerPurchase
-                           ? ` – ${article.purchaseUnit} à ${article.unitsPerPurchase} ${article.unit}`
-                           : ''}
+                            ? ` – ${article.purchaseUnit} à ${article.unitsPerPurchase} ${article.unit}`
+                            : ''}
                         </Typography>
 
                       </Box>
@@ -313,6 +356,11 @@ const onSubmit = async (data) => {
                     <Tooltip title="Bearbeiten">
                       <IconButton size="small" onClick={() => handleOpenDialog(article)}>
                         <Edit />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Als abgelaufen buchen">
+                      <IconButton size="small" color="error" onClick={() => handleOpenExpiredDialog(article)}>
+                        <EventBusy />
                       </IconButton>
                     </Tooltip>
                   </TableCell>
@@ -393,31 +441,31 @@ const onSubmit = async (data) => {
 
                 />
               </Grid>
-<Grid item xs={12} sm={6}>
-  <Controller
-    name="purchaseUnit"
-    control={control}
-    render={({ field }) => (
-      <TextField {...field} label="Einkaufseinheit (optional)" fullWidth placeholder="z. B. Kiste" />
-    )}
-  />
-</Grid>
+              <Grid item xs={12} sm={6}>
+                <Controller
+                  name="purchaseUnit"
+                  control={control}
+                  render={({ field }) => (
+                    <TextField {...field} label="Einkaufseinheit (optional)" fullWidth placeholder="z. B. Kiste" />
+                  )}
+                />
+              </Grid>
 
-<Grid item xs={12} sm={6}>
-  <Controller
-    name="unitsPerPurchase"
-    control={control}
-    render={({ field }) => (
-      <TextField
-        {...field}
-        label="Einheiten pro Einkaufseinheit"
-        type="number"
-        inputProps={{ step: 1, min: 1 }}
-        fullWidth
-      />
-    )}
-  />
-</Grid>
+              <Grid item xs={12} sm={6}>
+                <Controller
+                  name="unitsPerPurchase"
+                  control={control}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Einheiten pro Einkaufseinheit"
+                      type="number"
+                      inputProps={{ step: 1, min: 1 }}
+                      fullWidth
+                    />
+                  )}
+                />
+              </Grid>
 
               <Grid item xs={12} sm={6}>
                 <Controller
@@ -496,6 +544,38 @@ const onSubmit = async (data) => {
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      {/* Expired Dialog */}
+      <Dialog open={openExpiredDialog} onClose={handleCloseExpiredDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Als abgelaufen buchen</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" gutterBottom>
+            Artikel: <strong>{expiredArticle?.name}</strong>
+          </Typography>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Menge"
+            type="number"
+            fullWidth
+            variant="outlined"
+            value={expiredQuantity}
+            onChange={(e) => setExpiredQuantity(e.target.value)}
+            inputProps={{ min: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseExpiredDialog}>Abbrechen</Button>
+          <Button
+            onClick={handleExpiredSubmit}
+            variant="contained"
+            color="error"
+            disabled={expiredMutation.isLoading || !expiredQuantity || expiredQuantity < 1}
+          >
+            {expiredMutation.isLoading ? 'Buche...' : 'Buchen'}
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

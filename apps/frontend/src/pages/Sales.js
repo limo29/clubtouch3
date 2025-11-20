@@ -7,7 +7,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import {
   Search, Female, Male, Person, ShoppingCart, AttachMoney,
-  History, AccountBalanceWallet
+  History, AccountBalanceWallet, LocalBar
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
@@ -99,6 +99,7 @@ const Sales = () => {
       const updated = customersData.customers.find(c => c.id === selectedCustomer.id);
       if (updated) setSelectedCustomer(updated);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customersData, selectedCustomer?.id]);
 
   const articles = useMemo(() => {
@@ -147,6 +148,18 @@ const Sales = () => {
   /* Logik */
   const handleCashSale = () => { if (!cart.length) return; quickSaleMutation.mutate({ paymentMethod: 'CASH', items: cart.map(i => ({ articleId: i.id, quantity: i.quantity })) }); };
   const handleQuickSale = (customer) => { if (!cart.length) return; quickSaleMutation.mutate({ paymentMethod: 'ACCOUNT', customerId: customer.id, items: cart.map(i => ({ articleId: i.id, quantity: i.quantity })) }); };
+
+  const handleOwnerUse = () => {
+    if (!cart.length) return;
+    if (window.confirm('Wirklich "Auf den Wirt" buchen?')) {
+      quickSaleMutation.mutate({
+        type: 'OWNER_USE',
+        paymentMethod: 'CASH', // Dummy
+        customerId: null,
+        items: cart.map(i => ({ articleId: i.id, quantity: i.quantity }))
+      });
+    }
+  };
 
   const filteredCustomers = useMemo(() => {
     const s = customerSearch.toLowerCase();
@@ -388,6 +401,17 @@ const Sales = () => {
                   Auf {selectedCustomer.nickname || selectedCustomer.name} buchen
                 </Button>
               )}
+
+              <Button
+                fullWidth
+                size="large"
+                sx={{ mt: 1, py: 1.2, bgcolor: 'warning.main', '&:hover': { bgcolor: 'warning.dark' } }}
+                variant="contained"
+                onClick={handleOwnerUse}
+                startIcon={<LocalBar />}
+              >
+                Auf den Wirt
+              </Button>
             </Box>
           )}
         </Card>

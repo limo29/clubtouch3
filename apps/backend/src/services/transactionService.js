@@ -1,11 +1,8 @@
 const prisma = require('../utils/prisma');
-const customerService = require('./customerService');
-const articleService = require('./articleService');
 
 class TransactionService {
-  // Erstelle neue Transaktion (Verkauf)
-async createSale(data, userId) {
-    const { customerId, paymentMethod, items } = data;
+  async createSale(data, userId) {
+    const { customerId, paymentMethod, items, type = 'SALE' } = data;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new Error('Keine Artikel im Warenkorb');
@@ -38,7 +35,10 @@ async createSale(data, userId) {
         // PREIS (als Number – pragmatisch, da Prisma Decimal in JS gut als Number nutzbar ist)
         const price = Number(article.price || 0);
         const itemTotal = price * qty;
-        totalAmount += itemTotal;
+        // Nur bei echtem Verkauf summieren wir den Betrag für die Bezahlung
+        if (type === 'SALE') {
+          totalAmount += itemTotal;
+        }
 
         // Vorhersage Lager nach Verkauf (nur für Warnung, nicht blockierend)
         const currentStock = Number(article.stock || 0);
@@ -56,12 +56,15 @@ async createSale(data, userId) {
         });
 
         // StockMovement (SALE; Menge negativ)
+        // Falls type EXPIRED oder OWNER_USE ist, nehmen wir das als Reason
+        const movementType = (type === 'EXPIRED' || type === 'OWNER_USE') ? type : 'SALE';
+
         await tx.stockMovement.create({
           data: {
             articleId: article.id,
-            type: 'SALE',
+            type: movementType,
             quantity: -qty,
-            reason: 'Verkauf'
+            reason: type === 'SALE' ? 'Verkauf' : (type === 'EXPIRED' ? 'Abgelaufen' : 'Eigenverbrauch')
           }
         });
 
@@ -75,7 +78,8 @@ async createSale(data, userId) {
       }
 
       // Kundenkonto-Prüfung (hier NICHT negativ zulassen!)
-      if (paymentMethod === 'ACCOUNT' && customerId) {
+      // Nur relevant, wenn es ein SALE ist und per ACCOUNT bezahlt wird
+      if (type === 'SALE' && paymentMethod === 'ACCOUNT' && customerId) {
         const customer = await tx.customer.findUnique({
           where: { id: customerId }
         });
@@ -94,9 +98,9 @@ async createSale(data, userId) {
       // Transaktion anlegen
       const transaction = await tx.transaction.create({
         data: {
-          type: 'SALE',
-          paymentMethod,
-          totalAmount,
+          type: type, // SALE, EXPIRED, OWNER_USE
+          paymentMethod: (type === 'SALE') ? paymentMethod : 'CASH', // Fallback für Non-Sale
+          totalAmount, // ist 0 bei EXPIRED/OWNER_USE
           userId,
           customerId,
           items: {
@@ -144,13 +148,9 @@ async createSale(data, userId) {
       console.error('Error updating highscore:', err);
     });
 
-    // Falls dein Controller schon auf { transaction, warnings } angepasst ist:
     return result;
-
-    // Falls du lieber das alte Verhalten brauchst (nur transaction):
-    // return result.transaction;
   }
-  
+
   // Storniere Transaktion
   async cancelTransaction(transactionId, userId) {
     // Starte Datenbank-Transaktion
@@ -163,15 +163,15 @@ async createSale(data, userId) {
           customer: true
         }
       });
-      
+
       if (!originalTransaction) {
         throw new Error('Transaktion nicht gefunden');
       }
-      
+
       if (originalTransaction.cancelled) {
         throw new Error('Transaktion wurde bereits storniert');
       }
-      
+
       // Markiere Original-Transaktion als storniert
       await tx.transaction.update({
         where: { id: transactionId },
@@ -181,7 +181,7 @@ async createSale(data, userId) {
           cancelledBy: userId
         }
       });
-      
+
       // Erstelle Storno-Transaktion
       const cancelTransaction = await tx.transaction.create({
         data: {
@@ -201,7 +201,7 @@ async createSale(data, userId) {
           }
         }
       });
-      
+
       // Gebe Artikel wieder in den Bestand zurück
       for (const item of originalTransaction.items) {
         await tx.article.update({
@@ -212,7 +212,7 @@ async createSale(data, userId) {
             }
           }
         });
-        
+
         // Erstelle Bestandsbewegung
         await tx.stockMovement.create({
           data: {
@@ -223,7 +223,7 @@ async createSale(data, userId) {
           }
         });
       }
-      
+
       // Bei Kundenkonto: Buche Guthaben zurück
       if (originalTransaction.paymentMethod === 'ACCOUNT' && originalTransaction.customerId) {
         await tx.customer.update({
@@ -235,31 +235,31 @@ async createSale(data, userId) {
           }
         });
       }
-      
+
       return {
         originalTransaction,
         cancelTransaction
       };
     });
-    
+
     return result;
   }
-  
+
   // Liste Transaktionen
   async listTransactions(filters = {}) {
     const { startDate, endDate, customerId, paymentMethod, includeItems = false } = filters;
-    
+
     const where = {};
-    
+
     if (startDate || endDate) {
       where.createdAt = {};
       if (startDate) where.createdAt.gte = new Date(startDate);
       if (endDate) where.createdAt.lte = new Date(endDate);
     }
-    
+
     if (customerId) where.customerId = customerId;
     if (paymentMethod) where.paymentMethod = paymentMethod;
-    
+
     const include = {
       customer: true,
       user: {
@@ -269,7 +269,7 @@ async createSale(data, userId) {
         }
       }
     };
-    
+
     if (includeItems) {
       include.items = {
         include: {
@@ -277,14 +277,14 @@ async createSale(data, userId) {
         }
       };
     }
-    
+
     return await prisma.transaction.findMany({
       where,
       include,
       orderBy: { createdAt: 'desc' }
     });
   }
-  
+
   // Hole einzelne Transaktion
   async getTransaction(transactionId) {
     return await prisma.transaction.findUnique({
@@ -315,91 +315,91 @@ async createSale(data, userId) {
       }
     });
   }
-  
-// Tagesabschluss
-async getDailySummary(date = new Date()) {
-  const startOfDay = new Date(date);
-  startOfDay.setHours(0, 0, 0, 0);
-  
-  const endOfDay = new Date(date);
-  endOfDay.setHours(23, 59, 59, 999);
-  
-  const [
-    totalSales,
-    cashSales,
-    accountSales,
-    cancelledSales,
-    topArticles,
-    hourlyDistribution
-  ] = await Promise.all([
-    // Gesamtumsatz
-    prisma.transaction.aggregate({
-      where: {
-        type: 'SALE',
-        cancelled: false,
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay
-        }
-      },
-      _sum: {
-        totalAmount: true
-      },
-      _count: true
-    }),
-    
-    // Bar-Umsatz
-    prisma.transaction.aggregate({
-      where: {
-        type: 'SALE',
-        paymentMethod: 'CASH',
-        cancelled: false,
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay
-        }
-      },
-      _sum: {
-        totalAmount: true
-      },
-      _count: true
-    }),
-    
-    // Kundenkonto-Umsatz
-    prisma.transaction.aggregate({
-      where: {
-        type: 'SALE',
-        paymentMethod: 'ACCOUNT',
-        cancelled: false,
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay
-        }
-      },
-      _sum: {
-        totalAmount: true
-      },
-      _count: true
-    }),
-    
-    // Stornierte Verkäufe
-    prisma.transaction.aggregate({
-      where: {
-        type: 'SALE',
-        cancelled: true,
-        cancelledAt: {
-          gte: startOfDay,
-          lte: endOfDay
-        }
-      },
-      _sum: {
-        totalAmount: true
-      },
-      _count: true
-    }),
-    
-    // Top verkaufte Artikel
-    prisma.$queryRaw`
+
+  // Tagesabschluss
+  async getDailySummary(date = new Date()) {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const [
+      totalSales,
+      cashSales,
+      accountSales,
+      cancelledSales,
+      topArticles,
+      hourlyDistribution
+    ] = await Promise.all([
+      // Gesamtumsatz
+      prisma.transaction.aggregate({
+        where: {
+          type: 'SALE',
+          cancelled: false,
+          createdAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        },
+        _sum: {
+          totalAmount: true
+        },
+        _count: true
+      }),
+
+      // Bar-Umsatz
+      prisma.transaction.aggregate({
+        where: {
+          type: 'SALE',
+          paymentMethod: 'CASH',
+          cancelled: false,
+          createdAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        },
+        _sum: {
+          totalAmount: true
+        },
+        _count: true
+      }),
+
+      // Kundenkonto-Umsatz
+      prisma.transaction.aggregate({
+        where: {
+          type: 'SALE',
+          paymentMethod: 'ACCOUNT',
+          cancelled: false,
+          createdAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        },
+        _sum: {
+          totalAmount: true
+        },
+        _count: true
+      }),
+
+      // Stornierte Verkäufe
+      prisma.transaction.aggregate({
+        where: {
+          type: 'SALE',
+          cancelled: true,
+          cancelledAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        },
+        _sum: {
+          totalAmount: true
+        },
+        _count: true
+      }),
+
+      // Top verkaufte Artikel
+      prisma.$queryRaw`
       SELECT 
         a.id,
         a.name,
@@ -417,9 +417,9 @@ async getDailySummary(date = new Date()) {
       ORDER BY quantity_sold DESC
       LIMIT 10
     `,
-    
-    // Umsatzverteilung nach Stunden
-    prisma.$queryRaw`
+
+      // Umsatzverteilung nach Stunden
+      prisma.$queryRaw`
       SELECT 
         EXTRACT(HOUR FROM "createdAt") as hour,
         COUNT(*) as transactions,
@@ -432,30 +432,30 @@ async getDailySummary(date = new Date()) {
       GROUP BY hour
       ORDER BY hour
     `
-  ]);
-  
-  function safeNumber(value) {
-    if (value === null || value === undefined) return 0;
-    if (typeof value === 'bigint') return Number(value);
-    return value;
+    ]);
+
+    function safeNumber(value) {
+      if (value === null || value === undefined) return 0;
+      if (typeof value === 'bigint') return Number(value);
+      return value;
+    }
+
+    return {
+      date: date.toISOString().split('T')[0],
+      summary: {
+        totalRevenue: safeNumber(totalSales._sum.totalAmount),
+        totalTransactions: totalSales._count || 0,
+        cashRevenue: safeNumber(cashSales._sum.totalAmount),
+        cashTransactions: cashSales._count || 0,
+        accountRevenue: safeNumber(accountSales._sum.totalAmount),
+        accountTransactions: accountSales._count || 0,
+        cancelledRevenue: safeNumber(cancelledSales._sum.totalAmount),
+        cancelledTransactions: cancelledSales._count || 0
+      },
+      topArticles,
+      hourlyDistribution
+    };
   }
-  
-  return {
-    date: date.toISOString().split('T')[0],
-    summary: {
-      totalRevenue: safeNumber(totalSales._sum.totalAmount),
-      totalTransactions: totalSales._count || 0,
-      cashRevenue: safeNumber(cashSales._sum.totalAmount),
-      cashTransactions: cashSales._count || 0,
-      accountRevenue: safeNumber(accountSales._sum.totalAmount),
-      accountTransactions: accountSales._count || 0,
-      cancelledRevenue: safeNumber(cancelledSales._sum.totalAmount),
-      cancelledTransactions: cancelledSales._count || 0
-    },
-    topArticles,
-    hourlyDistribution
-  };
-}
 
 }
 

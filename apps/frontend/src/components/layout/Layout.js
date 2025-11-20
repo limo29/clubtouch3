@@ -37,6 +37,7 @@ import {
   DarkMode as DarkModeIcon,
   LightMode as LightModeIcon,
   SettingsBrightness as SystemModeIcon,
+  Campaign,
 } from '@mui/icons-material';
 import { useAuth } from '../../context/AuthContext';
 import { useColorMode } from '../../theme';
@@ -74,6 +75,7 @@ const Layout = () => {
     { text: 'Highscore', icon: <EmojiEvents />, path: '/highscore' },
     { text: 'EÜR', icon: <AccountBalance />, path: '/profit-loss' },
     { text: 'Berichte', icon: <Assessment />, path: '/reports' },
+    { text: 'Werbung', icon: <Campaign />, path: '/ads' },
   ];
   if (isAdmin) menuItems.push({ text: 'Benutzer', icon: <ManageAccounts />, path: '/users' });
 
