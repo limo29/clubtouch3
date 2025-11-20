@@ -17,7 +17,14 @@ class AdController {
     // Create new ad
     async createAd(req, res) {
         try {
-            const { imageUrl, duration, transition, active } = req.body;
+            const { duration, transition, active } = req.body;
+            let imageUrl = req.body.imageUrl;
+
+            if (req.file) {
+                // Construct URL for uploaded file
+                // Assuming server serves 'uploads' directory at /uploads
+                imageUrl = `/uploads/ads/${req.file.filename}`;
+            }
 
             // Get max order to append
             const lastAd = await prisma.adSlide.findFirst({
@@ -31,7 +38,7 @@ class AdController {
                     duration: Number(duration) || 10,
                     transition: transition || 'FADE',
                     order: newOrder,
-                    active: active !== undefined ? active : true
+                    active: active !== undefined ? String(active) === 'true' : true
                 }
             });
             res.json(ad);

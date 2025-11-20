@@ -446,6 +446,8 @@ const Sales = () => {
             <List dense>
               {historyData.map(t => {
                 const isTopUp = t.type === 'TOPUP';
+                const isOwnerUse = t.type === 'OWNER_USE';
+                const isExpired = t.type === 'EXPIRED';
                 const isCancelled = t.cancelled || (isTopUp && t.reference?.startsWith('STORNO:'));
                 // Check if this is a reversal entry itself
                 const isReversalEntry = isTopUp && t.amount < 0;
@@ -464,6 +466,8 @@ const Sales = () => {
                             {new Date(t.date).toLocaleString('de-DE')}
                             {isCancelled && <Chip size="small" label="Storniert" color="error" variant="outlined" sx={{ ml: 1, height: 20 }} />}
                             {isReversalEntry && <Chip size="small" label="Storno-Buchung" color="error" sx={{ ml: 1, height: 20 }} />}
+                            {!isTopUp && isOwnerUse && <Chip size="small" label="Auf den Wirt" color="warning" sx={{ ml: 1, height: 20 }} />}
+                            {!isTopUp && isExpired && <Chip size="small" label="Abgelaufen" color="error" sx={{ ml: 1, height: 20 }} />}
                           </Typography>
                           <Typography fontWeight={700} color={t.amount > 0 ? 'success.main' : 'text.primary'}>
                             {t.amount > 0 ? '+' : ''}{money(t.amount)}

@@ -36,12 +36,17 @@ function initializeWebSocket(server) {
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth.token;
-      if (!token) {
-        return next(new Error('Authentication error'));
+      if (token) {
+        try {
+          const decoded = verifyAccessToken(token);
+          socket.userId = decoded.userId;
+          console.log(`✅ Authenticated WebSocket connection: ${socket.userId}`);
+        } catch (err) {
+          console.warn('⚠️ Invalid token, proceeding as anonymous');
+        }
+      } else {
+        console.log('ℹ️ Anonymous WebSocket connection');
       }
-
-      const decoded = verifyAccessToken(token);
-      socket.userId = decoded.userId;
       next();
     } catch (err) {
       next(new Error('Authentication error'));
