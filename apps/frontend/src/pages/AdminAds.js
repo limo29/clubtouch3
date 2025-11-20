@@ -3,7 +3,7 @@ import {
     Box, Button, Card, CardContent, CardMedia, Container,
     Dialog, DialogActions, DialogContent, DialogTitle, IconButton,
     Stack, TextField, Typography, MenuItem, Select, FormControl, InputLabel,
-    Grid, Switch, FormControlLabel
+    Grid, Switch, FormControlLabel, Divider
 } from '@mui/material';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -14,6 +14,7 @@ export default function AdminAds() {
     const [ads, setAds] = useState([]);
     const [uploadOpen, setUploadOpen] = useState(false);
     const [newImageUrl, setNewImageUrl] = useState('');
+    const [newFile, setNewFile] = useState(null);
     const [newDuration, setNewDuration] = useState(10);
     const [newTransition, setNewTransition] = useState('FADE');
 
@@ -30,14 +31,24 @@ export default function AdminAds() {
 
     const handleCreate = async () => {
         try {
-            await api.post('/ads', {
-                imageUrl: newImageUrl,
-                duration: newDuration,
-                transition: newTransition,
-                active: true
+            const formData = new FormData();
+            if (newFile) {
+                formData.append('image', newFile);
+            } else if (newImageUrl) {
+                formData.append('imageUrl', newImageUrl);
+            }
+            formData.append('duration', newDuration);
+            formData.append('transition', newTransition);
+            formData.append('active', true);
+
+            await api.post('/ads', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             });
             setUploadOpen(false);
             setNewImageUrl('');
+            setNewFile(null);
             fetchAds();
         } catch (err) {
             console.error(err);
@@ -159,12 +170,40 @@ export default function AdminAds() {
                 <DialogTitle>Neue Werbung hinzufügen</DialogTitle>
                 <DialogContent>
                     <Stack spacing={3} sx={{ mt: 1 }}>
+                        <Stack direction="row" spacing={2} alignItems="center">
+                            <Button
+                                variant="outlined"
+                                component="label"
+                                startIcon={<AddPhotoAlternateIcon />}
+                            >
+                                Bild auswählen
+                                <input
+                                    type="file"
+                                    hidden
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                        if (e.target.files[0]) {
+                                            setNewFile(e.target.files[0]);
+                                            setNewImageUrl(''); // Clear URL if file selected
+                                        }
+                                    }}
+                                />
+                            </Button>
+                            {newFile && <Typography variant="body2" noWrap>{newFile.name}</Typography>}
+                        </Stack>
+
+                        <Divider>ODER</Divider>
+
                         <TextField
                             label="Bild URL"
                             fullWidth
                             value={newImageUrl}
-                            onChange={(e) => setNewImageUrl(e.target.value)}
-                            helperText="Direkter Link zum Bild (z.B. Imgur, S3, oder lokaler Upload Pfad)"
+                            onChange={(e) => {
+                                setNewImageUrl(e.target.value);
+                                setNewFile(null); // Clear file if URL entered
+                            }}
+                            disabled={!!newFile}
+                            helperText="Direkter Link zum Bild (z.B. Imgur, S3)"
                         />
                         <Stack direction="row" spacing={2}>
                             <TextField
@@ -192,7 +231,7 @@ export default function AdminAds() {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setUploadOpen(false)}>Abbrechen</Button>
-                    <Button variant="contained" onClick={handleCreate} disabled={!newImageUrl}>Speichern</Button>
+                    <Button variant="contained" onClick={handleCreate} disabled={!newImageUrl && !newFile}>Speichern</Button>
                 </DialogActions>
             </Dialog>
         </Container>
