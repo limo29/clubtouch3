@@ -18,8 +18,6 @@ import {
   Button,
   TextField,
   Grid,
-  Card,
-  CardContent,
   List,
   ListItem,
   ListItemText,
@@ -44,6 +42,7 @@ import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
+import KPICard from '../components/common/KPICard';
 
 const Transactions = () => {
   const queryClient = useQueryClient();
@@ -158,64 +157,40 @@ const Transactions = () => {
       {dailySummary && (
         <Grid container spacing={3} sx={{ mb: 3 }}>
           <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Heutiger Umsatz
-                </Typography>
-                <Typography variant="h4">
-                  {formatCurrency(dailySummary.summary.totalRevenue)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {dailySummary.summary.totalTransactions} Transaktionen
-                </Typography>
-              </CardContent>
-            </Card>
+            <KPICard
+              title="Heutiger Umsatz"
+              value={formatCurrency(dailySummary.summary.totalRevenue)}
+              icon={AttachMoney}
+              color="primary"
+              subTitle={`${dailySummary.summary.totalTransactions} Transaktionen`}
+            />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Bar-Umsatz
-                </Typography>
-                <Typography variant="h4">
-                  {formatCurrency(dailySummary.summary.cashRevenue)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {dailySummary.summary.cashTransactions} Transaktionen
-                </Typography>
-              </CardContent>
-            </Card>
+            <KPICard
+              title="Bar-Umsatz"
+              value={formatCurrency(dailySummary.summary.cashRevenue)}
+              icon={AttachMoney}
+              color="success"
+              subTitle={`${dailySummary.summary.cashTransactions} Transaktionen`}
+            />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Kundenkonto-Umsatz
-                </Typography>
-                <Typography variant="h4">
-                  {formatCurrency(dailySummary.summary.accountRevenue)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {dailySummary.summary.accountTransactions} Transaktionen
-                </Typography>
-              </CardContent>
-            </Card>
+            <KPICard
+              title="Kundenkonto-Umsatz"
+              value={formatCurrency(dailySummary.summary.accountRevenue)}
+              icon={AccountBalanceWallet}
+              color="info"
+              subTitle={`${dailySummary.summary.accountTransactions} Transaktionen`}
+            />
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  Storniert
-                </Typography>
-                <Typography variant="h4" color="error">
-                  {dailySummary.summary.cancelledTransactions}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {formatCurrency(dailySummary.summary.cancelledRevenue)}
-                </Typography>
-              </CardContent>
-            </Card>
+            <KPICard
+              title="Storniert"
+              value={dailySummary.summary.cancelledTransactions}
+              icon={Cancel}
+              color="error"
+              subTitle={formatCurrency(dailySummary.summary.cancelledRevenue)}
+            />
           </Grid>
         </Grid>
       )}

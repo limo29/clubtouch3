@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import { format } from 'date-fns';
+import KPICard from '../components/common/KPICard';
 
 // UI Components for "Premium" feel
 const GlassCard = ({ children, sx = {}, ...props }) => (
@@ -314,28 +315,40 @@ const Reports = () => {
 
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={6} sm={3}>
-            <GlassCard sx={{ p: 1, textAlign: 'center', bgcolor: 'rgba(33, 150, 243, 0.1)' }}>
-              <Typography variant="caption" color="text.secondary">Umsatz Gesamt</Typography>
-              <Typography variant="h6" color="white">{fmt(summary.totalRevenue)}</Typography>
-            </GlassCard>
+            <KPICard
+              title="Umsatz Gesamt"
+              value={fmt(summary.totalRevenue)}
+              icon={EuroSymbol}
+              color="primary"
+              sx={{ minHeight: 120 }}
+            />
           </Grid>
           <Grid item xs={6} sm={3}>
-            <GlassCard sx={{ p: 1, textAlign: 'center' }}>
-              <Typography variant="caption" color="text.secondary">Bar</Typography>
-              <Typography variant="body1">{fmt(summary.cashRevenue)}</Typography>
-            </GlassCard>
+            <KPICard
+              title="Bar"
+              value={fmt(summary.cashRevenue)}
+              icon={EuroSymbol}
+              color="success"
+              sx={{ minHeight: 120 }}
+            />
           </Grid>
           <Grid item xs={6} sm={3}>
-            <GlassCard sx={{ p: 1, textAlign: 'center' }}>
-              <Typography variant="caption" color="text.secondary">Konto</Typography>
-              <Typography variant="body1">{fmt(summary.accountRevenue)}</Typography>
-            </GlassCard>
+            <KPICard
+              title="Konto"
+              value={fmt(summary.accountRevenue)}
+              icon={AccountBalance}
+              color="info"
+              sx={{ minHeight: 120 }}
+            />
           </Grid>
           <Grid item xs={6} sm={3}>
-            <GlassCard sx={{ p: 1, textAlign: 'center' }}>
-              <Typography variant="caption" color="text.secondary">Transaktionen</Typography>
-              <Typography variant="body1">{summary.totalTransactions}</Typography>
-            </GlassCard>
+            <KPICard
+              title="Transaktionen"
+              value={summary.totalTransactions}
+              icon={Receipt}
+              color="warning"
+              sx={{ minHeight: 120 }}
+            />
           </Grid>
         </Grid>
 

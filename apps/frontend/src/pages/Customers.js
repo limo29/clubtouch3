@@ -41,11 +41,14 @@ import {
   Receipt,
   EmojiEvents,
   TrendingUp,
+  AccountBalanceWallet,
+  Warning,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
+import KPICard from '../components/common/KPICard';
 
 const Customers = () => {
   const queryClient = useQueryClient();
@@ -226,57 +229,42 @@ const Customers = () => {
       </Typography>
 
       {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 3 }} alignItems="stretch">
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Kunden gesamt
-              </Typography>
-              <Typography variant="h4">
-                {customers.length}
-              </Typography>
-            </CardContent>
-          </Card>
+          <KPICard
+            title="Kunden gesamt"
+            value={customers.length}
+            icon={Person}
+            color="primary"
+          />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Gesamtguthaben
-              </Typography>
-              <Typography variant="h4">
-                {formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0))}
-              </Typography>
-            </CardContent>
-          </Card>
+          <KPICard
+            title="Gesamtguthaben"
+            value={formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0))}
+            icon={AccountBalanceWallet}
+            color="success"
+          />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Durchschn. Guthaben
-              </Typography>
-              <Typography variant="h4">
-                {customers.length > 0
-                  ? formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0) / customers.length)
-                  : formatCurrency(0)
-                }
-              </Typography>
-            </CardContent>
-          </Card>
+          <KPICard
+            title="Ø Guthaben"
+            value={customers.length > 0
+              ? formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0) / customers.length)
+              : formatCurrency(0)
+            }
+            icon={TrendingUp}
+            color="info"
+          />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Niedriges Guthaben
-              </Typography>
-              <Typography variant="h4" color="warning.main">
-                {lowBalanceData?.count || 0}
-              </Typography>
-            </CardContent>
-          </Card>
+          <KPICard
+            title="Niedriges Guthaben"
+            value={lowBalanceData?.count || 0}
+            icon={Warning}
+            color="warning"
+            subTitle={lowBalanceData?.count > 0 ? "Handlungsbedarf" : "Alles OK"}
+          />
         </Grid>
       </Grid>
 

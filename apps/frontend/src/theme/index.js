@@ -67,7 +67,7 @@ export default function ColorModeProvider({ children }) {
           main: isDark ? neonRed : brandRed
         },
         success: { main: isDark ? '#00e676' : '#2e7d32' },
-        warning: { main: '#ffea00' }, // Neon Yellow/Amber
+        warning: { main: isDark ? '#ffea00' : '#ed6c02' }, // Neon Yellow/Amber for dark, readable orange for light
         error: { main: isDark ? '#ff1744' : '#d32f2f' },
         background: {
           default: isDark ? deepBlack : '#f7f8fa',

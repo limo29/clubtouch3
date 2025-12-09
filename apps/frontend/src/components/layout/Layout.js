@@ -234,6 +234,7 @@ const Layout = () => {
             ml: { lg: location.pathname.startsWith('/sales') ? 0 : `${drawerWidth}px` },
             width: { lg: location.pathname.startsWith('/sales') ? '100%' : `calc(100% - ${drawerWidth}px)` },
             bgcolor: !isOnline ? 'error.light' : 'background.default',
+            color: 'text.primary',
             transition: 'background-color 0.3s'
           }}
         >
