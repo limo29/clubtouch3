@@ -11,8 +11,7 @@ import {
     KeyboardSensor,
     PointerSensor,
     useSensor,
-    useSensors,
-    DragOverlay
+    useSensors
 } from '@dnd-kit/core';
 import {
     arrayMove,
@@ -29,7 +28,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import AddIcon from '@mui/icons-material/Add';
+
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 

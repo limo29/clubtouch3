@@ -44,13 +44,12 @@ import {
   ExpandLess,
   ExpandMore,
   WifiOff,
-  CloudSync,
-  CloudDone
+  CloudSync
 } from '@mui/icons-material';
 import { useOffline } from '../../context/OfflineContext';
 import { useAuth } from '../../context/AuthContext';
 import { useColorMode } from '../../theme';
-import Link from '@mui/material/Link'; // Not needed but keeping imports clean
+
 import LogoNeon from '../../logo_neon_v2.png';
 
 const drawerWidth = 240;

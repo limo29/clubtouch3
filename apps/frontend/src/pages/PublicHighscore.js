@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-    Box, Card, CardContent, Chip, CssBaseline, Divider, Stack,
-    Typography, alpha, GlobalStyles, createTheme, ThemeProvider
+    Box, Card, CardContent, Chip, Stack, CssBaseline,
+    Typography, GlobalStyles
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
-import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import EuroIcon from '@mui/icons-material/Euro';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import TimerIcon from '@mui/icons-material/Timer';
@@ -14,7 +13,7 @@ import { WS_URL } from '../config/api';
 import Podium from '../components/common/Podium';
 
 // Helper functions
-const clamp = (min, val, max) => `clamp(${min}, ${val}, ${max})`;
+
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 
 // Enforce Dark Mode? No, let's use global theme.

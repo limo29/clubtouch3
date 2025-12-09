@@ -1,15 +1,15 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
-  Avatar, Stack, IconButton, List, ListItem, ListItemText, Button, Dialog, DialogTitle,
-  DialogContent, DialogActions, MenuItem, Chip, useMediaQuery, Divider, Collapse,
+  Avatar, Stack, IconButton, List, ListItem, Button, Dialog, DialogTitle,
+  DialogContent, DialogActions, Chip, useMediaQuery, Divider, Collapse,
   Snackbar, Alert
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
-  Search, Female, Male, Person, ShoppingCart, AttachMoney,
+  Search, ShoppingCart, AttachMoney,
   History, AccountBalanceWallet, LocalBar, Remove, DeleteOutline, Add,
-  CreditCard, Savings, Close, TrendingUp, TrendingDown, RestoreFromTrash
+  Close, TrendingUp, TrendingDown, RestoreFromTrash
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';

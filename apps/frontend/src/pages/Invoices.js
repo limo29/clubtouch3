@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import {
   Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
-  Avatar, Stack, IconButton, List, ListItem, ListItemText, Button, Dialog, DialogTitle,
+  Stack, IconButton, List, ListItemText, Button, Dialog, DialogTitle,
   DialogContent, MenuItem, Chip, Drawer, useMediaQuery,
   CardActions, Collapse, CardMedia, CardActionArea, Tooltip, Zoom, Fade,
   Divider, ListItemButton, ListItemIcon
@@ -10,7 +10,7 @@ import { useTheme } from '@mui/material/styles';
 import {
   Search, Person, Add, Delete, Download, Edit, Settings,
   Remove as RemoveIcon, Add as AddIcon, Close as CloseIcon,
-  Send as SendIcon, AttachMoney, Block, FilterList, KeyboardArrowUp, KeyboardArrowDown,
+  Send as SendIcon, AttachMoney, Block, FilterList, KeyboardArrowUp,
   Inventory
 } from '@mui/icons-material';
 import { DatePicker, MobileDatePicker, DesktopDatePicker } from '@mui/x-date-pickers';

@@ -40,7 +40,6 @@ import {
   Image as ImageIcon,
   Save,
   DragIndicator,
-  Check,
 } from '@mui/icons-material';
 import {
   DndContext,
@@ -48,8 +47,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   useSensor,
-  useSensors,
-  DragOverlay
+  useSensors
 } from '@dnd-kit/core';
 import {
   arrayMove,
@@ -185,7 +183,7 @@ const StatCard = ({ title, value, icon, color, gradient }) => {
 
 const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus }) => {
   const theme = useTheme();
-  const isLight = theme.palette.mode === 'light';
+
 
   // Helper text for purchase unit configuration
   const purchaseInfo = (article.purchaseUnit && article.unitsPerPurchase > 1)
@@ -389,7 +387,7 @@ const Articles = () => {
   const watchUnit = watch("unit");
   const watchPurchaseUnit = watch("purchaseUnit");
   const watchUnitsPerPurchase = watch("unitsPerPurchase");
-  const watchCategory = watch("category");
+
   const [isCustomCategory, setIsCustomCategory] = useState(false);
 
 

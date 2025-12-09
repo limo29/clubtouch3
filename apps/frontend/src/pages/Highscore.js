@@ -1,19 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Card, CardContent, Chip, CssBaseline, IconButton, Stack,
+  Box, Card, CardContent, Chip, IconButton, Stack,
   Typography, alpha, GlobalStyles, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Autocomplete, Grid, InputAdornment, Tooltip
+  Autocomplete, Grid, Tooltip
 } from '@mui/material';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
+// import { createTheme, ThemeProvider } from '@mui/material/styles';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import FlagIcon from '@mui/icons-material/Flag';
 import CloseIcon from '@mui/icons-material/Close';
 import MonitorIcon from '@mui/icons-material/Monitor';
-import HomeIcon from '@mui/icons-material/Home';
 
 import { io } from 'socket.io-client';
 import api, { getToken } from '../services/api';
@@ -144,7 +143,7 @@ function BodyFlag({ active }) {
 export default function Highscore() {
   const navigate = useNavigate();
   // const [dark] = useLocalBool('hs_dark', true); // Removed local dark mode to use global theme
-  const [autoRotate, setAutoRotate] = useLocalBool('hs_autoRotate', true);
+  const [autoRotate] = useLocalBool('hs_autoRotate', true);
   const [forceKiosk, setForceKiosk] = useLocalBool('hs_forceKiosk', false);
   const [mode, setMode] = useState('AMOUNT');
 

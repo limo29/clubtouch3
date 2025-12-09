@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Stack, Typography, alpha, keyframes } from '@mui/material';
-import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
+
 
 // Animations
 const slideUp = keyframes`
@@ -79,7 +79,7 @@ const PodiumItem = ({ entry, rank, height, color, delay, moneyFormatter, mode })
 };
 
 export default function Podium({ topThree, mode, moneyFormatter }) {
-    const [first, second, third] = [null, null, null];
+
     // Map based on rank if available, otherwise index
     const p1 = topThree.find(x => x.rank === 1) || topThree[0];
     const p2 = topThree.find(x => x.rank === 2) || topThree[1];

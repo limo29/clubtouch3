@@ -5,7 +5,7 @@ import {
     Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
     IconButton, Slider, Stack, TextField, Typography,
     Paper, Select, MenuItem, ToggleButton, ToggleButtonGroup,
-    Tooltip, Popover, Grid, List, ListItem, ListItemText, Divider,
+    Tooltip, Popover, List, ListItem, ListItemText, Divider,
     Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
 
@@ -31,7 +31,7 @@ import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FlipToFrontIcon from '@mui/icons-material/FlipToFront';
 import FlipToBackIcon from '@mui/icons-material/FlipToBack';
-import RotateRightIcon from '@mui/icons-material/RotateRight';
+
 
 import SlideElement, { ICONS } from '../ads/SlideElement';
 import api from '../../services/api';

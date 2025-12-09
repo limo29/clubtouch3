@@ -36,7 +36,6 @@ import {
 import {
   Add,
   Edit,
-  AccountBalanceWallet,
   Search,
   Person,
   Receipt,

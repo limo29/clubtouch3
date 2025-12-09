@@ -48,51 +48,10 @@ const formatCurrency = (amount) =>
     num(amount)
   );
 
-function themeTint(theme, color, fallback) {
-  // dezente Kartenhintergründe je nach Theme
-  const map = {
-    success: theme.palette.success.main,
-    warning: theme.palette.warning.main,
-    info: theme.palette.info.main,
-    error: theme.palette.error.main,
-    primary: theme.palette.primary.main,
-  };
-  const base = map[color] || fallback || theme.palette.primary.main;
-  return theme.palette.mode === "dark"
-    ? alpha(base, 0.12)
-    : alpha(base, 0.08);
-}
+
 
 /* ---------------- StatCard ---------------- */
-function StatCard({ title, value, color = "primary" }) {
-  const theme = useTheme();
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        p: 3,
-        textAlign: "center",
-        borderRadius: 2,
-        border: `1px solid ${alpha(theme.palette.divider, 0.8)}`,
-        bgcolor: themeTint(theme, color),
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-      }}
-    >
-      <Typography
-        variant="h2"
-        sx={{ fontSize: { xs: "2.4rem", sm: "3rem" }, fontWeight: 800, mb: 0.5 }}
-      >
-        {value}
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
-        {title}
-      </Typography>
-    </Paper>
-  );
-}
+
 
 /* ---------------- StatusChip ---------------- */
 function StatusChip({ document, onToggle, disabled }) {

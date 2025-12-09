@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Grid,
@@ -13,25 +13,19 @@ import {
   Avatar,
   Chip,
   IconButton,
-  Alert,
   Button,
   Skeleton,
   Stack,
   Divider,
-  useMediaQuery,
   Paper,
 } from "@mui/material";
 import {
   AttachMoney,
-  People,
   Inventory,
-  TrendingUp,
   Warning,
   EmojiEvents,
-  LocalDrink,
   Refresh,
   ShoppingCart,
-  ReceiptLong,
   Description,
   ArrowForward,
   ShoppingBasket,
@@ -40,9 +34,7 @@ import {
 } from "@mui/icons-material";
 import { useTheme, alpha } from "@mui/material/styles";
 import { useQuery } from "@tanstack/react-query";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { format } from "date-fns";
-import { de } from "date-fns/locale";
 import api from "../services/api";
 import { API_ENDPOINTS } from "../config/api";
 
@@ -64,22 +56,17 @@ const SafeVal = ({ loading, value, fallback = "—", variant = "h4", color }) =>
     </Typography>
   );
 
-function tint(theme, colorKey) {
-  const c = theme.palette[colorKey]?.main || theme.palette.primary.main;
-  return theme.palette.mode === "dark" ? alpha(c, 0.18) : alpha(c, 0.12);
-}
+
 
 /* ------------------------------ Data fetches ------------------------------ */
 export default function Dashboard() {
   const theme = useTheme();
   const navigate = useNavigate();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   // 1. Daily Summary (Revenue, Top Articles)
   const {
     data: dailySummary,
     isLoading: loadingSummary,
-    isError: errorSummary,
     refetch: refetchSummary,
     dataUpdatedAt,
   } = useQuery({
@@ -97,14 +84,14 @@ export default function Dashboard() {
   });
 
   // 3. Low Balance
-  const { data: lowBalance, isLoading: loadingLowBalance } = useQuery({
+  const { data: lowBalance } = useQuery({
     queryKey: ["low-balance"],
     queryFn: async () => (await api.get(API_ENDPOINTS.CUSTOMERS_LOW_BALANCE)).data,
     staleTime: 5 * 60_000,
   });
 
   // 4. Highscore
-  const { data: highscore, isLoading: loadingHighscore } = useQuery({
+  const { data: highscore } = useQuery({
     queryKey: ["highscore-dashboard"],
     queryFn: async () =>
       (await api.get(API_ENDPOINTS.HIGHSCORE, { params: { type: "DAILY", mode: "AMOUNT" } }))
@@ -151,8 +138,6 @@ export default function Dashboard() {
       : [];
 
   const avgTicket = sum.totalTransactions ? sum.totalRevenue / sum.totalTransactions : 0;
-
-  const activeCustomers = lowBalance?.customers?.length ?? 0; // Note: endpoint name misleading, but usually contains count logic? Actually LOW_BALANCE returns list. 
   // Wait, ACTIVE CUSTOMERS logic in previous code was:  activeCustomers = lowBalance?.customers?.length ?? 0; which is WRONG if endpoint is just low balance. 
   // But let's keep it consistent with previous logic or fix if obvious. 
   // Re-reading previous code: "const activeCustomers = lowBalance?.customers?.length ?? 0;" 

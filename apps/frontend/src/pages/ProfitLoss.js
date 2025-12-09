@@ -567,7 +567,7 @@ export default function ProfitLoss() {
   const top10 = incomeByArticle.slice(0, 10);
 
   const incomeByType = plData?.details?.incomeByType || { transactions: 0, invoices: 0, ownerUse: 0 };
-  const chartCat = incomeByCategory.map((c) => ({ category: c.category, Einnahmen: c.amount }));
+
   const chartTop = top10.map((a) => ({ artikel: a.article, Einnahmen: a.amount }));
 
   const downloadEUR = async () => {
