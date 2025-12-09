@@ -61,7 +61,9 @@ class ArticleController {
       articleData.price = toDecimalString(articleData.price);
       articleData.initialStock = toDecimalString(articleData.initialStock);
       articleData.minStock = toDecimalString(articleData.minStock);
+
       articleData.unitsPerPurchase = toDecimalString(articleData.unitsPerPurchase);
+      if (articleData.order) articleData.order = parseInt(articleData.order, 10);
       if (articleData.purchaseUnit === '') articleData.purchaseUnit = undefined;
 
       // Bild verarbeitet?
@@ -105,7 +107,9 @@ class ArticleController {
       // Zahlen normalisieren
       updateData.price = toDecimalString(updateData.price);
       updateData.minStock = toDecimalString(updateData.minStock);
+
       updateData.unitsPerPurchase = toDecimalString(updateData.unitsPerPurchase);
+      if (updateData.order) updateData.order = parseInt(updateData.order, 10);
       if (updateData.purchaseUnit === '') updateData.purchaseUnit = undefined;
       const currentArticle = await articleService.findById(id);
       if (!currentArticle) return res.status(404).json({ error: 'Artikel nicht gefunden' });
@@ -195,6 +199,20 @@ class ArticleController {
     } catch (error) {
       console.error('Get article stats error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Statistiken' });
+    }
+  }
+
+  // Reorder
+  async reorderArticles(req, res) {
+    try {
+      const { items } = req.body;
+      if (!Array.isArray(items)) return res.status(400).json({ error: 'Invalid data' });
+
+      await articleService.reorderArticles(items);
+      res.json({ message: 'Sortierung aktualisiert' });
+    } catch (error) {
+      console.error('Reorder articles error:', error);
+      res.status(500).json({ error: 'Fehler beim Aktualisieren der Sortierung' });
     }
   }
 }

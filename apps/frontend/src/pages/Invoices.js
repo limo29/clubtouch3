@@ -2,16 +2,21 @@ import React, { useMemo, useState, useEffect } from 'react';
 import {
   Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
   Avatar, Stack, IconButton, List, ListItem, ListItemText, Button, Dialog, DialogTitle,
-  DialogContent, MenuItem, Chip, Drawer, useMediaQuery
+  DialogContent, MenuItem, Chip, Drawer, useMediaQuery,
+  CardActions, Collapse, CardMedia, CardActionArea, Tooltip, Zoom, Fade,
+  Divider, ListItemButton, ListItemIcon
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
-  Search, Person, Add, Delete, Download, Edit,
-  Remove as RemoveIcon, Add as AddIcon, Close as CloseIcon
+  Search, Person, Add, Delete, Download, Edit, Settings,
+  Remove as RemoveIcon, Add as AddIcon, Close as CloseIcon,
+  Send as SendIcon, AttachMoney, Block, FilterList, KeyboardArrowUp, KeyboardArrowDown,
+  Inventory
 } from '@mui/icons-material';
 import { DatePicker, MobileDatePicker, DesktopDatePicker } from '@mui/x-date-pickers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 
@@ -52,6 +57,7 @@ export default function Invoices() {
   const queryClient = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const { isAdmin } = useAuth();
 
   // Tabelle / Filter
   const [filters, setFilters] = useState({ status: '', search: '', startDate: null, endDate: null });
@@ -111,8 +117,8 @@ export default function Invoices() {
   const getStatusColor = (s) => (s === 'PAID' ? 'success' : s === 'SENT' ? 'info' : s === 'CANCELLED' ? 'error' : 'default');
   const getStatusLabel = (s) => (s === 'PAID' ? 'Bezahlt' : s === 'SENT' ? 'Versendet' : s === 'CANCELLED' ? 'Storniert' : 'Entwurf');
 
-  // POS UI
   const [showCreate, setShowCreate] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [editInvoice, setEditInvoice] = useState(null);
 
   // Empfänger-Freitext
@@ -131,6 +137,7 @@ export default function Invoices() {
   const openStatusSheet = (inv) => setStatusSheet({ open: true, inv });
   const closeStatusSheet = () => setStatusSheet({ open: false, inv: null });
 
+  const [showFilters, setShowFilters] = useState(false); // Mobile filter toggle
   const categories = useMemo(() => ['all', ...uniq(articles.map(a => a.category).filter(Boolean))], [articles]);
   const filteredCustomers = useMemo(() => {
     const s = customerSearch.toLowerCase();
@@ -239,46 +246,103 @@ export default function Invoices() {
     >
       <Typography variant="h4" gutterBottom>Rechnungen</Typography>
 
-      <Box component={Card} sx={{ p: 2, mb: 2 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={6} md={3}>
-            <TextField
-              label="Suche"
-              value={filters.search}
-              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-              size="small" fullWidth
-              InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
-            />
+      <Box component={Card} sx={{
+        p: 2, mb: 3,
+        borderRadius: 3,
+        background: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.8)',
+        backdropFilter: 'blur(10px)',
+        boxShadow: theme.shadows[2]
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: { xs: 1, md: 0 } }}>
+          {isMobile && (
+            <Button
+              startIcon={showFilters ? <KeyboardArrowUp /> : <FilterList />}
+              onClick={() => setShowFilters(!showFilters)}
+              size="small"
+              sx={{ mr: 2 }}
+            >
+              Filter
+            </Button>
+          )}
+          {!isMobile && <Typography variant="h6" sx={{ opacity: 0.7, fontSize: '1rem', mr: 2 }}>Filter</Typography>}
+        </Box>
+
+        <Collapse in={!isMobile || showFilters}>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                label="Suche"
+                value={filters.search}
+                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                size="small" fullWidth
+                variant="outlined"
+                InputProps={{
+                  startAdornment: <InputAdornment position="start"><Search /></InputAdornment>,
+                  sx: { borderRadius: 2 }
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={2.5}>
+              <TextField
+                select
+                label="Status"
+                value={filters.status}
+                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                size="small" fullWidth
+                SelectProps={{ sx: { borderRadius: 2 } }}
+              >
+                <MenuItem value="">Alle</MenuItem>
+                <MenuItem value="DRAFT">Entwurf</MenuItem>
+                <MenuItem value="SENT">Versendet</MenuItem>
+                <MenuItem value="PAID">Bezahlt</MenuItem>
+                <MenuItem value="CANCELLED">Storniert</MenuItem>
+              </TextField>
+            </Grid>
+            <Grid item xs={6} sm={6} md={2}>
+              <DatePicker
+                label="Von"
+                value={filters.startDate}
+                onChange={(d) => setFilters({ ...filters, startDate: d })}
+                slotProps={{ textField: { size: 'small', fullWidth: true, sx: { '& .MuiOutlinedInput-root': { borderRadius: 2 } } } }}
+              />
+            </Grid>
+            <Grid item xs={6} sm={6} md={2}>
+              <DatePicker
+                label="Bis"
+                value={filters.endDate}
+                onChange={(d) => setFilters({ ...filters, endDate: d })}
+                slotProps={{ textField: { size: 'small', fullWidth: true, sx: { '& .MuiOutlinedInput-root': { borderRadius: 2 } } } }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Button
+                  variant="contained"
+                  startIcon={<Add />}
+                  onClick={openCreate}
+                  sx={{ borderRadius: 2, px: 3, fontWeight: 700, textTransform: 'none', background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})` }}
+                  fullWidth={isMobile}
+                >
+                  Neu
+                </Button>
+                {isAdmin && (
+                  <IconButton
+                    onClick={() => setShowSettings(true)}
+                    title="Einstellungen"
+                    sx={{
+                      bgcolor: 'background.paper',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 2
+                    }}
+                  >
+                    <Settings />
+                  </IconButton>
+                )}
+              </Stack>
+            </Grid>
           </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <TextField select label="Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} size="small" fullWidth>
-              <MenuItem value="">Alle</MenuItem>
-              <MenuItem value="DRAFT">Entwurf</MenuItem>
-              <MenuItem value="SENT">Versendet</MenuItem>
-              <MenuItem value="PAID">Bezahlt</MenuItem>
-              <MenuItem value="CANCELLED">Storniert</MenuItem>
-            </TextField>
-          </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <DatePicker
-              label="Von"
-              value={filters.startDate}
-              onChange={(d) => setFilters({ ...filters, startDate: d })}
-              slotProps={{ textField: { size: 'small', fullWidth: true } }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={2}>
-            <DatePicker
-              label="Bis"
-              value={filters.endDate}
-              onChange={(d) => setFilters({ ...filters, endDate: d })}
-              slotProps={{ textField: { size: 'small', fullWidth: true } }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6} md={3} sx={{ display: { xs: 'none', sm: 'block' } }}>
-            <Button variant="contained" startIcon={<Add />} onClick={openCreate}>Neue Rechnung</Button>
-          </Grid>
-        </Grid>
+        </Collapse>
       </Box>
 
       {/* Desktop: Tabelle | Mobile: Karten */}
@@ -299,43 +363,54 @@ export default function Invoices() {
             <Box component="tbody">
               {isLoading && (<Box component="tr"><Box component="td" colSpan={7} sx={{ p: 2 }}>Lade…</Box></Box>)}
               {!isLoading && invoices.map(inv => (
-                <Box component="tr" key={inv.id} sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
-                  <Box component="td" sx={{ p: 1.5, fontWeight: 700 }}>{inv.invoiceNumber}</Box>
+                <Box component="tr" key={inv.id} sx={{
+                  borderTop: '1px solid', borderColor: 'divider',
+                  transition: 'background-color 0.2s',
+                  '&:hover': { bgcolor: 'action.hover' }
+                }}>
+                  <Box component="td" sx={{ p: 1.5, fontWeight: 700, fontFamily: 'monospace' }}>{inv.invoiceNumber}</Box>
                   <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })}</Box>
                   <Box component="td" sx={{ p: 1.5 }}>{inv.customerName}</Box>
-                  <Box component="td" sx={{ p: 1.5, textAlign: 'right' }}>{money(inv.totalAmount)}</Box>
-                  <Box component="td" sx={{ p: 1.5 }}><Chip size="small" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} /></Box>
+                  <Box component="td" sx={{ p: 1.5, textAlign: 'right', fontWeight: 600 }}>{money(inv.totalAmount)}</Box>
+                  <Box component="td" sx={{ p: 1.5 }}><Chip size="small" variant="outlined" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} sx={{ fontWeight: 600, borderRadius: 1 }} /></Box>
                   <Box component="td" sx={{ p: 1.5 }}>{format(new Date(inv.dueDate), 'dd.MM.yyyy', { locale: de })}</Box>
-                  <Box component="td" sx={{ p: 1.5, textAlign: 'right', position: 'sticky', right: 0, bgcolor: 'background.paper' }}>
-                    <IconButton size="small" onClick={() => handleDownloadPDF(inv.id)} title="PDF" aria-label="PDF herunterladen"><Download /></IconButton>
-                    {inv.status === 'DRAFT' && (
-                      <IconButton size="small" color="primary" title="Bearbeiten" aria-label="Bearbeiten" onClick={() => openEdit(inv)}>
-                        <Edit />
-                      </IconButton>
-                    )}
-                    {/* Status-Aktionen (kompakt) */}
-                    <Stack direction="row" spacing={0.5} sx={{ display: 'inline-flex', ml: 1 }}>
+                  <Box component="td" sx={{ p: 1.5, textAlign: 'right', position: 'sticky', right: 0, bgcolor: 'inherit' }}>
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <Tooltip title="PDF herunterladen">
+                        <IconButton size="small" onClick={() => handleDownloadPDF(inv.id)}><Download fontSize="small" /></IconButton>
+                      </Tooltip>
+
                       {inv.status === 'DRAFT' && (
-                        <Button size="small" variant="outlined" onClick={() => setStatus(inv, 'SENT')}>
-                          Versenden
-                        </Button>
+                        <Tooltip title="Bearbeiten">
+                          <IconButton size="small" color="primary" onClick={() => openEdit(inv)}>
+                            <Edit fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+
+                      {/* Status-Aktionen (Icons) */}
+                      {inv.status === 'DRAFT' && (
+                        <Tooltip title="Versenden markieren">
+                          <IconButton size="small" color="info" onClick={() => setStatus(inv, 'SENT')}>
+                            <SendIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       )}
                       {!['PAID', 'CANCELLED'].includes(inv.status) && (
-                        <Button size="small" variant="outlined" color="success" onClick={() => setStatus(inv, 'PAID')}>
-                          Bezahlt
-                        </Button>
+                        <Tooltip title="Als Bezahlt markieren">
+                          <IconButton size="small" color="success" onClick={() => setStatus(inv, 'PAID')}>
+                            <AttachMoney fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       )}
                       {inv.status !== 'CANCELLED' && (
-                        <Button size="small" variant="outlined" color="error" onClick={() => setStatus(inv, 'CANCELLED')}>
-                          Stornieren
-                        </Button>
+                        <Tooltip title="Stornieren">
+                          <IconButton size="small" color="error" onClick={() => setStatus(inv, 'CANCELLED')}>
+                            <Block fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       )}
                     </Stack>
-                    {updateStatusMutation.isLoading && (
-                      <Typography role="status" aria-live="polite" variant="caption" sx={{ ml: 1 }} color="text.secondary">
-                        Status wird aktualisiert…
-                      </Typography>
-                    )}
                   </Box>
                 </Box>
               ))}
@@ -346,36 +421,56 @@ export default function Invoices() {
         <Stack spacing={1.25} sx={{ pb: 8 }}>
           {isLoading && <Card sx={{ p: 2 }}>Lade…</Card>}
           {!isLoading && invoices.map(inv => (
-            <Card key={inv.id}>
-              <CardContent sx={{ pb: 1.5 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center">
-                  <Typography fontWeight={700}>{inv.invoiceNumber}</Typography>
-                  <Chip size="small" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} />
-                </Stack>
-                <Typography variant="body2" color="text.secondary">
-                  {format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })} • {inv.customerName}
-                </Typography>
-                <Typography variant="h6" sx={{ mt: .5, fontWeight: 800, textAlign: 'right' }}>
-                  {money(inv.totalAmount)}
-                </Typography>
-              </CardContent>
-              <Stack direction="row" spacing={1} sx={{ px: 2, pb: 1.5, flexWrap: 'wrap' }}>
-                <Button size="small" variant="outlined" onClick={() => handleDownloadPDF(inv.id)} startIcon={<Download />}>PDF</Button>
-                {inv.status === 'DRAFT' && (
-                  <Button size="small" variant="outlined" onClick={() => openEdit(inv)} startIcon={<Edit />}>Bearbeiten</Button>
-                )}
-                <Button size="small" variant="contained" onClick={() => openStatusSheet(inv)}>
-                  Status
-                </Button>
-              </Stack>
+            <Card key={inv.id} sx={{ borderRadius: 3, boxShadow: theme.shadows[2], overflow: 'hidden' }}>
+              <CardActionArea onClick={() => openStatusSheet(inv)}>
+                <CardContent sx={{ pb: 1 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                    <Box>
+                      <Typography fontWeight={700} variant="h6" sx={{ fontFamily: 'monospace' }}>{inv.invoiceNumber}</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        {format(new Date(inv.createdAt), 'dd.MM.yyyy', { locale: de })}
+                      </Typography>
+                      <Typography variant="body1" fontWeight={500} sx={{ mt: 0.5 }}>{inv.customerName}</Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Chip size="small" variant="filled" color={getStatusColor(inv.status)} label={getStatusLabel(inv.status)} sx={{ borderRadius: 1.5, fontWeight: 700 }} />
+                      <Typography variant="h5" sx={{ mt: 1, fontWeight: 800, color: 'primary.main' }}>
+                        {money(inv.totalAmount)}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </CardContent>
+              </CardActionArea>
+              <Divider />
+              <CardActions sx={{ justifyContent: 'space-between', px: 2, bgcolor: 'action.hover' }}>
+                <Button size="small" startIcon={<Download />} onClick={() => handleDownloadPDF(inv.id)}>PDF</Button>
+                <Box>
+                  {inv.status === 'DRAFT' && (
+                    <IconButton size="small" color="primary" onClick={() => openEdit(inv)}><Edit /></IconButton>
+                  )}
+                  <Button size="small" onClick={() => openStatusSheet(inv)}>Status</Button>
+                </Box>
+              </CardActions>
             </Card>
           ))}
-          {/* FAB für „Neu“ */}
-          <Box sx={{ position: 'fixed', right: 16, bottom: 16, zIndex: 10 }}>
-            <Button variant="contained" onClick={openCreate} startIcon={<Add />} sx={{ borderRadius: 999 }}>
-              Neu
-            </Button>
-          </Box>
+          {/* FAB für „Neu“ - Mobile Only */}
+          <Zoom in={true}>
+            <Box sx={{ position: 'fixed', right: 20, bottom: 84, zIndex: 10 }}>
+              <Button
+                variant="contained"
+                onClick={openCreate}
+                startIcon={<Add />}
+                sx={{
+                  borderRadius: 8, px: 3, py: 1.5,
+                  boxShadow: 6,
+                  background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                  fontWeight: 700
+                }}
+              >
+                Neu
+              </Button>
+            </Box>
+          </Zoom>
         </Stack>
       )}
 
@@ -527,6 +622,7 @@ export default function Invoices() {
           )}
         </DialogContent>
       </Dialog>
+      <InvoiceSettingsDialog open={showSettings} onClose={() => setShowSettings(false)} />
     </Box>
   );
 }
@@ -553,53 +649,52 @@ function ThreeColumnPOS(props) {
       height: { md: 'calc(100vh - 160px)' } // im Drawer
     }}>
       {/* Empfänger + Kundenliste */}
-      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: { md: 2 } }}>
         <CardContent sx={{ pb: 1 }}>
           <TextField
             label="Empfängername *"
             value={recipientName}
             onChange={(e) => setRecipientName(e.target.value)}
             fullWidth size="small"
+            variant="filled"
           />
           <TextField
             label="Anschrift"
             value={recipientAddress}
             onChange={(e) => setRecipientAddress(e.target.value)}
             fullWidth multiline minRows={3} size="small" sx={{ mt: 1 }}
+            variant="filled"
             placeholder={'Straße 1\n12345 Musterstadt'}
           />
           <DebouncedTextField
-            placeholder="Kunde suchen – Klick übernimmt Name (editierbar)"
+            placeholder="Kunde suchen"
             size="small"
             fullWidth
             value={customerSearch}
             onChange={setCustomerSearch}
             InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
-            sx={{ mt: 1 }}
-            helperText="Tipp: Klick auf einen Kunden übernimmt den Namen (und ggf. Adresse) in die Felder."
+            sx={{ mt: 2 }}
           />
         </CardContent>
-        <Box sx={{ p: 2, pt: 0, overflowY: 'auto', flex: 1 }}>
-          <List dense={!isMobile}>
+        <Box sx={{ overflowY: 'auto', flex: 1, px: 2, pb: 2 }}>
+          <List dense>
             {customers.map(c => (
-              <ListItem
+              <ListItemButton
                 key={c.id}
                 onClick={() => onPickCustomer(c)}
                 sx={{
-                  cursor: 'pointer',
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderRadius: 1,
-                  mb: 1,
-                  '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
+                  borderRadius: 2,
+                  mb: 0.5,
+                  '&:hover': { bgcolor: 'primary.light', color: 'primary.contrastText', '& .MuiSvgIcon-root': { color: 'inherit' } }
                 }}
               >
-                <Avatar sx={{ mr: 1 }}><Person /></Avatar>
+                <ListItemIcon sx={{ minWidth: 40 }}><Person /></ListItemIcon>
                 <ListItemText
                   primary={<Typography noWrap fontWeight={600}>{c.nickname || c.name}</Typography>}
                   secondary={c.nickname ? c.name : null}
+                  secondaryTypographyProps={{ sx: { color: 'inherit', opacity: 0.8 } }}
                 />
-              </ListItem>
+              </ListItemButton>
             ))}
           </List>
         </Box>
@@ -625,25 +720,57 @@ function ThreeColumnPOS(props) {
             {articles.map(a => {
               const inCart = cart.find(i => i.id === a.id)?.quantity || 0;
               return (
-                <Grid item xs={6} sm={4} md={3} lg={2} key={a.id}>
-                  <Card onClick={() => addToCart(a)} sx={{ cursor: 'pointer', position: 'relative', '&:hover': { transform: 'scale(1.03)' }, transition: 'transform .15s' }}>
-                    {a.imageMedium && <Box component="img" src={a.imageMedium} alt={a.name} loading="lazy" sx={{ width: '100%', height: 140, objectFit: 'cover' }} />}
-                    {!!inCart && (
-                      <Box sx={{ position: 'absolute', top: 6, right: 6, px: .75, py: .25, borderRadius: 1, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', fontSize: 12, fontWeight: 700 }}>
-                        x{inCart}
+                <Grid item xs={6} sm={4} md={3} lg={3} key={a.id}>
+                  <Card
+                    sx={{
+                      cursor: 'pointer', height: '100%',
+                      borderRadius: 1.5,
+                      border: inCart ? '2px solid' : '1px solid',
+                      borderColor: inCart ? 'primary.main' : 'transparent',
+                      boxShadow: inCart ? 4 : 2,
+                      transition: 'all 0.2s',
+                      display: 'flex', flexDirection: 'column',
+                      '&:hover': { transform: 'translateY(-4px)', boxShadow: 6 }
+                    }}
+                    onClick={() => addToCart(a)}
+                  >
+                    <Box sx={{ position: 'relative', height: 160, bgcolor: 'action.hover' }}>
+                      {a.imageMedium ? (
+                        <CardMedia component="img" image={a.imageMedium} alt={a.name} sx={{ height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.1 }}><Inventory sx={{ fontSize: 60 }} /></Box>
+                      )}
+                      {!!inCart && (
+                        <Fade in={true}>
+                          <Box sx={{
+                            position: 'absolute', top: 8, right: 8,
+                            bgcolor: 'primary.main', color: 'primary.contrastText',
+                            borderRadius: '50%', width: 28, height: 28,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 14, fontWeight: 700, boxShadow: 3
+                          }}>
+                            {inCart}
+                          </Box>
+                        </Fade>
+                      )}
+                    </Box>
+
+                    <CardContent sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                      <Box>
+                        <Typography variant="body1" fontWeight={700} title={a.name} sx={{ lineHeight: 1.2, mb: 0.5 }}>{a.name}</Typography>
+                        <Typography variant="h6" fontWeight={800} color="primary">{money(a.price)}</Typography>
                       </Box>
-                    )}
-                    <CardContent sx={{ p: 1.25 }}>
-                      <Typography noWrap fontSize={14} fontWeight={600}>{a.name}</Typography>
-                      <Typography fontWeight={800} color="primary" fontSize={16}>{money(a.price)}</Typography>
+
                       {a.purchaseUnit && a.unitsPerPurchase > 1 && (
                         <Button
-                          size="small"
-                          variant="outlined"
-                          sx={{ mt: 0.5 }}
+                          size="medium"
+                          variant={inCart ? "contained" : "outlined"}
+                          color="secondary"
+                          fullWidth
+                          sx={{ mt: 2, fontSize: '0.85rem', py: 0.75, fontWeight: 600, textTransform: 'none' }}
                           onClick={(e) => { e.stopPropagation(); addToCart({ ...a, __crate: true }); }}
                         >
-                          +1 {a.purchaseUnit} (×{a.unitsPerPurchase})
+                          + {a.purchaseUnit}
                         </Button>
                       )}
                     </CardContent>
@@ -761,7 +888,62 @@ function ThreeColumnPOS(props) {
             </Button>
           </Stack>
         </Box>
-      </Card>
-    </Box>
+      </Card >
+    </Box >
+  );
+}
+
+function InvoiceSettingsDialog({ open, onClose }) {
+  const queryClient = useQueryClient();
+  const [values, setValues] = useState({});
+  const { data, isLoading } = useQuery({
+    queryKey: ['invoiceSettings'],
+    queryFn: async () => (await api.get('/invoices/settings')).data,
+    enabled: open,
+    staleTime: 0
+  });
+
+  useEffect(() => { if (data) setValues(data); }, [data]);
+
+  const mutation = useMutation({
+    mutationFn: async (vals) => (await api.put('/invoices/settings', vals)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries(['invoiceSettings']);
+      onClose();
+    }
+  });
+
+  const handleChange = (key, val) => setValues(prev => ({ ...prev, [key]: val }));
+  const save = () => mutation.mutate(values);
+
+  if (!open) return null;
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Rechnungseinstellungen</DialogTitle>
+      <DialogContent dividers>
+        {isLoading && <Typography>Lade...</Typography>}
+        {!isLoading && (
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="subtitle2" color="primary">Absender & Kontakt</Typography>
+            <TextField label="Firmenname / Zahlungsempfänger" value={values.INVOICE_PAYEE_NAME || ''} onChange={e => handleChange('INVOICE_PAYEE_NAME', e.target.value)} fullWidth size="small" />
+            <TextField label="Straße & Hausnr." value={values.INVOICE_ADDRESS_STREET || ''} onChange={e => handleChange('INVOICE_ADDRESS_STREET', e.target.value)} fullWidth size="small" />
+            <TextField label="PLZ & Stadt" value={values.INVOICE_ADDRESS_CITY || ''} onChange={e => handleChange('INVOICE_ADDRESS_CITY', e.target.value)} fullWidth size="small" />
+            <TextField label="E-Mail" value={values.INVOICE_EMAIL || ''} onChange={e => handleChange('INVOICE_EMAIL', e.target.value)} fullWidth size="small" />
+
+            <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>Bankverbindung</Typography>
+            <TextField label="IBAN" value={values.INVOICE_IBAN || ''} onChange={e => handleChange('INVOICE_IBAN', e.target.value)} fullWidth size="small" />
+            <TextField label="BIC" value={values.INVOICE_BIC || ''} onChange={e => handleChange('INVOICE_BIC', e.target.value)} fullWidth size="small" />
+
+            <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>Sonstiges</Typography>
+            <TextField label="Referenz-Präfix (z.B. RE)" value={values.INVOICE_REF_PREFIX || ''} onChange={e => handleChange('INVOICE_REF_PREFIX', e.target.value)} fullWidth size="small" />
+          </Stack>
+        )}
+      </DialogContent>
+      <Box sx={{ p: 2, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+        <Button onClick={onClose}>Abbrechen</Button>
+        <Button variant="contained" onClick={save} disabled={mutation.isLoading}>Speichern</Button>
+      </Box>
+    </Dialog>
   );
 }

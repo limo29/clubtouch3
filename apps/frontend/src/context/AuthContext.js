@@ -32,19 +32,19 @@ export const AuthProvider = ({ children }) => {
       }
       setLoading(false);
     };
-    
+
     checkAuth();
   }, []);
 
-  const login = async (email, password) => {
+  const login = async (identifier, password) => {
     try {
       setError(null);
-      const response = await api.post(API_ENDPOINTS.LOGIN, { email, password });
+      const response = await api.post(API_ENDPOINTS.LOGIN, { identifier, password });
       const { user, accessToken, refreshToken } = response.data;
-      
+
       setTokens(accessToken, refreshToken);
       setUser(user);
-      
+
       return { success: true };
     } catch (err) {
       const errorMessage = err.response?.data?.error || 'Login fehlgeschlagen';

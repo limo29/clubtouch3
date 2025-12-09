@@ -36,6 +36,7 @@ import {
   AccountBalanceWallet,
   Info,
   FilterList,
+  LocalBar,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -137,11 +138,13 @@ const Transactions = () => {
     }).format(amount);
   };
 
-  const getPaymentMethodIcon = (method) => {
+  const getPaymentMethodIcon = (method, type) => {
+    if (type === 'OWNER_USE') return <LocalBar />;
     return method === 'CASH' ? <AttachMoney /> : <AccountBalanceWallet />;
   };
 
-  const getPaymentMethodLabel = (method) => {
+  const getPaymentMethodLabel = (method, type) => {
+    if (type === 'OWNER_USE') return 'Auf den Wirt';
     return method === 'CASH' ? 'Bar' : 'Kundenkonto';
   };
 
@@ -303,7 +306,7 @@ const Transactions = () => {
                   {format(new Date(transaction.createdAt), 'dd.MM.yyyy HH:mm', { locale: de })}
                 </TableCell>
                 <TableCell>
-                  {transaction.customer ? transaction.customer.name : 'Bar-Zahlung'}
+                  {transaction.customer ? transaction.customer.name : (transaction.type === 'OWNER_USE' ? 'Auf den Wirt' : 'Bar-Zahlung')}
                 </TableCell>
                 <TableCell>
                   {transaction.items?.length || 0} Artikel
@@ -319,8 +322,8 @@ const Transactions = () => {
                 </TableCell>
                 <TableCell>
                   <Chip
-                    icon={getPaymentMethodIcon(transaction.paymentMethod)}
-                    label={getPaymentMethodLabel(transaction.paymentMethod)}
+                    icon={getPaymentMethodIcon(transaction.paymentMethod, transaction.type)}
+                    label={getPaymentMethodLabel(transaction.paymentMethod, transaction.type)}
                     size="small"
                   />
                 </TableCell>
@@ -411,16 +414,16 @@ const Transactions = () => {
                   Kunde
                 </Typography>
                 <Typography variant="body1" gutterBottom>
-                  {selectedTransaction.customer?.name || 'Bar-Zahlung'}
+                  {selectedTransaction.customer ? selectedTransaction.customer.name : (selectedTransaction.type === 'OWNER_USE' ? 'Auf den Wirt' : 'Bar-Zahlung')}
                 </Typography>
 
                 <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
                   Zahlungsart
                 </Typography>
                 <Box display="flex" alignItems="center" gap={1}>
-                  {getPaymentMethodIcon(selectedTransaction.paymentMethod)}
+                  {getPaymentMethodIcon(selectedTransaction.paymentMethod, selectedTransaction.type)}
                   <Typography variant="body1">
-                    {getPaymentMethodLabel(selectedTransaction.paymentMethod)}
+                    {getPaymentMethodLabel(selectedTransaction.paymentMethod, selectedTransaction.type)}
                   </Typography>
                 </Box>
 

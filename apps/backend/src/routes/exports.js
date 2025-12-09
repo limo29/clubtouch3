@@ -10,7 +10,7 @@ router.use(authenticate);
 router.get('/', exportController.listAvailableExports);
 
 // CSV Exporte (Admins und Kassierer)
-router.get('/transactions', 
+router.get('/transactions',
   authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
   exportController.exportTransactions
 );
@@ -26,6 +26,11 @@ router.get('/customers',
 );
 
 // PDF Exporte (Admins und Kassierer)
+router.get('/daily-summary/preview',
+  authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
+  exportController.getDailySummaryPreview
+);
+
 router.get('/daily-summary',
   authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
   exportController.exportDailySummary
@@ -37,7 +42,7 @@ router.get('/monthly-summary',
 );
 
 router.get('/eur',
-  authorize('ADMIN','ACCOUNTANT'),
+  authorize('ADMIN', 'ACCOUNTANT'),
   exportController.exportEUR
 );
 

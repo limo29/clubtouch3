@@ -7,7 +7,7 @@ class PurchaseDocumentService {
    * Generiert eine neue Belegnummer (z.B. RE-2025-0001)
    */
   async generateDocumentNumber(type) {
-    const prefix = type === 'RECHNUNG' ? 'RE' : 'LS';
+    const prefix = type === 'RECHNUNG' ? 'EK' : 'LS';
     const year = new Date().getFullYear();
     const yearPrefix = `${prefix}-${year}-`;
 
@@ -412,7 +412,7 @@ class PurchaseDocumentService {
       paid,
       dueDate,
       paymentMethod,
-      items // Erwartet: [{ articleId, kisten, flaschen }]
+      items // Erwartet: [{ articleId, kisten, flaschen }] oder undefined
     } = data;
 
     return prisma.$transaction(async (tx) => {
@@ -427,122 +427,134 @@ class PurchaseDocumentService {
         throw new Error('Beleg nicht gefunden.');
       }
 
-      // 2. Lagerbestand-KORREKTUR (Alte Buchungen stornieren)
-      // Wir erstellen eine Map, um die Stornos zu sammeln
-      const stockCorrections = new Map();
-      for (const oldItem of oldDocument.items) {
-        if (oldItem.articleId) {
-          // 'quantity' ist die Gesamtmenge (z.B. 15 Flaschen)
-          const oldQuantity = new Prisma.Decimal(oldItem.quantity);
-          // Wir addieren den *negativen* Wert, um den Bestand zu senken
-          const currentCorrection = stockCorrections.get(oldItem.articleId) || new Prisma.Decimal(0);
-          stockCorrections.set(oldItem.articleId, currentCorrection.minus(oldQuantity));
+      // --- ITEMS & LAGERBESTAND LOGIK (Nur wenn 'items' übergeben wurde) ---
+      let newItemCreations = undefined;
+
+      if (items !== undefined) {
+        // 2. Lagerbestand-KORREKTUR (Alte Buchungen stornieren)
+        // Wir erstellen eine Map, um die Stornos zu sammeln
+        const stockCorrections = new Map();
+        for (const oldItem of oldDocument.items) {
+          if (oldItem.articleId) {
+            // 'quantity' ist die Gesamtmenge (z.B. 15 Flaschen)
+            const oldQuantity = new Prisma.Decimal(oldItem.quantity);
+            // Wir addieren den *negativen* Wert, um den Bestand zu senken
+            const currentCorrection = stockCorrections.get(oldItem.articleId) || new Prisma.Decimal(0);
+            stockCorrections.set(oldItem.articleId, currentCorrection.minus(oldQuantity));
+          }
         }
-      }
 
-      // 3. Lagerbestand-KORREKTUR (Neue Buchungen anwenden)
-      if (items && items.length > 0) {
-        for (const newItem of items) {
-          if (!newItem.articleId) continue;
+        // 3. Lagerbestand-KORREKTUR (Neue Buchungen anwenden)
+        if (items && items.length > 0) {
+          for (const newItem of items) {
+            if (!newItem.articleId) continue;
 
-          const article = await tx.article.findUnique({ where: { id: newItem.articleId } });
-          if (!article) throw new Error(`Artikel ${newItem.articleId} nicht gefunden.`);
+            const article = await tx.article.findUnique({ where: { id: newItem.articleId } });
+            if (!article) throw new Error(`Artikel ${newItem.articleId} nicht gefunden.`);
 
-          const kistenQty = new Prisma.Decimal(newItem.kisten || 0);
-          const flaschenQty = new Prisma.Decimal(newItem.flaschen || 0);
-          const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
+            const kistenQty = new Prisma.Decimal(newItem.kisten || 0);
+            const flaschenQty = new Prisma.Decimal(newItem.flaschen || 0);
+            const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
 
-          const totalNewQuantity = kistenQty.times(unitsPerKiste).plus(flaschenQty);
+            const totalNewQuantity = kistenQty.times(unitsPerKiste).plus(flaschenQty);
 
-          // Wir addieren den *positiven* Wert, um den Bestand zu erhöhen
-          const currentCorrection = stockCorrections.get(newItem.articleId) || new Prisma.Decimal(0);
-          stockCorrections.set(newItem.articleId, currentCorrection.plus(totalNewQuantity));
+            // Wir addieren den *positiven* Wert, um den Bestand zu erhöhen
+            const currentCorrection = stockCorrections.get(newItem.articleId) || new Prisma.Decimal(0);
+            stockCorrections.set(newItem.articleId, currentCorrection.plus(totalNewQuantity));
+          }
         }
-      }
 
-      // 4. Lagerbestand-Delta-Buchungen durchführen
-      for (const [articleId, delta] of stockCorrections.entries()) {
-        if (delta.equals(0)) continue; // Keine Änderung
+        // 4. Lagerbestand-Delta-Buchungen durchführen
+        for (const [articleId, delta] of stockCorrections.entries()) {
+          if (delta.equals(0)) continue; // Keine Änderung
 
-        // 4a. Lagerbestand im Artikel aktualisieren
-        await tx.article.update({
-          where: { id: articleId },
-          data: {
-            stock: {
-              increment: delta // 'delta' kann positiv oder negativ sein
+          // 4a. Lagerbestand im Artikel aktualisieren
+          await tx.article.update({
+            where: { id: articleId },
+            data: {
+              stock: {
+                increment: delta // 'delta' kann positiv oder negativ sein
+              }
             }
-          }
-        });
-
-        // 4b. StockMovement loggen
-        await tx.stockMovement.create({
-          data: {
-            articleId: articleId,
-            type: 'CORRECTION', // Wir verwenden 'CORRECTION' für Änderungen
-            quantity: delta,
-            reason: `Korrektur Beleg ${oldDocument.documentNumber}`
-          }
-        });
-      }
-
-      // 5. Alte Positionen LÖSCHEN
-      await tx.purchaseDocumentItem.deleteMany({
-        where: { documentId: documentId }
-      });
-
-      // 6. Neue Positionen ERSTELLEN
-      const newItemCreations = [];
-      if (items && items.length > 0) {
-        for (const newItem of items) {
-          if (!newItem.articleId) continue;
-
-          const article = await tx.article.findUnique({ where: { id: newItem.articleId } });
-          const kistenQty = new Prisma.Decimal(newItem.kisten || 0);
-          const flaschenQty = new Prisma.Decimal(newItem.flaschen || 0);
-          const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
-          const totalNewQuantity = kistenQty.times(unitsPerKiste).plus(flaschenQty);
-
-          if (totalNewQuantity.lte(0)) continue;
-
-          newItemCreations.push({
-            articleId: newItem.articleId,
-            description: article.name,
-            quantity: totalNewQuantity,
-            unit: article.unit,
-            purchaseUnit: article.purchaseUnit,
-            purchaseUnitQuantity: kistenQty,
-            baseUnit: article.unit,
-            baseUnitQuantity: flaschenQty,
-            pricePerUnit: new Prisma.Decimal(0), // TODO: Preislogik
-            totalPrice: new Prisma.Decimal(0)
           });
+
+          // 4b. StockMovement loggen
+          await tx.stockMovement.create({
+            data: {
+              articleId: articleId,
+              type: 'CORRECTION', // Wir verwenden 'CORRECTION' für Änderungen
+              quantity: delta,
+              reason: `Korrektur Beleg ${oldDocument.documentNumber}`
+            }
+          });
+        }
+
+        // 5. Alte Positionen LÖSCHEN
+        await tx.purchaseDocumentItem.deleteMany({
+          where: { documentId: documentId }
+        });
+
+        // 6. Neue Positionen vorbereiten (werden beim Update via 'create' hinzugefügt)
+        newItemCreations = [];
+        if (items && items.length > 0) {
+          for (const newItem of items) {
+            if (!newItem.articleId) continue;
+
+            const article = await tx.article.findUnique({ where: { id: newItem.articleId } });
+            const kistenQty = new Prisma.Decimal(newItem.kisten || 0);
+            const flaschenQty = new Prisma.Decimal(newItem.flaschen || 0);
+            const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
+            const totalNewQuantity = kistenQty.times(unitsPerKiste).plus(flaschenQty);
+
+            if (totalNewQuantity.lte(0)) continue;
+
+            newItemCreations.push({
+              articleId: newItem.articleId,
+              description: article.name,
+              quantity: totalNewQuantity,
+              unit: article.unit,
+              purchaseUnit: article.purchaseUnit,
+              purchaseUnitQuantity: kistenQty,
+              baseUnit: article.unit,
+              baseUnitQuantity: flaschenQty,
+              pricePerUnit: new Prisma.Decimal(0), // TODO: Preislogik
+              totalPrice: new Prisma.Decimal(0)
+            });
+          }
         }
       }
 
       // 7. Kopfdaten (Header) aktualisieren
-      const updateData = {
-        supplier,
-        documentDate: new Date(documentDate),
-        description,
-        items: {
-          create: newItemCreations // Neue Items hier erstellen
-        }
-      };
+      const updateData = {};
+      if (supplier !== undefined) updateData.supplier = supplier;
+      if (documentDate !== undefined) updateData.documentDate = new Date(documentDate);
+      if (description !== undefined) updateData.description = description;
+
+      if (newItemCreations !== undefined) {
+        updateData.items = {
+          create: newItemCreations
+        };
+      }
 
       if (oldDocument.type === 'RECHNUNG') {
-        updateData.totalAmount = totalAmount ? new Prisma.Decimal(totalAmount) : oldDocument.totalAmount;
-        updateData.paid = paid;
-        updateData.dueDate = dueDate ? new Date(dueDate) : oldDocument.dueDate;
-        if (paid) {
-          updateData.paymentMethod = paymentMethod;
-          updateData.paidAt = oldDocument.paidAt || new Date();
-        } else {
-          updateData.paymentMethod = null;
-          updateData.paidAt = null;
+        if (totalAmount !== undefined) updateData.totalAmount = new Prisma.Decimal(totalAmount);
+        if (paid !== undefined) {
+          updateData.paid = paid;
+          if (paid) {
+            // Wenn bezahlt gesetzt wird, und Methode da ist
+            if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
+            // Wenn vorher nicht bezahlt war, setze Datum
+            if (!oldDocument.paid) updateData.paidAt = new Date();
+          } else {
+            updateData.paymentMethod = null;
+            updateData.paidAt = null;
+          }
         }
+        if (dueDate !== undefined) updateData.dueDate = new Date(dueDate);
       }
+
       if (nachweisUrl !== undefined) {
-        updateData.nachweisUrl = nachweisUrl; // Setzt es auf den neuen Pfad oder auf null, wenn gelöscht
+        updateData.nachweisUrl = nachweisUrl;
       }
 
       const updatedDocument = await tx.purchaseDocument.update({
@@ -557,7 +569,7 @@ class PurchaseDocumentService {
           action: 'UPDATE_DOCUMENT',
           entityType: 'PurchaseDocument',
           entityId: documentId,
-          changes: { updatedFields: Object.keys(data) }
+          changes: { updatedFields: Object.keys(data), nachweisUpdate: nachweisUrl !== undefined }
         }
       });
 

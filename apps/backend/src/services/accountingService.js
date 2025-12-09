@@ -15,7 +15,15 @@ class AccountingService {
     end.setHours(23, 59, 59, 999);
 
     // Verkäufe (POS)
-    const [txAgg, incomeByCategoryRaw, txCash, txAccount, expiredRaw, ownerUseRaw] = await Promise.all([
+    const [
+      txAgg,
+      incomeByCategoryRaw,
+      txCash,
+      txAccount,
+      expiredRaw,
+      ownerUseRaw,
+      ownerUseAgg // << New: Aggregate total amount for OWNER_USE
+    ] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', cancelled: false, createdAt: { gte: start, lte: end } },
         _sum: { totalAmount: true }, _count: true
@@ -38,9 +46,9 @@ class AccountingService {
         where: { type: 'SALE', cancelled: false, paymentMethod: 'ACCOUNT', createdAt: { gte: start, lte: end } },
         _sum: { totalAmount: true }
       }),
-      // Abgelaufene Artikel (Menge)
+      // Abgelaufene Artikel (Menge + Betrag)
       prisma.$queryRaw`
-        SELECT a.name as article, SUM(ti.quantity) as quantity
+        SELECT a.name as article, SUM(ti.quantity) as quantity, SUM(ti."totalPrice") as amount
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
@@ -49,9 +57,9 @@ class AccountingService {
         GROUP BY a.id, a.name
         ORDER BY quantity DESC
       `,
-      // Eigenverbrauch (Menge)
+      // Eigenverbrauch (Menge + Betrag)
       prisma.$queryRaw`
-        SELECT a.name as article, SUM(ti.quantity) as quantity
+        SELECT a.name as article, SUM(ti.quantity) as quantity, SUM(ti."totalPrice") as amount
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
@@ -59,7 +67,12 @@ class AccountingService {
           AND t.cancelled = false AND t.type = 'OWNER_USE'
         GROUP BY a.id, a.name
         ORDER BY quantity DESC
-      `
+      `,
+      // Summe Eigenverbrauch (Gesamt)
+      prisma.transaction.aggregate({
+        where: { type: 'OWNER_USE', cancelled: false, createdAt: { gte: start, lte: end } },
+        _sum: { totalAmount: true }
+      })
     ]);
 
     // Einnahmen nach Artikel (für Top-10 Chart)
@@ -100,7 +113,10 @@ class AccountingService {
 
     const incomePOS = dec(txAgg._sum.totalAmount);
     const incomeInvoices = dec(invoicesPaidAgg._sum.totalAmount);
-    const incomeTotal = incomePOS + incomeInvoices;
+    const incomeOwnerUse = dec(ownerUseAgg._sum.totalAmount);
+
+    // Einnahmen gesamt = POS + Rechnungen + Eigenverbrauch
+    const incomeTotal = incomePOS + incomeInvoices + incomeOwnerUse;
 
     const expensesTotal = dec(invAgg._sum.totalAmount);
     const profit = incomeTotal - expensesTotal;
@@ -124,19 +140,22 @@ class AccountingService {
 
     const expiredItems = expiredRaw.map(r => ({
       article: r.article || '—',
-      quantity: Number(r.quantity || 0)
+      quantity: Number(r.quantity || 0),
+      amount: Number(r.amount || 0)
     }));
 
     const ownerUseItems = ownerUseRaw.map(r => ({
       article: r.article || '—',
-      quantity: Number(r.quantity || 0)
+      quantity: Number(r.quantity || 0),
+      amount: Number(r.amount || 0)
     }));
 
     return {
       summary: {
         totalIncome: incomeTotal,
         totalExpenses: expensesTotal,
-        profit
+        profit,
+        incomeOwnerUse // Pass explicitly if needed
       },
       details: {
         incomeByCategory,
@@ -144,7 +163,8 @@ class AccountingService {
         expensesBySupplier,
         incomeByType: {
           transactions: dec(txCash._sum.totalAmount) + dec(txAccount._sum.totalAmount),
-          invoices: incomeInvoices // <— neu
+          invoices: incomeInvoices,
+          ownerUse: incomeOwnerUse // Add to breakdown
         },
         expiredItems,
         ownerUseItems
@@ -186,7 +206,9 @@ class AccountingService {
       orderBy: [{ category: 'asc' }, { name: 'asc' }]
     });
     const system = articles.map(a => ({
-      articleId: a.id, name: a.name, systemStock: Number(a.stock || 0), unit: a.unit
+      articleId: a.id, name: a.name, systemStock: Number(a.stock || 0), unit: a.unit,
+      price: Number(a.price || 0), value: Number(a.stock || 0) * Number(a.price || 0),
+      purchaseUnit: a.purchaseUnit, unitsPerPurchase: Number(a.unitsPerPurchase || 0)
     }));
 
     const physicalMap = new Map(
@@ -197,7 +219,9 @@ class AccountingService {
       articleId: s.articleId,
       name: s.name,
       physicalStock: physicalMap.has(s.articleId) ? physicalMap.get(s.articleId) : s.systemStock,
-      unit: s.unit
+      unit: s.unit,
+      purchaseUnit: s.purchaseUnit,
+      unitsPerPurchase: s.unitsPerPurchase
     }));
 
     const diff = inventoryPhysical.map(p => {
@@ -206,7 +230,9 @@ class AccountingService {
         articleId: p.articleId,
         name: p.name,
         diff: Number(p.physicalStock) - Number(sys.systemStock),
-        unit: p.unit
+        unit: p.unit,
+        purchaseUnit: p.purchaseUnit,
+        unitsPerPurchase: p.unitsPerPurchase
       };
     });
 
@@ -327,7 +353,7 @@ class AccountingService {
         paid: true,
         documentDate: { gte: start, lte: end }
       },
-      select: { documentDate: true, supplier: true, documentNumber: true, totalAmount: true }
+      select: { documentDate: true, supplier: true, documentNumber: true, totalAmount: true, nachweisUrl: true, paid: true }
     });
 
     // Offene (unbezahlte) Ausgangsrechnungen im Zeitraum
@@ -339,7 +365,25 @@ class AccountingService {
       select: { customerName: true, description: true, createdAt: true, dueDate: true, status: true, totalAmount: true }
     });
 
-    return { soldArticles, paidInvoices, expenseDocs, unpaidInvoices, expiredArticles, ownerUseArticles };
+    // Systembestand (Snapshot aktuell für Preview - da Preview immer "jetzt" im Kontext des Abschlusses ist)
+    // Wenn das Jahr bereits geschlossen ist, müssten wir eigentlich den Snapshot aus dem Report nehmen.
+    // Aber getFiscalYearPreview wird meist vor dem Abschluss aufgerufen.
+    const articles = await prisma.article.findMany({
+      orderBy: [{ category: 'asc' }, { name: 'asc' }]
+    });
+    const inventorySystem = articles.map(a => ({
+      articleId: a.id,
+      name: a.name,
+      category: a.category,
+      unit: a.unit,
+      stock: Number(a.stock || 0),
+      price: Number(a.price || 0),
+      value: Number(a.stock || 0) * Number(a.price || 0),
+      purchaseUnit: a.purchaseUnit,
+      unitsPerPurchase: Number(a.unitsPerPurchase || 0)
+    }));
+
+    return { soldArticles, paidInvoices, expenseDocs, unpaidInvoices, expiredArticles, ownerUseArticles, inventorySystem };
   }
 
 }

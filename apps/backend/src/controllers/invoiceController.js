@@ -62,6 +62,21 @@ class InvoiceController {
       res.json(result);
     } catch (err) { console.error('Delete invoice error:', err); res.status(400).json({ error: err.message || 'Fehler beim Löschen/Stornieren der Rechnung' }); }
   }
+
+  async getSettings(req, res) {
+    try {
+      const settings = await invoiceService.getSettings();
+      res.json(settings);
+    } catch (e) { console.error('Get settings error:', e); res.status(500).json({ error: 'Fehler beim Laden der Einstellungen' }); }
+  }
+
+  async updateSettings(req, res) {
+    try {
+      if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Nur Admins dürfen Einstellungen ändern' });
+      await invoiceService.updateSettings(req.body);
+      res.json({ message: 'Einstellungen gespeichert' });
+    } catch (e) { console.error('Update settings error:', e); res.status(500).json({ error: 'Fehler beim Speichern der Einstellungen' }); }
+  }
 }
 
 module.exports = new InvoiceController();

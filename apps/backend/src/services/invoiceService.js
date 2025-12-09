@@ -4,10 +4,16 @@ const { Prisma } = require('@prisma/client');
 const QRCode = require('qrcode');
 
 // .env Konfig
-const PAYEE_NAME = process.env.INVOICE_PAYEE_NAME || 'Clubtouch3 e.V.';
-const IBAN = process.env.INVOICE_IBAN || 'DE12345678901234567890';
-const BIC = process.env.INVOICE_BIC || 'DEUTDEFFXXX';
-const REM_REF_PREFIX = process.env.INVOICE_REF_PREFIX || 'RE';
+// .env Konfig (Fallback)
+const DEFAULT_CONFIG = {
+  INVOICE_PAYEE_NAME: process.env.INVOICE_PAYEE_NAME || 'Clubtouch3 e.V.',
+  INVOICE_IBAN: process.env.INVOICE_IBAN || 'DE12345678901234567890',
+  INVOICE_BIC: process.env.INVOICE_BIC || 'DEUTDEFFXXX',
+  INVOICE_REF_PREFIX: process.env.INVOICE_REF_PREFIX || 'RE',
+  INVOICE_ADDRESS_STREET: 'Musterstraße 123',
+  INVOICE_ADDRESS_CITY: '12345 Musterstadt',
+  INVOICE_EMAIL: 'info@clubtouch3.de'
+};
 
 const d = (v) => new Prisma.Decimal(v ?? 0);
 
@@ -33,6 +39,29 @@ class InvoiceService {
     const last = await prisma.invoice.findFirst({ where: { invoiceNumber: { startsWith: `${currentYear}-` } }, orderBy: { invoiceNumber: 'desc' } });
     let n = 1; if (last) { const p = last.invoiceNumber.split('-'); if (p.length === 2) n = parseInt(p[1], 10) + 1; }
     return `${currentYear}-${String(n).padStart(4, '0')}`;
+  }
+
+  async getSettings() {
+    const keys = Object.keys(DEFAULT_CONFIG);
+    const stored = await prisma.systemSetting.findMany({ where: { key: { in: keys } } });
+    const settings = { ...DEFAULT_CONFIG };
+    for (const s of stored) {
+      if (s.value) settings[s.key] = s.value;
+    }
+    return settings;
+  }
+
+  async updateSettings(data) {
+    const validKeys = Object.keys(DEFAULT_CONFIG);
+    for (const [key, value] of Object.entries(data)) {
+      if (validKeys.includes(key)) {
+        await prisma.systemSetting.upsert({
+          where: { key },
+          update: { value: String(value) },
+          create: { key, value: String(value) }
+        });
+      }
+    }
   }
 
   async createInvoice(data, userId) {
@@ -68,9 +97,9 @@ class InvoiceService {
     return inv;
   }
 
-  buildSepaEpcQr({ amount, remittance }) {
+  buildSepaEpcQr({ amount, remittance, settings }) {
     const amt = Number(amount || 0).toFixed(2);
-    return ['BCD', '001', '1', 'SCT', BIC, PAYEE_NAME, IBAN, `EUR${amt}`, '', '', (remittance || '').slice(0, 140)].join('');
+    return ['BCD', '001', '1', 'SCT', settings.INVOICE_BIC, settings.INVOICE_PAYEE_NAME, settings.INVOICE_IBAN, `EUR${amt}`, '', '', (remittance || '').slice(0, 140)].join('');
   }
   drawTableHeader(doc, y) {
     doc.fontSize(10);
@@ -83,19 +112,20 @@ class InvoiceService {
   }
 
   // Hilfsfunktion: Footer + SEPA QR zeichnen
-  async drawFooterWithQr(doc, totalAmount, invoiceNumber) {
+  // Hilfsfunktion: Footer + SEPA QR zeichnen
+  async drawFooterWithQr(doc, totalAmount, invoiceNumber, settings) {
     const pageW = doc.page.width;
     const pageH = doc.page.height;
     const marginB = doc.page.margins.bottom || 50;
 
     const footerY = pageH - marginB - 30;     // sicher innerhalb der Seite
     doc.fontSize(8);
-    doc.text(`Bank: ${PAYEE_NAME} | IBAN: ${IBAN} | BIC: ${BIC}`,
+    doc.text(`Bank: ${settings.INVOICE_PAYEE_NAME} | IBAN: ${settings.INVOICE_IBAN} | BIC: ${settings.INVOICE_BIC}`,
       50, footerY, { align: 'center', width: pageW - 100 });
 
     // QR rechts unten
-    const remRef = `${REM_REF_PREFIX}-${invoiceNumber}`;
-    const epc = this.buildSepaEpcQr({ amount: totalAmount, remittance: remRef });
+    const remRef = `${settings.INVOICE_REF_PREFIX}-${invoiceNumber}`;
+    const epc = this.buildSepaEpcQr({ amount: totalAmount, remittance: remRef, settings });
     const qrPng = await QRCode.toBuffer(epc, { type: 'png', errorCorrectionLevel: 'M', margin: 1, scale: 4 });
     const qrWidth = 72; // 1 inch
     const qrX = pageW - (doc.page.margins.right || 50) - qrWidth;
@@ -119,15 +149,17 @@ class InvoiceService {
           mimeType: 'application/pdf'
         }));
 
+        const settings = await this.getSettings();
+
         // Header
         doc.rect(50, 50, 100, 50).stroke();
         doc.text('LOGO', 85, 70);
 
         doc.fontSize(10);
-        doc.text(PAYEE_NAME, 200, 50);
-        doc.text('Musterstraße 123', 200, 65);
-        doc.text('12345 Musterstadt', 200, 80);
-        doc.text('info@clubtouch3.de', 200, 95);
+        doc.text(settings.INVOICE_PAYEE_NAME, 200, 50);
+        doc.text(settings.INVOICE_ADDRESS_STREET, 200, 65);
+        doc.text(settings.INVOICE_ADDRESS_CITY, 200, 80);
+        doc.text(settings.INVOICE_EMAIL, 200, 95);
 
         // Empfänger
         doc.fontSize(10);
@@ -189,7 +221,8 @@ class InvoiceService {
         doc.text(`€ ${Number(invoice.totalAmount).toFixed(2)}`, 450, y);
 
         // Footer + QR **unten auf der aktuellen Seite**
-        await this.drawFooterWithQr(doc, invoice.totalAmount, invoice.invoiceNumber);
+        // Footer + QR **unten auf der aktuellen Seite**
+        await this.drawFooterWithQr(doc, invoice.totalAmount, invoice.invoiceNumber, settings);
 
         doc.end();
       } catch (e) { reject(e); }

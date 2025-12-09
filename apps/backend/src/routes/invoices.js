@@ -12,6 +12,18 @@ router.get('/',
   invoiceController.listInvoices
 );
 
+// Einstellungen abrufen
+router.get('/settings',
+  authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
+  (req, res) => invoiceController.getSettings(req, res)
+);
+
+// Einstellungen speichern
+router.put('/settings',
+  authorize('ADMIN'),
+  (req, res) => invoiceController.updateSettings(req, res)
+);
+
 // Einzelne Rechnung
 router.get('/:id',
   authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),

@@ -17,6 +17,7 @@ datasource db {
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
+  username  String?  @unique
   name      String
   password  String // Hashed! 
   role      Role     @default(CASHIER)
@@ -44,6 +45,7 @@ model Customer {
   updatedAt       DateTime         @updatedAt
   gender          Gender?          @default(OTHER)
   lastActivity    DateTime         @default(now())
+  active          Boolean          @default(true)
 
   // Relationen 
   transactions    Transaction[]
@@ -61,6 +63,7 @@ model Article {
   minStock           Decimal @default(0) @db.Decimal(10, 2) // Geändert zu Decimal
   unit               String  @default("Stück") // Verkaufseinheit (z.B. "Flasche")
   category           String
+  order              Int     @default(0)
   imageUrl           String?
   active             Boolean @default(true)
   countsForHighscore Boolean @default(true) // Für Highscore-Konfiguration 
@@ -415,6 +418,7 @@ model AdSlide {
   active      Boolean          @default(true)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+  slideData   Json?            // Stores the JSON representation of the slide elements
 }
 
 enum AdTransitionType {
@@ -422,4 +426,12 @@ enum AdTransitionType {
   SLIDE
   ZOOM
   NONE
+}
+
+// Allgemeine Systemeinstellungen (Key-Value Store)
+model SystemSetting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
 }

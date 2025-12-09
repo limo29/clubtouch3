@@ -3,42 +3,43 @@ const { comparePassword, generateTokens, verifyRefreshToken } = require('../util
 const prisma = require('../utils/prisma');
 
 class AuthController {
-// Login
-async login(req, res) {
-  try {
-    const { email, password } = req.body;
-    
-    console.log('Login attempt for:', email); // Debug
-    
-    // Finde User
-    const user = await userService.findByEmail(email);
-    
-    if (!user) {
-      console.log('User not found'); // Debug
-      return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
-    }
-    
-    if (!user.active) {
-      console.log('User is inactive'); // Debug
-      return res.status(401).json({ error: 'Benutzer ist deaktiviert' });
-    }
-    
-    // Prüfe Passwort
-    const isValid = await comparePassword(password, user.password);
-    
-    if (!isValid) {
-      console.log('Invalid password'); // Debug
-      return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
-    }
+  // Login
+  async login(req, res) {
+    try {
+      const { email, password, identifier } = req.body;
+      const loginIdentifier = identifier || email;
 
-      
+      console.log('Login attempt for:', loginIdentifier); // Debug
+
+      // Finde User
+      const user = await userService.findByIdentifier(loginIdentifier);
+
+      if (!user) {
+        console.log('User not found'); // Debug
+        return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
+      }
+
+      if (!user.active) {
+        console.log('User is inactive'); // Debug
+        return res.status(401).json({ error: 'Benutzer ist deaktiviert' });
+      }
+
+      // Prüfe Passwort
+      const isValid = await comparePassword(password, user.password);
+
+      if (!isValid) {
+        console.log('Invalid password'); // Debug
+        return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
+      }
+
+
       // Generiere Tokens
       const { accessToken, refreshToken } = generateTokens(user.id);
-      
+
       // Speichere Session
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7); // 7 Tage
-      
+
       await prisma.session.create({
         data: {
           userId: user.id,
@@ -47,7 +48,7 @@ async login(req, res) {
           expiresAt
         }
       });
-      
+
       // Erstelle Audit-Log
       await prisma.auditLog.create({
         data: {
@@ -57,7 +58,7 @@ async login(req, res) {
           entityId: user.id
         }
       });
-      
+
       res.json({
         message: 'Erfolgreich angemeldet',
         user: {
@@ -70,28 +71,28 @@ async login(req, res) {
         refreshToken
       });
     } catch (error) {
-    console.error('Login error details:', error); // Besseres Error-Logging
-    res.status(500).json({ 
-      error: 'Fehler bei der Anmeldung',
-      details: error.message // Temporär für Debugging
-    });
+      console.error('Login error details:', error); // Besseres Error-Logging
+      res.status(500).json({
+        error: 'Fehler bei der Anmeldung',
+        details: error.message // Temporär für Debugging
+      });
+    }
   }
-}
 
-  
+
   // Logout
   async logout(req, res) {
     try {
       const authHeader = req.headers.authorization;
-      
+
       if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.substring(7);
-        
+
         // Lösche Session
         await prisma.session.deleteMany({
           where: { token }
         });
-        
+
         // Audit-Log
         if (req.user) {
           await prisma.auditLog.create({
@@ -104,48 +105,48 @@ async login(req, res) {
           });
         }
       }
-      
+
       res.json({ message: 'Erfolgreich abgemeldet' });
     } catch (error) {
       console.error('Logout error:', error);
       res.status(500).json({ error: 'Fehler beim Abmelden' });
     }
   }
-  
+
   // Refresh Token
   async refreshToken(req, res) {
     try {
       const { refreshToken } = req.body;
-      
+
       if (!refreshToken) {
         return res.status(401).json({ error: 'Refresh Token fehlt' });
       }
-      
+
       // Verifiziere Refresh Token
       const decoded = verifyRefreshToken(refreshToken);
-      
+
       // Prüfe ob Session existiert
       const session = await prisma.session.findFirst({
-        where: { 
+        where: {
           refreshToken,
           userId: decoded.userId
         }
       });
-      
+
       if (!session) {
         return res.status(401).json({ error: 'Ungültige Session' });
       }
-      
+
       // Prüfe ob User noch aktiv
       const user = await userService.findById(decoded.userId);
-      
+
       if (!user || !user.active) {
         return res.status(401).json({ error: 'Benutzer inaktiv' });
       }
-      
+
       // Generiere neue Tokens
       const tokens = generateTokens(user.id);
-      
+
       // Update Session
       await prisma.session.update({
         where: { id: session.id },
@@ -155,7 +156,7 @@ async login(req, res) {
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         }
       });
-      
+
       res.json({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken
@@ -165,7 +166,7 @@ async login(req, res) {
       res.status(401).json({ error: 'Token-Erneuerung fehlgeschlagen' });
     }
   }
-  
+
   // Aktueller User
   async me(req, res) {
     res.json({
