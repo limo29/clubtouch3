@@ -94,6 +94,7 @@ const Users = () => {
       reset({
         name: user.name,
         email: user.email,
+        username: user.username || '',
         role: user.role,
         password: '',
       });
@@ -101,6 +102,7 @@ const Users = () => {
       reset({
         name: '',
         email: '',
+        username: '',
         role: 'CASHIER',
         password: '',
       });
@@ -193,6 +195,7 @@ const Users = () => {
           <TableHead>
             <TableRow>
               <TableCell>Name</TableCell>
+              <TableCell>Benutzername</TableCell>
               <TableCell>E-Mail</TableCell>
               <TableCell>Rolle</TableCell>
               <TableCell>Status</TableCell>
@@ -211,6 +214,7 @@ const Users = () => {
                     )}
                   </Typography>
                 </TableCell>
+                <TableCell>{user.username || '-'}</TableCell>
                 <TableCell>{user.email}</TableCell>
                 <TableCell>
                   <Chip
@@ -303,6 +307,20 @@ const Users = () => {
                       type="email"
                       error={!!errors.email}
                       helperText={errors.email?.message}
+                    />
+                  )}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Controller
+                  name="username"
+                  control={control}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Benutzername (Optional)"
+                      error={!!errors.username}
+                      helperText={errors.username?.message}
                     />
                   )}
                 />

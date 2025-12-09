@@ -85,8 +85,13 @@ class TransactionService {
         });
         if (!customer) throw new Error('Kunde nicht gefunden');
         const balance = Number(customer.balance || 0);
-        if (balance < totalAmount) {
-          throw new Error(`Nicht genügend Guthaben. Verfügbar: €${balance.toFixed(2)}, Benötigt: €${totalAmount.toFixed(2)}`);
+        const allowedOverdraft = 10.0;
+        if (balance - totalAmount < -allowedOverdraft) {
+          throw new Error(`Nicht genügend Guthaben. Limit: -€${allowedOverdraft.toFixed(2)}, Aktuell: €${balance.toFixed(2)}, Benötigt: €${totalAmount.toFixed(2)}`);
+        }
+
+        if (balance - totalAmount < 0) {
+          warnings.push(`Achtung: Kontostand negativ! Neuer Stand: €${(balance - totalAmount).toFixed(2)}`);
         }
 
         await tx.customer.update({
@@ -136,6 +141,15 @@ class TransactionService {
       // 1) als separates Array (für den neuen Controller),
       // 2) UND an das Objekt gehängt (für alten Controller).
       transaction._warnings = warnings;
+
+      // UPDATE LAST ACTIVITY (immer, auch bei Barzahlung)
+      if (customerId) {
+        await tx.customer.update({
+          where: { id: customerId },
+          data: { lastActivity: new Date() }
+        });
+      }
+
       return { transaction, warnings };
     });
 
@@ -317,12 +331,20 @@ class TransactionService {
   }
 
   // Tagesabschluss
-  async getDailySummary(date = new Date()) {
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
+  async getDailySummary(date = new Date(), startHour = 6) {
+    const requestDate = new Date(date);
+    // Wenn die angefragte Zeit vor dem Tagesbeginn liegt (z.B. 1 Uhr nachts, Start 6 Uhr),
+    // dann gehört das noch zum "Geschäftstag" von gestern.
+    if (requestDate.getHours() < startHour) {
+      requestDate.setDate(requestDate.getDate() - 1);
+    }
 
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date(requestDate);
+    startOfDay.setHours(startHour, 0, 0, 0);
+
+    const endOfDay = new Date(startOfDay);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+    endOfDay.setTime(endOfDay.getTime() - 1); // 1ms vor dem nächsten Start
 
     const [
       totalSales,
@@ -430,7 +452,11 @@ class TransactionService {
         AND cancelled = false
         AND type = 'SALE'
       GROUP BY hour
-      ORDER BY hour
+      ORDER BY 
+        CASE 
+          WHEN EXTRACT(HOUR FROM "createdAt") < ${startHour} THEN EXTRACT(HOUR FROM "createdAt") + 24 
+          ELSE EXTRACT(HOUR FROM "createdAt") 
+        END
     `
     ]);
 
@@ -442,6 +468,7 @@ class TransactionService {
 
     return {
       date: date.toISOString().split('T')[0],
+      startHour,
       summary: {
         totalRevenue: safeNumber(totalSales._sum.totalAmount),
         totalTransactions: totalSales._count || 0,
@@ -452,8 +479,8 @@ class TransactionService {
         cancelledRevenue: safeNumber(cancelledSales._sum.totalAmount),
         cancelledTransactions: cancelledSales._count || 0
       },
-      topArticles,
-      hourlyDistribution
+      topArticles: topArticles.map(a => ({ ...a, quantity_sold: safeNumber(a.quantity_sold), revenue: safeNumber(a.revenue) })),
+      hourlyDistribution: hourlyDistribution.map(h => ({ hour: h.hour, transactions: safeNumber(h.transactions), revenue: safeNumber(h.revenue) }))
     };
   }
 

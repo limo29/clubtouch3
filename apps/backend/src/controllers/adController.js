@@ -38,7 +38,8 @@ class AdController {
                     duration: Number(duration) || 10,
                     transition: transition || 'FADE',
                     order: newOrder,
-                    active: active !== undefined ? String(active) === 'true' : true
+                    active: active !== undefined ? String(active) === 'true' : true,
+                    slideData: req.body.slideData ? JSON.parse(req.body.slideData) : undefined
                 }
             });
             res.json(ad);
@@ -61,7 +62,8 @@ class AdController {
                     duration: data.duration ? Number(data.duration) : undefined,
                     transition: data.transition,
                     active: data.active,
-                    order: data.order ? Number(data.order) : undefined
+                    order: data.order ? Number(data.order) : undefined,
+                    slideData: data.slideData ? JSON.parse(data.slideData) : undefined
                 }
             });
             res.json(ad);

@@ -3,7 +3,8 @@ import React, { useMemo, useState, useEffect } from 'react';
 import {
   Box, Card, CardContent, Typography, Grid, Paper, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Button, TextField, Alert, Chip, Dialog,
-  DialogTitle, DialogContent, DialogActions, IconButton, Stack, Tabs, Tab, InputAdornment
+  DialogTitle, DialogContent, DialogActions, IconButton, Stack, Tabs, Tab, InputAdornment,
+  useTheme, useMediaQuery
 } from '@mui/material';
 import {
   Download, TrendingUp, TrendingDown, AccountBalance, Add, Delete, Close,
@@ -503,6 +504,8 @@ function CloseYearDialog({ open, onClose, fy, onSubmit }) {
 /* ==================== Hauptseite: EÜR + Geschäftsjahre ==================== */
 export default function ProfitLoss() {
   const qc = useQueryClient();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   /* Zeitraum */
   const [dateRange, setDateRange] = useState({
@@ -541,8 +544,8 @@ export default function ProfitLoss() {
     totalIncome: asNum(plData?.summary?.totalIncome),
     totalExpenses: asNum(plData?.summary?.totalExpenses),
     profit: asNum(plData?.summary?.profit),
-    expiredItems: plData?.summary?.expiredItems || [],
-    ownerUseItems: plData?.summary?.ownerUseItems || [],
+    expiredItems: plData?.details?.expiredItems || [],
+    ownerUseItems: plData?.details?.ownerUseItems || [],
   };
 
   const incomeByCategory = (plData?.details?.incomeByCategory || []).map(x => ({
@@ -563,8 +566,8 @@ export default function ProfitLoss() {
   }));
   const top10 = incomeByArticle.slice(0, 10);
 
-  const incomeByType = plData?.details?.incomeByType || { transactions: 0, invoices: 0 };
-  const chartCat = incomeByCategory.map((c) => ({ category: c.category, Einnahmen: c.amount }));
+  const incomeByType = plData?.details?.incomeByType || { transactions: 0, invoices: 0, ownerUse: 0 };
+
   const chartTop = top10.map((a) => ({ artikel: a.article, Einnahmen: a.amount }));
 
   const downloadEUR = async () => {
@@ -647,154 +650,229 @@ export default function ProfitLoss() {
       {plError && <Alert severity="error" sx={{ mb: 2 }}>Fehler beim Laden der EÜR.</Alert>}
 
       {/* Summary */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} md={4}>
-          <Card><CardContent>
-            <Box display="flex" alignItems="center" mb={2}><TrendingUp sx={{ color: 'success.main', mr: 2 }} /><Typography color="textSecondary">Einnahmen</Typography></Box>
-            <Typography variant="h4" color="success.main">{fmt(summary.totalIncome)}</Typography>
-          </CardContent></Card>
+          <Card sx={{
+            background: theme.palette.mode === 'dark'
+              ? `linear-gradient(135deg, ${theme.palette.success.dark} 0%, ${theme.palette.success.main} 100%)`
+              : `linear-gradient(135deg, ${theme.palette.success.light} 0%, ${theme.palette.success.main} 100%)`,
+            color: 'white'
+          }}>
+            <CardContent>
+              <Box display="flex" alignItems="center" mb={1}>
+                <TrendingUp sx={{ color: 'inherit', mr: 2, opacity: 0.9 }} />
+                <Typography color="inherit" variant="subtitle1" fontWeight="bold">Einnahmen</Typography>
+              </Box>
+              <Typography variant="h4" color="inherit" fontWeight="bold">{fmt(summary.totalIncome)}</Typography>
+            </CardContent>
+          </Card>
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card><CardContent>
-            <Box display="flex" alignItems="center" mb={2}><TrendingDown sx={{ color: 'error.main', mr: 2 }} /><Typography color="textSecondary">Ausgaben</Typography></Box>
-            <Typography variant="h4" color="error.main">{fmt(summary.totalExpenses)}</Typography>
-          </CardContent></Card>
+          <Card sx={{
+            background: theme.palette.mode === 'dark'
+              ? `linear-gradient(135deg, ${theme.palette.error.dark} 0%, ${theme.palette.error.main} 100%)`
+              : `linear-gradient(135deg, ${theme.palette.error.light} 0%, ${theme.palette.error.main} 100%)`,
+            color: 'white'
+          }}>
+            <CardContent>
+              <Box display="flex" alignItems="center" mb={1}>
+                <TrendingDown sx={{ color: 'inherit', mr: 2, opacity: 0.9 }} />
+                <Typography color="inherit" variant="subtitle1" fontWeight="bold">Ausgaben</Typography>
+              </Box>
+              <Typography variant="h4" color="inherit" fontWeight="bold">{fmt(summary.totalExpenses)}</Typography>
+            </CardContent>
+          </Card>
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card><CardContent>
-            <Box display="flex" alignItems="center" mb={2}><AccountBalance sx={{ color: summary.profit >= 0 ? 'success.main' : 'error.main', mr: 2 }} /><Typography color="textSecondary">Gewinn/Verlust</Typography></Box>
-            <Typography variant="h4" color={summary.profit >= 0 ? 'success.main' : 'error.main'}>{fmt(summary.profit)}</Typography>
-          </CardContent></Card>
+          <Card sx={{
+            background: summary.profit >= 0
+              ? (theme.palette.mode === 'dark'
+                ? `linear-gradient(135deg, ${theme.palette.info.dark} 0%, ${theme.palette.info.main} 100%)` // Dark mode: Blueish
+                : `linear-gradient(135deg, #ffd700 0%, #fbc02d 100%)`) // Light mode: Gold/Yellow
+              : (theme.palette.mode === 'dark'
+                ? `linear-gradient(135deg, ${theme.palette.warning.dark} 0%, ${theme.palette.warning.main} 100%)`
+                : `linear-gradient(135deg, ${theme.palette.warning.light} 0%, ${theme.palette.warning.main} 100%)`),
+            color: summary.profit >= 0 && theme.palette.mode === 'light' ? 'rgba(0,0,0,0.87)' : 'white'
+          }}>
+            <CardContent>
+              <Box display="flex" alignItems="center" mb={1}>
+                <AccountBalance sx={{ color: 'inherit', mr: 2, opacity: 0.9 }} />
+                <Typography color="inherit" variant="subtitle1" fontWeight="bold">Gewinn/Verlust</Typography>
+              </Box>
+              <Typography variant="h4" color="inherit" fontWeight="bold">
+                {summary.profit > 0 ? '+' : ''}{fmt(summary.profit)}
+              </Typography>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 
       <Grid container spacing={3}>
         {/* Einnahmen nach Kategorie */}
-        <Grid item xs={12} md={6}>
-          <Card><CardContent>
-            <Typography variant="h6" gutterBottom>Einnahmen nach Kategorie</Typography>
-            <TableContainer>
-              <Table size="small">
-                <TableHead><TableRow><TableCell>Kategorie</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
-                <TableBody>
-                  {incomeByCategory.map((cat) => (
-                    <TableRow key={cat.category}><TableCell>{cat.category}</TableCell><TableCell align="right">{fmt(cat.amount)}</TableCell></TableRow>
-                  ))}
-                  <TableRow><TableCell><strong>Gesamt</strong></TableCell><TableCell align="right"><strong>{fmt(summary.totalIncome)}</strong></TableCell></TableRow>
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent></Card>
+        <Grid item xs={12} md={6} lg={4}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ flexGrow: 1 }}>
+              <Typography variant="h6" gutterBottom>Einnahmen nach Kategorie</Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead><TableRow><TableCell>Kategorie</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
+                  <TableBody>
+                    {incomeByCategory.map((cat) => (
+                      <TableRow key={cat.category}><TableCell>{cat.category}</TableCell><TableCell align="right">{fmt(cat.amount)}</TableCell></TableRow>
+                    ))}
+                    <TableRow><TableCell><strong>Gesamt</strong></TableCell><TableCell align="right"><strong>{fmt(summary.totalIncome)}</strong></TableCell></TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
         </Grid>
 
         {/* Ausgaben nach Lieferant */}
-        <Grid item xs={12} md={6}>
-          <Card><CardContent>
-            <Typography variant="h6" gutterBottom>Ausgaben nach Lieferant</Typography>
-            <TableContainer>
-              <Table size="small">
-                <TableHead><TableRow><TableCell>Lieferant</TableCell><TableCell align="right">Anzahl</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
-                <TableBody>
-                  {expensesBySupplier.map((row) => (
-                    <TableRow key={row.supplier}><TableCell>{row.supplier}</TableCell><TableCell align="right">{row.count}</TableCell><TableCell align="right">{fmt(row.amount)}</TableCell></TableRow>
-                  ))}
-                  <TableRow><TableCell colSpan={2}><strong>Gesamt</strong></TableCell><TableCell align="right"><strong>{fmt(summary.totalExpenses)}</strong></TableCell></TableRow>
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent></Card>
+        <Grid item xs={12} md={6} lg={4}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ flexGrow: 1 }}>
+              <Typography variant="h6" gutterBottom>Ausgaben nach Lieferant</Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead><TableRow><TableCell>Lieferant</TableCell><TableCell align="right">Anzahl</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
+                  <TableBody>
+                    {expensesBySupplier.map((row) => (
+                      <TableRow key={row.supplier}><TableCell>{row.supplier}</TableCell><TableCell align="right">{row.count}</TableCell><TableCell align="right">{fmt(row.amount)}</TableCell></TableRow>
+                    ))}
+                    <TableRow><TableCell colSpan={2}><strong>Gesamt</strong></TableCell><TableCell align="right"><strong>{fmt(summary.totalExpenses)}</strong></TableCell></TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
         </Grid>
 
         {/* Einnahmen nach Typ */}
-        <Grid item xs={12} md={6}>
-          <Card><CardContent>
-            <Typography variant="h6" gutterBottom>Einnahmen nach Typ</Typography>
-            <TableContainer>
-              <Table size="small">
-                <TableHead><TableRow><TableCell>Typ</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
-                <TableBody>
-                  <TableRow><TableCell>Barverkäufe & Kundenkonto</TableCell><TableCell align="right">{fmt(incomeByType.transactions)}</TableCell></TableRow>
-                  <TableRow><TableCell>Bezahlte Rechnungen</TableCell><TableCell align="right">{fmt(incomeByType.invoices)}</TableCell></TableRow>
-                  <TableRow><TableCell><strong>Gesamt</strong></TableCell><TableCell align="right"><strong>{fmt(summary.totalIncome)}</strong></TableCell></TableRow>
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent></Card>
+        <Grid item xs={12} md={6} lg={4}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ flexGrow: 1 }}>
+              <Typography variant="h6" gutterBottom>Einnahmen nach Typ</Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead><TableRow><TableCell>Typ</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
+                  <TableBody>
+                    <TableRow><TableCell>Barverkäufe & Kundenkonto</TableCell><TableCell align="right">{fmt(incomeByType.transactions)}</TableCell></TableRow>
+                    <TableRow><TableCell>Bezahlte Rechnungen</TableCell><TableCell align="right">{fmt(incomeByType.invoices)}</TableCell></TableRow>
+                    <TableRow><TableCell>Eigenverbrauch (Sachentnahme)</TableCell><TableCell align="right">{fmt(incomeByType.ownerUse || 0)}</TableCell></TableRow>
+                    <TableRow><TableCell><strong>Gesamt</strong></TableCell><TableCell align="right"><strong>{fmt(summary.totalIncome)}</strong></TableCell></TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
         </Grid>
 
         {/* Einnahmen nach Artikel (Top 10) */}
-        <Grid item xs={12} md={6}>
-          <Card><CardContent>
-            <Typography variant="h6" gutterBottom>Einnahmen nach Artikel (Top 10)</Typography>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={chartTop}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="artikel" />
-                <YAxis />
-                <Tooltip formatter={(v) => fmt(v)} />
-                <Legend />
-                <Bar dataKey="Einnahmen" fill="#1976d2" />
-              </BarChart>
-            </ResponsiveContainer>
-            {incomeByArticle.length === 0 && (
-              <Typography variant="body2" color="text.secondary">Keine Artikeldaten verfügbar.</Typography>
-            )}
-          </CardContent></Card>
+        <Grid item xs={12} md={12} lg={6}>
+          <Card sx={{ height: '100%', minHeight: 400 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Einnahmen nach Artikel (Top 10)</Typography>
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={chartTop} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
+                  <defs>
+                    <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={theme.palette.primary.main} stopOpacity={0.8} />
+                      <stop offset="95%" stopColor={theme.palette.primary.main} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+                  <XAxis
+                    dataKey="artikel"
+                    tick={{ fontSize: 11, fill: theme.palette.text.secondary }}
+                    interval={0}
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis tick={{ fontSize: 11, fill: theme.palette.text.secondary }} />
+                  <Tooltip
+                    formatter={(v) => fmt(v)}
+                    cursor={{ fill: theme.palette.action.hover }}
+                    contentStyle={{
+                      backgroundColor: theme.palette.background.paper,
+                      color: theme.palette.text.primary,
+                      borderRadius: 8,
+                      border: `1px solid ${theme.palette.divider}`,
+                      boxShadow: theme.shadows[4]
+                    }}
+                    itemStyle={{ color: theme.palette.text.primary }}
+                    labelStyle={{ color: theme.palette.text.secondary, marginBottom: '4px' }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '10px' }} />
+                  <Bar
+                    dataKey="Einnahmen"
+                    fill="url(#colorIncome)"
+                    radius={[4, 4, 0, 0]}
+                    barSize={isMobile ? 20 : 40}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+              {incomeByArticle.length === 0 && (
+                <Typography variant="body2" color="text.secondary">Keine Artikeldaten verfügbar.</Typography>
+              )}
+            </CardContent>
+          </Card>
         </Grid>
 
-        {/* Einnahmen nach Kategorie – Chart */}
-        <Grid item xs={12}>
-          <Card><CardContent>
-            <Typography variant="h6" gutterBottom>Einnahmen nach Kategorie</Typography>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={chartCat}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="category" />
-                <YAxis />
-                <Tooltip formatter={(v) => fmt(v)} />
-                <Legend />
-                <Bar dataKey="Einnahmen" fill="#4caf50" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent></Card>
-        </Grid>
+
 
         {/* Abgelaufen & Eigenverbrauch */}
-        <Grid item xs={12} md={6}>
-          <Card><CardContent>
-            <Typography variant="h6" gutterBottom>Abgelaufene Artikel (Menge)</Typography>
-            <TableContainer>
-              <Table size="small">
-                <TableHead><TableRow><TableCell>Artikel</TableCell><TableCell align="right">Menge</TableCell></TableRow></TableHead>
-                <TableBody>
-                  {summary.expiredItems.length === 0 ? (
-                    <TableRow><TableCell colSpan={2}>Keine Einträge</TableCell></TableRow>
-                  ) : summary.expiredItems.map((row, i) => (
-                    <TableRow key={i}><TableCell>{row.article}</TableCell><TableCell align="right">{row.quantity}</TableCell></TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent></Card>
+        {/* Abgelaufen & Eigenverbrauch */}
+        <Grid item xs={12} md={6} lg={3}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ flexGrow: 1 }}>
+              <Typography variant="h6" gutterBottom>Abgelaufene Artikel</Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead><TableRow><TableCell>Artikel</TableCell><TableCell align="right">Menge</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
+                  <TableBody>
+                    {summary.expiredItems.length === 0 ? (
+                      <TableRow><TableCell colSpan={3}>Keine Einträge</TableCell></TableRow>
+                    ) : summary.expiredItems.map((row, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{row.article}</TableCell>
+                        <TableCell align="right">{row.quantity}</TableCell>
+                        <TableCell align="right">{fmt(row.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
         </Grid>
 
-        <Grid item xs={12} md={6}>
-          <Card><CardContent>
-            <Typography variant="h6" gutterBottom>Eigenverbrauch (Menge)</Typography>
-            <TableContainer>
-              <Table size="small">
-                <TableHead><TableRow><TableCell>Artikel</TableCell><TableCell align="right">Menge</TableCell></TableRow></TableHead>
-                <TableBody>
-                  {summary.ownerUseItems.length === 0 ? (
-                    <TableRow><TableCell colSpan={2}>Keine Einträge</TableCell></TableRow>
-                  ) : summary.ownerUseItems.map((row, i) => (
-                    <TableRow key={i}><TableCell>{row.article}</TableCell><TableCell align="right">{row.quantity}</TableCell></TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent></Card>
+        <Grid item xs={12} md={6} lg={3}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ flexGrow: 1 }}>
+              <Typography variant="h6" gutterBottom>Eigenverbrauch</Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead><TableRow><TableCell>Artikel</TableCell><TableCell align="right">Menge</TableCell><TableCell align="right">Betrag</TableCell></TableRow></TableHead>
+                  <TableBody>
+                    {summary.ownerUseItems.length === 0 ? (
+                      <TableRow><TableCell colSpan={3}>Keine Einträge</TableCell></TableRow>
+                    ) : summary.ownerUseItems.map((row, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{row.article}</TableCell>
+                        <TableCell align="right">{row.quantity}</TableCell>
+                        <TableCell align="right">{fmt(row.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
         </Grid>
+
+
       </Grid>
 
       {/* ============= Geschäftsjahre ============= */}
@@ -806,38 +884,65 @@ export default function ProfitLoss() {
 
         {fyError && <Alert severity="error" sx={{ mb: 2 }}>Fehler beim Laden der Geschäftsjahre.</Alert>}
 
-        <Card>
-          <CardContent>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Zeitraum</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell align="right">Aktionen</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {fiscalYears.length === 0 ? (
-                  <TableRow><TableCell colSpan={4}>Noch keine Geschäftsjahre.</TableCell></TableRow>
-                ) : fiscalYears.map((fy) => (
-                  <TableRow key={fy.id}>
-                    <TableCell>{fy.name}</TableCell>
-                    <TableCell>{format(new Date(fy.startDate), 'dd.MM.yyyy')} – {format(new Date(fy.endDate), 'dd.MM.yyyy')}</TableCell>
-                    <TableCell>{fy.closed ? <Chip color="success" label="Abgeschlossen" size="small" /> : <Chip label="Offen" size="small" />}</TableCell>
-                    <TableCell align="right">
-                      {!fy.closed ? (
-                        <Button size="small" onClick={() => setCloseTarget(fy)}>Abschließen</Button>
-                      ) : (
-                        <Button size="small" variant="outlined" startIcon={<Download />} onClick={() => downloadFYReport(fy.id, fy.name)}>PDF</Button>
-                      )}
-                    </TableCell>
+        {isMobile ? (
+          <Stack spacing={2}>
+            {fiscalYears.length === 0 ? (
+              <Typography color="text.secondary" align="center">Noch keine Geschäftsjahre.</Typography>
+            ) : fiscalYears.map((fy) => (
+              <Card key={fy.id} variant="outlined">
+                <CardContent sx={{ pb: 1 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                    <Typography variant="h6">{fy.name}</Typography>
+                    {fy.closed ? <Chip color="success" label="Abgeschlossen" size="small" /> : <Chip label="Offen" size="small" />}
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {format(new Date(fy.startDate), 'dd.MM.yyyy')} – {format(new Date(fy.endDate), 'dd.MM.yyyy')}
+                  </Typography>
+                  <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                    {!fy.closed ? (
+                      <Button size="small" variant="contained" onClick={() => setCloseTarget(fy)}>Abschließen</Button>
+                    ) : (
+                      <Button size="small" variant="outlined" startIcon={<Download />} onClick={() => downloadFYReport(fy.id, fy.name)}>PDF</Button>
+                    )}
+                  </Box>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        ) : (
+          <Card>
+            <CardContent>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Zeitraum</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell align="right">Aktionen</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                </TableHead>
+                <TableBody>
+                  {fiscalYears.length === 0 ? (
+                    <TableRow><TableCell colSpan={4}>Noch keine Geschäftsjahre.</TableCell></TableRow>
+                  ) : fiscalYears.map((fy) => (
+                    <TableRow key={fy.id}>
+                      <TableCell>{fy.name}</TableCell>
+                      <TableCell>{format(new Date(fy.startDate), 'dd.MM.yyyy')} – {format(new Date(fy.endDate), 'dd.MM.yyyy')}</TableCell>
+                      <TableCell>{fy.closed ? <Chip color="success" label="Abgeschlossen" size="small" /> : <Chip label="Offen" size="small" />}</TableCell>
+                      <TableCell align="right">
+                        {!fy.closed ? (
+                          <Button size="small" onClick={() => setCloseTarget(fy)}>Abschließen</Button>
+                        ) : (
+                          <Button size="small" variant="outlined" startIcon={<Download />} onClick={() => downloadFYReport(fy.id, fy.name)}>PDF</Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
       </Box>
 
       {/* Dialog: Neues Geschäftsjahr */}

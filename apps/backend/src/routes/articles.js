@@ -36,6 +36,9 @@ router.use(authenticate);
 // Liste aller Artikel
 router.get('/', h(articleController.listArticles));
 
+// Reorder Items
+router.put('/reorder', authorize('ADMIN', 'CASHIER'), h(articleController.reorderArticles));
+
 // Bestandswarnungen
 router.get('/low-stock', h(articleController.checkLowStock));
 

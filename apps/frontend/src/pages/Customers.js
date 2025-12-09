@@ -27,11 +27,15 @@ import {
   ListItem,
   ListItemText,
   Avatar,
+  useMediaQuery,
+  useTheme,
+  Tooltip,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import {
   Add,
   Edit,
-  AccountBalanceWallet,
   Search,
   Person,
   Receipt,
@@ -51,6 +55,8 @@ const Customers = () => {
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const { control, handleSubmit, reset, formState: { errors } } = useForm();
   const { control: topUpControl, handleSubmit: handleTopUpSubmit, reset: resetTopUp } = useForm();
@@ -114,6 +120,17 @@ const Customers = () => {
     },
   });
 
+  const toggleClientStatus = useMutation({
+    mutationFn: async (customer) => {
+      await api.put(`${API_ENDPOINTS.CUSTOMERS}/${customer.id}`, {
+        active: customer.active === false ? true : false
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['customers']);
+    }
+  });
+
   // Top up mutation
   const topUpMutation = useMutation({
     mutationFn: async ({ customerId, ...data }) => {
@@ -137,12 +154,14 @@ const Customers = () => {
         name: customer.name,
         nickname: customer.nickname || '',
         gender: customer.gender || 'OTHER', // NEU
+        active: customer.active !== false,
       });
     } else {
       reset({
         name: '',
         nickname: '',
         gender: 'OTHER', // NEU
+        active: true,
       });
     }
     setOpenDialog(true);
@@ -304,11 +323,12 @@ const Customers = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell>Spitzname</TableCell>
+              <TableCell>Name / Status</TableCell>
+              {!isMobile && <TableCell>Spitzname</TableCell>}
               <TableCell align="right">Guthaben</TableCell>
-              <TableCell align="right">Transaktionen</TableCell>
-              <TableCell>Erstellt am</TableCell>
+              {!isMobile && <TableCell align="right">Letzte Transaktion</TableCell>}
+              {!isMobile && <TableCell align="right">Transaktionen</TableCell>}
+              {!isMobile && <TableCell>Erstellt am</TableCell>}
               <TableCell align="right">Aktionen</TableCell>
             </TableRow>
           </TableHead>
@@ -317,7 +337,10 @@ const Customers = () => {
               <TableRow
                 key={customer.id}
                 hover
-                sx={{ cursor: 'pointer' }}
+                sx={{
+                  cursor: 'pointer',
+                  bgcolor: customer.active === false ? 'rgba(255, 0, 0, 0.08)' : 'inherit'
+                }}
                 onClick={() => handleOpenDetailDialog(customer)}
               >
                 <TableCell>
@@ -325,12 +348,29 @@ const Customers = () => {
                     <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}>
                       <Person />
                     </Avatar>
-                    <Typography variant="body2">
-                      {customer.name}
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2" fontWeight="bold">
+                        {customer.name}
+                      </Typography>
+                      {isMobile && customer.nickname && (
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          {customer.nickname}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Box sx={{ ml: 2 }} onClick={(e) => e.stopPropagation()}>
+                      <Tooltip title={customer.active !== false ? "Aktiv" : "Versteckt"}>
+                        <Switch
+                          size="small"
+                          checked={customer.active !== false}
+                          onChange={() => toggleClientStatus.mutate(customer)}
+                          color="primary"
+                        />
+                      </Tooltip>
+                    </Box>
                   </Box>
                 </TableCell>
-                <TableCell>{customer.nickname || '-'}</TableCell>
+                {!isMobile && <TableCell>{customer.nickname || '-'}</TableCell>}
                 <TableCell align="right">
                   <Typography
                     variant="body2"
@@ -340,10 +380,13 @@ const Customers = () => {
                     {formatCurrency(customer.balance)}
                   </Typography>
                 </TableCell>
-                <TableCell align="right">{customer._count?.transactions || 0}</TableCell>
-                <TableCell>
+                {!isMobile && <TableCell align="right">
+                  {customer.lastActivity ? new Date(customer.lastActivity).toLocaleDateString('de-DE') : '-'}
+                </TableCell>}
+                {!isMobile && <TableCell align="right">{customer._count?.transactions || 0}</TableCell>}
+                {!isMobile && <TableCell>
                   {new Date(customer.createdAt).toLocaleDateString('de-DE')}
-                </TableCell>
+                </TableCell>}
                 <TableCell align="right">
                   <IconButton
                     size="small"
@@ -353,16 +396,6 @@ const Customers = () => {
                     }}
                   >
                     <Edit />
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    color="primary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleOpenTopUpDialog(customer);
-                    }}
-                  >
-                    <AccountBalanceWallet />
                   </IconButton>
                 </TableCell>
               </TableRow>
@@ -423,6 +456,19 @@ const Customers = () => {
                       <MenuItem value="MALE">Männlich</MenuItem>
                       <MenuItem value="OTHER">Andere/Nicht angegeben</MenuItem>
                     </TextField>
+                  )}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Controller
+                  name="active"
+                  control={control}
+                  defaultValue={true}
+                  render={({ field }) => (
+                    <FormControlLabel
+                      control={<Switch {...field} checked={field.value} />}
+                      label="Aktiv (im Verkauf anzeigen)"
+                    />
                   )}
                 />
               </Grid>

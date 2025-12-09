@@ -1,34 +1,25 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-    Box, Card, CardContent, Chip, CssBaseline, Divider, Stack,
-    Typography, alpha, GlobalStyles, createTheme, ThemeProvider
+    Box, Card, CardContent, Chip, Stack, CssBaseline,
+    Typography, GlobalStyles
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
-import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import EuroIcon from '@mui/icons-material/Euro';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import TimerIcon from '@mui/icons-material/Timer';
 import { io } from 'socket.io-client';
 import api from '../services/api';
 import { WS_URL } from '../config/api';
+import Podium from '../components/common/Podium';
 
 // Helper functions
-const clamp = (min, val, max) => `clamp(${min}, ${val}, ${max})`;
+
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 
-export default function PublicHighscore() {
-    // Enforce Dark Mode
-    const theme = createTheme({
-        palette: {
-            mode: 'dark',
-            background: { default: '#0b0f15', paper: '#111824' },
-            primary: { main: '#71a7ff' },
-            secondary: { main: '#b792ff' }
-        },
-        typography: { fontSize: 16 }, // Slightly larger for public display
-        shape: { borderRadius: 16 },
-    });
+// Enforce Dark Mode? No, let's use global theme.
+// If strict dark mode is needed for public view, we can handle it via URL param or similar, but for now inherit global.
 
+export default function PublicHighscore() {
     const [loading, setLoading] = useState(true);
     const [live, setLive] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
@@ -49,7 +40,6 @@ export default function PublicHighscore() {
     const fetchAll = useCallback(async () => {
         setLoading(true);
         try {
-            // Use public endpoint
             const res = await api.get('/public/highscore/all');
             const hs = res.data || {};
 
@@ -68,13 +58,8 @@ export default function PublicHighscore() {
 
     useEffect(() => { fetchAll(); }, [fetchAll]);
 
-    // Live socket (Public namespace if needed, or just default)
-    // Note: Socket might require auth if not configured otherwise. 
-    // If socket fails, we just poll.
+    // Live socket
     useEffect(() => {
-        // Try connecting without token first if backend allows, or just skip socket for public if it's protected
-        // Assuming WS_URL is open or we need a public namespace.
-        // For now, let's try to connect. If it fails, we rely on polling.
         const s = io(WS_URL);
         s.on('connect', () => setLive(true));
         s.on('disconnect', () => setLive(false));
@@ -83,7 +68,6 @@ export default function PublicHighscore() {
         s.on('highscore:update', refresh);
         s.on('sale:new', refresh);
 
-        // Fallback polling every minute
         const poll = setInterval(refresh, 60000);
 
         return () => {
@@ -94,145 +78,146 @@ export default function PublicHighscore() {
 
 
     const RankRow = ({ entry, isTop }) => {
-        const rankAccent = (rank) => (rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : rank === 3 ? '#CD7F32' : null);
-
         return (
             <Stack
                 direction="row"
                 alignItems="center"
                 justifyContent="space-between"
                 sx={{
-                    py: isTop ? 2 : 1.5,
+                    py: 1,
                     px: 2,
-                    gap: 2,
-                    borderRadius: 3,
-                    position: 'relative',
-                    background: rankAccent(entry.rank) ? `linear-gradient(90deg, ${alpha(rankAccent(entry.rank), 0.15)}, transparent)` : 'transparent',
-                    boxShadow: isTop ? `inset 0 0 0 1px ${alpha(theme.palette.primary.main, 0.3)}` : 'none',
+                    borderRadius: 2,
+                    // background: 'rgba(255,255,255,0.03)', // Let theme handle cards or keep subtle
+                    borderBottom: '1px solid', borderColor: 'divider',
                     mb: 1
                 }}
             >
-                {rankAccent(entry.rank) && (
-                    <Box sx={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 6, borderTopLeftRadius: 8, borderBottomLeftRadius: 8, bgcolor: rankAccent(entry.rank) }} />
-                )}
                 <Stack direction="row" alignItems="center" spacing={2} sx={{ minWidth: 0 }}>
-                    <Chip
-                        label={`#${entry.rank}`}
-                        sx={{
-                            fontWeight: 900,
-                            bgcolor: rankAccent(entry.rank) || 'action.selected',
-                            color: rankAccent(entry.rank) ? '#000' : 'text.primary',
-                            fontSize: '1.1rem',
-                            height: 32
-                        }}
-                    />
-                    <Typography noWrap sx={{ fontWeight: isTop ? 800 : 600, fontSize: clamp('20px', '2.5vw', '32px'), minWidth: 0 }}>
+                    <Box sx={{
+                        width: 32, height: 32, borderRadius: '50%', bgcolor: 'action.hover',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 14,
+                        color: 'text.secondary'
+                    }}>
+                        {entry.rank}
+                    </Box>
+                    <Typography noWrap sx={{ fontWeight: 600, fontSize: '1.1rem', maxWidth: '18ch' }}>
                         {entry.customerNickname || entry.customerName}
                     </Typography>
-                    {entry.rank <= 3 && <MilitaryTechIcon sx={{ color: rankAccent(entry.rank), fontSize: 32 }} />}
                 </Stack>
 
-                <Stack direction="row" spacing={3} alignItems="center" sx={{ flexShrink: 0 }}>
-                    {/* Only show score for cleaner look */}
-                    <Typography
-                        sx={{
-                            fontWeight: 900,
-                            fontSize: clamp('24px', '3vw', '40px'),
-                            textAlign: 'right',
-                            fontVariantNumeric: 'tabular-nums',
-                            textShadow: isTop ? `0 0 20px ${alpha(theme.palette.primary.main, 0.5)}` : 'none'
-                        }}
-                        color="primary"
-                    >
-                        {mode === 'AMOUNT' ? money(entry.score) : `${entry.score}`}
-                    </Typography>
-                </Stack>
+                <Typography
+                    sx={{
+                        fontWeight: 900,
+                        fontSize: '1.2rem',
+                        textAlign: 'right',
+                        fontVariantNumeric: 'tabular-nums',
+                    }}
+                    color="primary"
+                >
+                    {mode === 'AMOUNT' ? money(entry.score) : `${entry.score}`}
+                </Typography>
             </Stack>
         );
     };
 
-    const Board = ({ title, data }) => (
-        <Card
-            variant="outlined"
-            sx={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                bgcolor: alpha(theme.palette.background.paper, 0.6),
-                backdropFilter: 'blur(12px)',
-                border: '1px solid rgba(255,255,255,0.08)'
-            }}
-        >
-            <CardContent sx={{ p: 3, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Stack direction="row" spacing={2} alignItems="center">
-                        <TrophyIcon color="primary" sx={{ fontSize: 40 }} />
-                        <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>{title}</Typography>
+    const Board = ({ title, data }) => {
+        const topThree = (data?.entries || []).slice(0, 3);
+        const rest = (data?.entries || []).slice(3, 20); // Show up to 20
+
+        return (
+            <Card
+                variant="outlined"
+                sx={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                }}
+            >
+                <CardContent sx={{ p: 4, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
+                        <Stack direction="row" spacing={2} alignItems="center">
+                            <TrophyIcon color="primary" sx={{ fontSize: 48 }} />
+                            <Typography variant="h3" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{title}</Typography>
+                        </Stack>
+                        <Chip
+                            icon={mode === 'AMOUNT' ? <EuroIcon /> : <ShoppingCartIcon />}
+                            label={mode === 'AMOUNT' ? 'UMSATZ' : 'ANZAHL'}
+                            color="primary"
+                            variant="filled"
+                            sx={{ fontWeight: 900, borderRadius: 3, height: 40, px: 2, fontSize: '1rem' }}
+                        />
                     </Stack>
-                    <Chip
-                        icon={mode === 'AMOUNT' ? <EuroIcon /> : <ShoppingCartIcon />}
-                        label={mode === 'AMOUNT' ? 'UMSATZ' : 'ANZAHL'}
-                        color="primary"
-                        variant="outlined"
-                        sx={{ fontWeight: 700, borderRadius: 2 }}
-                    />
-                </Stack>
 
-                <Divider sx={{ mb: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-
-                <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-                    {/* Mask for smooth scroll fade if we had scrolling, but here we fit to screen usually */}
-                    <Stack spacing={0} sx={{ height: '100%', overflowY: 'auto', pr: 1 }}>
+                    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                         {loading ? (
-                            <Typography variant="h6" color="text.secondary" sx={{ mt: 4, textAlign: 'center' }}>Lade Highscores...</Typography>
+                            <Typography variant="h5" color="text.secondary" sx={{ mt: 10, textAlign: 'center' }}>Lade Clubscore...</Typography>
                         ) : (data?.entries?.length ?? 0) === 0 ? (
-                            <Typography variant="h6" color="text.secondary" sx={{ mt: 4, textAlign: 'center' }}>Keine Einträge vorhanden</Typography>
+                            <Typography variant="h5" color="text.secondary" sx={{ mt: 10, textAlign: 'center' }}>Keine Einträge vorhanden</Typography>
                         ) : (
-                            data.entries.map((e, idx) => (
-                                <RankRow key={e.customerId ?? idx} entry={e} isTop={idx === 0} />
-                            ))
+                            <>
+                                {/* Podium Area */}
+                                <Box sx={{ mb: 4, flexShrink: 0 }}>
+                                    <Podium topThree={topThree} mode={mode} moneyFormatter={money} />
+                                </Box>
+
+                                {/* Grid for Rest */}
+                                <Box sx={{
+                                    flex: 1,
+                                    display: 'grid',
+                                    gridTemplateColumns: '1fr 1fr',
+                                    gridTemplateRows: 'repeat(9, 1fr)', // Force fit rows
+                                    columnGap: 4,
+                                    rowGap: 1,
+                                    alignContent: 'start',
+                                    overflow: 'hidden' // No scroll
+                                }}>
+                                    {rest.map((e, idx) => (
+                                        <RankRow key={e.customerId ?? idx} entry={e} />
+                                    ))}
+                                </Box>
+                            </>
                         )}
-                    </Stack>
-                </Box>
-            </CardContent>
-        </Card>
-    );
+                    </Box>
+                </CardContent>
+            </Card>
+        );
+    };
 
     return (
-        <ThemeProvider theme={theme}>
+        <>
             <CssBaseline />
             <GlobalStyles styles={{
-                body: { overflow: 'hidden' }, // Prevent scrollbars on kiosk
-                '::-webkit-scrollbar': { width: '8px' },
-                '::-webkit-scrollbar-track': { background: 'transparent' },
-                '::-webkit-scrollbar-thumb': { background: 'rgba(255,255,255,0.1)', borderRadius: '4px' },
-                '::-webkit-scrollbar-thumb:hover': { background: 'rgba(255,255,255,0.2)' }
+                body: { overflow: 'hidden' },
+                '#root': { height: '100vh', overflow: 'hidden' }
             }} />
 
             <Box sx={{
                 height: '100vh',
                 display: 'flex',
                 flexDirection: 'column',
-                p: 3,
-                background: 'radial-gradient(circle at 50% -20%, #1a2738 0%, #0b0f15 100%)'
+                p: 4,
+                // Inherit background from body/theme usually, or explicit override if needed for standalone feel
+                bgcolor: 'background.default',
+                color: 'text.primary'
             }}>
 
                 {/* Header */}
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
-                    <Stack direction="row" spacing={2} alignItems="center">
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4, flexShrink: 0 }}>
+                    <Stack direction="row" spacing={3} alignItems="center">
                         <Box sx={{
-                            width: 64, height: 64,
-                            borderRadius: 4,
+                            width: 80, height: 80,
+                            borderRadius: 6,
                             bgcolor: 'primary.main',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            boxShadow: '0 0 40px rgba(113, 167, 255, 0.3)'
+                            boxShadow: '0 0 60px rgba(0, 230, 118, 0.4)' // Neon Green Glow
                         }}>
-                            <TrophyIcon sx={{ fontSize: 40, color: '#fff' }} />
+                            <TrophyIcon sx={{ fontSize: 48, color: '#000' }} />
                         </Box>
                         <Box>
-                            <Typography variant="h3" sx={{ fontWeight: 900, lineHeight: 1 }}>Highscore</Typography>
-                            <Typography variant="subtitle1" color="text.secondary" sx={{ fontWeight: 500 }}>
-                                {live ? <Stack direction="row" spacing={1} alignItems="center"><Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#4caf50', boxShadow: '0 0 10px #4caf50' }} /><span>LIVE UPDATE</span></Stack> : 'Letztes Update: ' + (lastUpdated?.toLocaleTimeString() || '-')}
+                            <Typography variant="h2" sx={{ fontWeight: 900, lineHeight: 1, mb: 0.5 }}>Clubscore</Typography>
+                            <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 500, opacity: 0.8 }}>
+                                {live ? <Stack direction="row" spacing={1.5} alignItems="center"><Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#4caf50', boxShadow: '0 0 15px #4caf50' }} /><span>LIVE UPDATE</span></Stack> : 'Letztes Update: ' + (lastUpdated?.toLocaleTimeString() || '-')}
                             </Typography>
                         </Box>
                     </Stack>
@@ -241,7 +226,7 @@ export default function PublicHighscore() {
                         <Chip
                             icon={<TimerIcon />}
                             label={`Saisonstart: ${new Date(startDate).toLocaleDateString('de-DE')}`}
-                            sx={{ bgcolor: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(10px)' }}
+                            sx={{ bgcolor: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(10px)', height: 48, px: 2, fontSize: '1.1rem', borderRadius: 4 }}
                         />
                     )}
                 </Stack>
@@ -250,15 +235,16 @@ export default function PublicHighscore() {
                 <Box sx={{
                     flex: 1,
                     display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+                    gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' },
                     gap: 4,
-                    minHeight: 0
+                    minHeight: 0,
+                    overflow: 'hidden'
                 }}>
                     <Board title="Heute" data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count} />
                     <Board title="Saison" data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count} />
                 </Box>
 
             </Box>
-        </ThemeProvider>
+        </>
     );
 }

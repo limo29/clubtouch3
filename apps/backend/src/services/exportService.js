@@ -44,6 +44,31 @@ class ExportService {
   }
   _fmtEUR = (n) => this.currencyFmt.format(Number(n || 0));
   _fmtDate = (d) => d ? new Date(d).toLocaleDateString('de-DE') : '—';
+  _fmtQty(n, unit, pUnit, pQty) {
+    const val = Number(n || 0);
+    const absVal = Math.abs(val);
+    const sign = val < 0 ? '-' : '';
+
+    // Bedingung: Keine Umrechnung definiert oder Total < 1 Einheit oder pQty nicht valide
+    if (!pUnit || !pQty || pQty <= 1 || absVal < 1) {
+      if (!unit) return val.toFixed(0);
+      return `${val.toFixed(0)} ${unit}`;
+    }
+
+    const crates = Math.floor(absVal / pQty);
+    const remainder = Number((absVal % pQty).toFixed(2));
+
+    if (crates === 0) {
+      return `${val.toFixed(0)} ${unit}`;
+    }
+
+    const parts = [];
+    if (crates > 0) parts.push(`${crates} ${pUnit}`);
+    if (remainder > 0) parts.push(`${remainder} ${unit}`);
+
+    const human = parts.join(', ');
+    return `${sign}${human} (${val.toFixed(0)})`;
+  }
 
   _createDocWithBuffer() {
     const theme = this.getTheme();
@@ -56,17 +81,14 @@ class ExportService {
     return { doc, done, theme };
   }
 
-  // Header ohne Fußzeile (Fußzeile kommt gesammelt am Ende)
   _decoratePage(doc, theme, { title, subtitle }) {
     this._lastHeaderInfo = { title, subtitle };
     const { margin } = theme.page;
     const pageWidth = doc.page.width;
 
-    // Kopf-Linie
     doc.save().lineWidth(1).strokeColor(theme.color.border)
       .moveTo(margin, margin - 15).lineTo(pageWidth - margin, margin - 15).stroke().restore();
 
-    // Titel
     doc.fillColor(theme.color.primary).font(theme.font.bold).fontSize(18)
       .text(title || '', margin, margin - 40, { width: pageWidth - margin * 2, align: 'left' });
 
@@ -85,30 +107,13 @@ class ExportService {
     this._decoratePage(doc, theme, headerInfo);
   }
 
-  // am Ende einmal über alle Seiten iterieren und Fußzeilen (Seitennummer + Datum) zeichnen
-  _writeFooters(doc, theme) {
-    const { margin } = theme.page;
-    const range = doc.bufferedPageRange();
-    for (let i = 0; i < range.count; i++) {
-      doc.switchToPage(i);
-      const pageWidth = doc.page.width;
-      const pageHeight = doc.page.height;
-      const footerY = pageHeight - margin + 15;
 
-      doc.font(theme.font.regular).fontSize(8).fillColor(theme.color.subtext)
-        .text(`Seite ${i + 1} / ${range.count}`, margin, footerY, {
-          width: pageWidth - margin * 2, align: 'left'
-        })
-        .text(`Erstellt am ${new Date().toLocaleString('de-DE')}`, margin, footerY, {
-          width: pageWidth - margin * 2, align: 'right'
-        });
-    }
-  }
 
   _section(doc, theme, text) {
     doc.x = theme.page.margin;
     const bottom = doc.page.height - theme.page.margin;
-    if (doc.y + 30 > bottom) this._addPageDecorated(doc, theme, this._lastHeaderInfo || {});
+    // Increased buffer to 100 to prevent headers at very bottom
+    if (doc.y + 100 > bottom) this._addPageDecorated(doc, theme, this._lastHeaderInfo || {});
     doc.moveDown(0.6);
     doc.font(theme.font.bold).fontSize(14).fillColor(theme.color.text)
       .text(text, { width: doc.page.width - theme.page.margin * 2 });
@@ -120,7 +125,6 @@ class ExportService {
     doc.font(theme.font.regular);
   }
 
-  // Universelle Tabelle mit optionaler Zellenfarbe
   _table(doc, theme, { columns, rows, sumRow = null, emptyHint = 'Keine Daten vorhanden', headerInfo }) {
     const left = theme.page.margin;
     const right = doc.page.width - theme.page.margin;
@@ -150,6 +154,10 @@ class ExportService {
     const ensureRoom = (need) => {
       const bottom = doc.page.height - theme.page.margin;
       if (doc.y + need > bottom) {
+        if (doc.y < theme.page.margin + 50) {
+          console.log(`[PDF WARN] Row too tall (${need}) for page. Printing anyway.`);
+          return;
+        }
         this._addPageDecorated(doc, theme, headerInfo || this._lastHeaderInfo || {});
         renderHeader();
       }
@@ -165,13 +173,16 @@ class ExportService {
 
     rows.forEach((row, i) => {
       // Zeilenhöhe bestimmen
+      // FIX: Font explizit setzen, damit heightOfString korrekt misst
+      doc.font(theme.font.regular).fontSize(10);
       const heights = columns.map((col, idx) => {
         const txt = col.render ? col.render(row) : (row[col.key] ?? '');
         return Math.max(doc.heightOfString(String(txt ?? ''), { width: widths[idx] - 4 }), 10);
       });
       const rowH = Math.max(...heights) + rowPad * 2;
 
-      ensureRoom(rowH + 6);
+      // FIX: Mehr Puffer für Seitenumbruch
+      ensureRoom(rowH + 30);
 
       // Zebra
       if (i % 2 === 0) doc.save().rect(left, doc.y - 2, usableWidth, rowH + 4).fill(theme.color.zebra).restore();
@@ -278,12 +289,12 @@ class ExportService {
   }
 
   /* ========= PDF: Tages-/Monats-/EÜR ========= */
-  async exportDailySummaryPDF(date = new Date()) {
-    const summary = await this.getDailySummaryData(date);
+  async exportDailySummaryPDF(date = new Date(), startHour = 6) {
+    const summary = await this.getDailySummaryData(date, startHour);
     return new Promise((resolve, reject) => {
       try {
         const { doc, done, theme } = this._createDocWithBuffer();
-        const headerInfo = { title: `Tagesabschluss – ${theme.brandName}`, subtitle: `Datum: ${new Date(summary.date).toLocaleDateString('de-DE')}` };
+        const headerInfo = { title: `Tagesabschluss – ${theme.brandName}`, subtitle: `Datum: ${new Date(summary.date).toLocaleDateString('de-DE')} (Ab ${startHour}:00 Uhr)` };
         this._decoratePage(doc, theme, headerInfo);
 
         this._section(doc, theme, 'Zusammenfassung');
@@ -320,7 +331,6 @@ class ExportService {
         });
 
         // Fußzeilen jetzt schreiben, dann enden
-        this._writeFooters(doc, theme);
         doc.end();
         done.then(pdf => resolve({ data: pdf, filename: `tagesabschluss_${summary.date}.pdf`, mimeType: 'application/pdf' }));
       } catch (e) { reject(e); }
@@ -394,7 +404,6 @@ class ExportService {
           headerInfo
         });
 
-        this._writeFooters(doc, theme);
         doc.end();
         done.then(pdf => resolve({
           data: pdf, filename: `monatsbericht_${year}_${String(month).padStart(2, '0')}.pdf`, mimeType: 'application/pdf'
@@ -512,7 +521,6 @@ class ExportService {
           headerInfo
         });
 
-        this._writeFooters(doc, theme);
         doc.end();
         done.then(pdf => resolve({ data: pdf, filename: `eur_${startDate}_${endDate}.pdf`, mimeType: 'application/pdf' }));
       } catch (e) { reject(e); }
@@ -526,19 +534,60 @@ class ExportService {
     const { fiscalYear } = report;
 
     const preview = await accountingService.getFiscalYearPreview(fiscalYearId);
-    const { soldArticles = [], paidInvoices = [], expenseDocs = [], unpaidInvoices = [] } = preview;
+    const {
+      soldArticles = [], paidInvoices = [], expenseDocs = [], unpaidInvoices = [],
+      expiredArticles = [], ownerUseArticles = []
+    } = preview;
 
-    const system = Array.isArray(report.inventorySystem) ? report.inventorySystem.map(x => ({
-      name: x.name, unit: x.unit, systemQty: Number(x.systemStock || 0)
-    })) : [];
+    // Live-Daten für Einheiten holen (falls Snapshot alt ist)
+    const allArticles = await prisma.article.findMany();
+    const articleMap = new Map(allArticles.map(a => [a.name, a]));
+
+    // Mapping System-Bestand
+    // Merge Snapshot mit Live-Daten für purchaseUnit falls im Snapshot fehlend
+    const system = Array.isArray(report.inventorySystem) ? report.inventorySystem.map(x => {
+      const live = articleMap.get(x.name);
+      return {
+        name: x.name,
+        unit: x.unit || live?.unit,
+        systemQty: Number(x.systemStock || 0),
+        price: Number(x.price || 0),
+        value: Number(x.value || (Number(x.systemStock || 0) * Number(x.price || 0))),
+        purchaseUnit: x.purchaseUnit || live?.purchaseUnit,
+        unitsPerPurchase: Number(x.unitsPerPurchase || live?.unitsPerPurchase || 0)
+      };
+    }) : [];
+
+    // DEBUG LOG
+    try {
+      console.log(`[PDF DEBUG] System inventory items: ${system.length}`);
+      if (system.length > 0) console.log('[PDF DEBUG] First item:', system[0]);
+    } catch (e) { }
+
     const physical = Array.isArray(report.inventoryPhysical) ? report.inventoryPhysical.map(x => ({
       name: x.name, unit: x.unit, physicalQty: Number(x.physicalStock || 0)
     })) : [];
+
     const physMap = new Map(physical.map(x => [x.name, x]));
+    // Map Diff Rows with Value Calculation
     const diffRows = system.map(s => {
       const p = physMap.get(s.name);
       const physicalQty = p ? p.physicalQty : s.systemQty;
-      return { name: s.name, unit: s.unit, systemQty: s.systemQty, physicalQty, diff: (physicalQty - s.systemQty) };
+      const diff = physicalQty - s.systemQty;
+      return {
+        name: s.name,
+        unit: s.unit,
+        systemQty: s.systemQty,
+        physicalQty,
+        diff,
+        price: s.price,
+        purchaseUnit: s.purchaseUnit,
+        unitsPerPurchase: s.unitsPerPurchase,
+        // Werte berechnen
+        systemValue: s.value,
+        physicalValue: physicalQty * s.price,
+        diffValue: diff * s.price
+      };
     });
 
     const sum = (arr, sel) => arr.reduce((acc, r) => acc + Number(sel(r) || 0), 0);
@@ -547,9 +596,17 @@ class ExportService {
     const paidInvSum = sum(paidInvoices, r => r.totalAmount);
     const expenseSum = sum(expenseDocs, r => r.totalAmount);
     const unpaidSum = sum(unpaidInvoices, r => r.totalAmount);
+    // Inventory Sums
     const systemQtySum = sum(system, r => r.systemQty);
+    const systemValueSum = sum(system, r => r.value);
+
+    // Diff Table Sums
     const physQtySum = sum(diffRows, r => r.physicalQty);
     const diffQtySum = sum(diffRows, r => r.diff);
+    // Values
+    const physValueSum = sum(diffRows, r => r.physicalValue);
+    const diffValueSum = sum(diffRows, r => r.diffValue);
+
     const banksTotal = sum((report.bankAccountsJson || []), b => b.balance);
 
     return new Promise((resolve, reject) => {
@@ -614,20 +671,73 @@ class ExportService {
         };
         this._addPageDecorated(doc, theme, headerInfo);
 
-        this._section(doc, theme, 'EÜR – Kennzahlen');
+        this._section(doc, theme, 'Übersicht & Kennzahlen');
         doc.fontSize(11)
           .fillColor(theme.color.success).text(`Einnahmen gesamt: ${this._fmtEUR(report.incomeTotal)}`)
           .fillColor(theme.color.danger).text(`Ausgaben gesamt: ${this._fmtEUR(report.expensesTotal)}`)
           .fillColor(theme.color.text).text(`Gewinn/Verlust: ${this._fmtEUR(report.profit)}`);
 
-        this._section(doc, theme, 'Kasse, Bankkonten & Kundenguthaben');
-        doc.fontSize(11).fillColor(theme.color.text)
-          .text(`Barkasse: ${this._fmtEUR(report.cashOnHand)}`)
+        doc.moveDown(0.5);
+        doc.text(`Barkasse: ${this._fmtEUR(report.cashOnHand)}`)
           .text(`Gästeguthaben (Summe): ${this._fmtEUR(report.guestBalance)}`);
         (report.bankAccountsJson || []).forEach(b =>
           doc.text(`Bankkonto ${b.name || ''}${b.iban ? ` (${b.iban})` : ''}: ${this._fmtEUR(b.balance)}`)
         );
 
+        // --- BESTAND & WAREN ---
+        this._section(doc, theme, 'Bestand laut System');
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Artikel', width: 200, render: r => r.name },
+            { header: 'Menge (System)', width: 100, align: 'right', render: r => this._fmtQty(r.systemQty, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Einzelpreis', width: 70, align: 'right', render: r => this._fmtEUR(r.price) },
+            { header: 'Warenwert', width: 80, align: 'right', render: r => this._fmtEUR(r.value), color: () => theme.color.text }
+          ],
+          rows: system || [],
+          sumRow: ['Summe', '', '', this._fmtEUR(systemValueSum)],
+          emptyHint: 'Keine Bestandsdaten.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Echter Bestand & Differenz');
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Artikel', width: 140, render: r => r.name },
+            { header: 'System', width: 100, align: 'right', render: r => this._fmtQty(r.systemQty, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Echt', width: 100, align: 'right', render: r => this._fmtQty(r.physicalQty, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Wert (Echt)', width: 80, align: 'right', render: r => this._fmtEUR(r.physicalValue) },
+            { header: 'Diff. Menge', width: 100, align: 'right', render: r => this._fmtQty(r.diff, r.unit, r.purchaseUnit, r.unitsPerPurchase), color: (r) => r.diff < 0 ? theme.color.danger : theme.color.success },
+            { header: 'Diff. Wert', width: 80, align: 'right', render: r => this._fmtEUR(r.diffValue), color: (r) => r.diffValue < 0 ? theme.color.danger : theme.color.success }
+          ],
+          rows: diffRows || [],
+          sumRow: ['Summe', '', '', this._fmtEUR(physValueSum), '', this._fmtEUR(diffValueSum)],
+          emptyHint: 'Keine Differenzdaten.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Abgelaufene Artikel (Verlust)');
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Artikel', width: 340, render: r => r.article },
+            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
+          ],
+          rows: expiredArticles || [],
+          emptyHint: 'Keine abgelaufenen Artikel.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Eigenverbrauch (Sachentnahme)');
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Artikel', width: 340, render: r => r.article },
+            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
+          ],
+          rows: ownerUseArticles || [],
+          emptyHint: 'Kein Eigenverbrauch.',
+          headerInfo
+        });
+
+        // --- FINANZEN DETAILS ---
         this._section(doc, theme, 'Alle Einnahmen (nach Artikel)');
         this._table(doc, theme, {
           columns: [
@@ -656,56 +766,31 @@ class ExportService {
           headerInfo
         });
 
-        this._section(doc, theme, 'Ausgaben (Einkäufe, bezahlt)');
+        // Detail-Liste für Ausgaben (Neue Anforderung)
+        this._section(doc, theme, 'Detaillierte Ausgabenliste');
         this._table(doc, theme, {
           columns: [
-            { header: 'Datum', width: 120, render: r => this._fmtDate(r.documentDate) },
-            { header: 'Lieferant', width: 240, render: r => r.supplier || '-' },
-            { header: 'Belegnr.', width: 120, render: r => r.documentNumber || '-' },
-            { header: 'Betrag', width: 60, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => this.getTheme().color.danger }
+            { header: 'Datum', width: 80, render: r => this._fmtDate(r.documentDate) },
+            { header: 'Lieferant', width: 180, render: r => r.supplier || '-' },
+            { header: 'Beleg', width: 100, render: r => r.documentNumber || '-' },
+            { header: 'Nachweis', width: 60, align: 'center', render: r => r.nachweisUrl ? 'Ja' : 'Nein' },
+            { header: 'Status', width: 60, render: r => r.paid ? 'Bezahlt' : 'Offen' },
+            { header: 'Betrag', width: 60, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
           ],
           rows: expenseDocs || [],
-          sumRow: ['Summe', '', '', this._fmtEUR(expenseSum)],
-          emptyHint: 'Keine Ausgabenbelege.',
-          headerInfo
-        });
-
-        this._section(doc, theme, 'Bestand laut System');
-        this._table(doc, theme, {
-          columns: [
-            { header: 'Artikel', width: 320, render: r => r.name },
-            { header: 'Einheit', width: 120, render: r => r.unit || '-' },
-            { header: 'System', width: 120, align: 'right', render: r => Number(r.systemQty || 0).toFixed(2) }
-          ],
-          rows: system || [],
-          sumRow: ['Summe', '', Number(systemQtySum).toFixed(2)],
-          emptyHint: 'Keine Bestandsdaten.',
-          headerInfo
-        });
-
-        this._section(doc, theme, 'Echter Bestand & Differenz');
-        this._table(doc, theme, {
-          columns: [
-            { header: 'Artikel', width: 260, render: r => r.name },
-            { header: 'Einheit', width: 120, render: r => r.unit || '-' },
-            { header: 'System', width: 100, align: 'right', render: r => Number(r.systemQty || 0).toFixed(2) },
-            { header: 'Echt', width: 100, align: 'right', render: r => Number(r.physicalQty || 0).toFixed(2) },
-            { header: 'Δ', width: 80, align: 'right', render: r => Number(r.diff || 0).toFixed(2), color: (r) => r.diff < 0 ? theme.color.danger : theme.color.success }
-          ],
-          rows: diffRows || [],
-          sumRow: ['Summe', '', Number(systemQtySum).toFixed(2), Number(physQtySum).toFixed(2), Number(diffQtySum).toFixed(2)],
-          emptyHint: 'Keine Differenzdaten.',
+          sumRow: ['Summe', '', '', '', '', this._fmtEUR(expenseSum)],
+          emptyHint: 'Keine Ausgaben vorhanden.',
           headerInfo
         });
 
         this._section(doc, theme, 'Offene Ausgangsrechnungen');
         this._table(doc, theme, {
           columns: [
-            { header: 'Empfänger', width: 220, render: r => r.customerName || '-' },
-            { header: 'Beschreibung', width: 220, render: r => r.description || '-' },
-            { header: 'Erstellt am', width: 100, render: r => this._fmtDate(r.createdAt) },
-            { header: 'Fällig am', width: 100, render: r => this._fmtDate(r.dueDate) },
-            { header: 'Status', width: 80, render: r => r.status },
+            { header: 'Empfänger', width: 200, render: r => r.customerName || '-' },
+            { header: 'Beschreibung', width: 200, render: r => r.description || '-' },
+            { header: 'Erstellt am', width: 80, render: r => this._fmtDate(r.createdAt) },
+            { header: 'Fällig am', width: 80, render: r => this._fmtDate(r.dueDate) },
+            { header: 'Status', width: 60, render: r => r.status },
             { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
           ],
           rows: unpaidInvoices || [],
@@ -715,7 +800,6 @@ class ExportService {
         });
 
         // Fußzeilen für alle Seiten
-        this._writeFooters(doc, theme);
         doc.end();
         done.then(pdf => resolve({
           data: pdf, filename: `jahresabschluss_${fiscalYear.name.replace(/\s+/g, '_')}.pdf`, mimeType: 'application/pdf'
@@ -725,9 +809,9 @@ class ExportService {
   }
 
   /* ========= HELPERS ========= */
-  async getDailySummaryData(date) {
+  async getDailySummaryData(date, startHour) {
     const transactionService = require('./transactionService');
-    return await transactionService.getDailySummary(date);
+    return await transactionService.getDailySummary(date, startHour);
   }
 
   getMonthName(month) {

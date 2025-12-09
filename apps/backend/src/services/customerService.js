@@ -64,6 +64,7 @@ class CustomerService {
         name: data.name,
         nickname: data.nickname,
         gender: data.gender || 'OTHER',
+        active: data.active !== undefined ? data.active : true, // Default true
         balance: 0,
         lastActivity: new Date()
       }
@@ -93,6 +94,7 @@ class CustomerService {
         name: data.name,
         nickname: data.nickname,
         gender: data.gender,
+        active: data.active,
         lastActivity: new Date()
       }
     });

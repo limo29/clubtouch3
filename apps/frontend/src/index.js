@@ -7,17 +7,20 @@ import App from './App';
 import * as serviceWorkerRegistration from './serviceWorkerRegistration';
 import reportWebVitals from './reportWebVitals';
 import ColorModeProvider from './theme';
+import { OfflineProvider } from './context/OfflineContext';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ColorModeProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <OfflineProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </OfflineProvider>
     </ColorModeProvider>
   </React.StrictMode>
 );
 
-serviceWorkerRegistration.unregister();
+serviceWorkerRegistration.register();
 reportWebVitals();

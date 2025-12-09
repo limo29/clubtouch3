@@ -1,33 +1,25 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  Box, Card, CardContent, Chip, CssBaseline, Divider, IconButton, Stack,
-  Switch, Tooltip, Typography, alpha, GlobalStyles, Button,
+  Box, Card, CardContent, Chip, IconButton, Stack,
+  Typography, alpha, GlobalStyles, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Checkbox, FormControlLabel, Autocomplete
+  Autocomplete, Grid, Tooltip
 } from '@mui/material';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
+// import { createTheme, ThemeProvider } from '@mui/material/styles';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
-import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
-import TimerIcon from '@mui/icons-material/AccessTime';
-import DarkModeIcon from '@mui/icons-material/DarkMode';
-import LightModeIcon from '@mui/icons-material/LightMode';
-import AutorenewIcon from '@mui/icons-material/Autorenew';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-import EuroIcon from '@mui/icons-material/Euro';
-import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import FlagIcon from '@mui/icons-material/Flag';
-import SettingsIcon from '@mui/icons-material/Settings';
-import CelebrationIcon from '@mui/icons-material/Celebration';
+import CloseIcon from '@mui/icons-material/Close';
+import MonitorIcon from '@mui/icons-material/Monitor';
 
 import { io } from 'socket.io-client';
 import api, { getToken } from '../services/api';
 import { API_ENDPOINTS, WS_URL } from '../config/api';
+import Podium from '../components/common/Podium';
 
-/* ---------- helpers ---------- */
-const clamp = (min, preferred, max) => `clamp(${min}, ${preferred}, ${max})`;
+/* ---------- Helpers ---------- */
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 const KIOSK_PARAM = new URLSearchParams(window.location.search).get('kiosk') === '1';
 
@@ -41,641 +33,392 @@ const useLocalBool = (key, initial) => {
   return [val, setVal];
 };
 
-/* ---------- Fullscreen Confetti (ohne externe Lib) ---------- */
+/* ---------- Components ---------- */
+
 function ConfettiOverlay({ trigger }) {
   const [pieces, setPieces] = useState([]);
-
   useEffect(() => {
     if (!trigger) return;
-    // erzeugt 80 Konfetti mit zufälligen Parametern
-    const colors = ['#ff5252', '#ffb300', '#66bb6a', '#42a5f5', '#ab47bc', '#ef5350'];
-    const arr = Array.from({ length: 80 }).map((_, i) => ({
-      id: `${trigger}-${i}`,
-      left: Math.random() * 100,         // vw
-      delay: Math.random() * 120,        // ms
-      dur: 700 + Math.random() * 900,    // ms
-      size: 6 + Math.random() * 10,      // px
-      rot: (Math.random() * 360) | 0,
+    const colors = ['#f44336', '#ff9800', '#4caf50', '#2196f3', '#9c27b0'];
+    setPieces(Array.from({ length: 60 }).map((_, i) => ({
+      id: i, left: Math.random() * 100, delay: Math.random() * 200, dur: 1000 + Math.random() * 1000,
       color: colors[i % colors.length]
-    }));
-    setPieces(arr);
-    const t = setTimeout(() => setPieces([]), 1800);
+    })));
+    const t = setTimeout(() => setPieces([]), 2200);
     return () => clearTimeout(t);
   }, [trigger]);
 
   if (!pieces.length) return null;
-
   return (
-    <Box
-      aria-hidden
-      sx={{
-        position: 'fixed', inset: 0, zIndex: 2000, pointerEvents: 'none',
-        overflow: 'hidden'
-      }}
-    >
-      {/* softer Flash */}
-      <Box sx={{
-        position: 'absolute', inset: 0, background:
-          'radial-gradient(60% 60% at 50% 50%, rgba(255,255,255,0.15), rgba(255,255,255,0))',
-        animation: 'flash 900ms ease-out'
-      }} />
+    <Box sx={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9999, overflow: 'hidden' }}>
       {pieces.map(p => (
-        <Box key={p.id}
-          sx={{
-            position: 'absolute',
-            top: '-10vh',
-            left: `${p.left}vw`,
-            width: p.size, height: p.size,
-            bgcolor: p.color,
-            transform: `rotate(${p.rot}deg)`,
-            borderRadius: 0.5,
-            animation: `confettiFall ${p.dur}ms ease-out ${p.delay}ms forwards`,
-            boxShadow: `0 0 8px ${alpha(p.color, 0.4)}`
-          }}
-        />
+        <Box key={p.id} sx={{
+          position: 'absolute', top: '-2vh', left: `${p.left}vw`, width: 8, height: 8, bgcolor: p.color,
+          animation: `confetti ${p.dur}ms linear ${p.delay}ms forwards`
+        }} />
       ))}
     </Box>
   );
 }
 
-/* ---------- Milestone Progress Bar ---------- */
 function GoalBar({ goal, onMilestone }) {
-  // goal liefert vom Backend: totalUnits, targetUnits, unitsPerPurchase, purchaseUnit, articleName, label
   const total = Number(goal.totalUnits || 0);
   const target = Math.max(1, Number(goal.targetUnits || 1));
   const step = Math.max(1, Number(goal.unitsPerPurchase || 1));
-  const unit = goal.purchaseUnit || goal.unit || 'Stück';
-  const pct = Math.max(0, Math.min(100, (total / target) * 100));
+  const unit = goal.purchaseUnit || goal.unit || 'Stk';
+
+  const pct = Math.min(100, (total / target) * 100);
   const reached = Math.floor(total / step);
   const milestones = Math.max(0, Math.floor(target / step));
+  const color = pct < 33 ? '#ef5350' : pct < 66 ? '#ffb300' : '#4caf50';
 
-  // Farbe: rot -> gelb -> grün
-  const color =
-    pct < 33 ? '#ef5350' : pct < 66 ? '#ffb300' : '#4caf50';
-
-  // Milestone-Event
   const lastRef = useRef(reached);
   useEffect(() => {
     if (reached > lastRef.current) onMilestone?.();
     lastRef.current = reached;
   }, [reached, onMilestone]);
 
-  // Labels „1. Kiste“, „2. Kiste“ etc.
-  const milestoneLabel = (i) => `${i}. ${unit}`;
-
   return (
-    <Box sx={{ mb: 1.7 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.6 }}>
-        <Typography sx={{ fontWeight: 800 }}>
-          {goal.label || goal.articleName || 'Ziel'}
-        </Typography>
-        {/* Zwischenstand: 49/100 Flaschen */}
-        <Typography variant="body2" sx={{ opacity: 0.9, fontWeight: 700 }}>
-          {Math.floor(total)}/{target} {unit}
+    <Box sx={{ width: '100%' }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-end" sx={{ mb: 0.5 }}>
+        <Box sx={{ minWidth: 0, mr: 2 }}>
+          <Typography variant="h6" noWrap sx={{ fontWeight: 800, lineHeight: 1.2, fontSize: '1rem' }}>
+            {goal.label || goal.articleName}
+          </Typography>
+          <Typography variant="caption" sx={{ opacity: 0.6, fontWeight: 600, display: 'block', lineHeight: 1 }}>
+            {step} {unit} pro Milestone
+          </Typography>
+        </Box>
+        <Typography variant="h6" sx={{ fontWeight: 800, color: color, whiteSpace: 'nowrap', lineHeight: 1.2, fontSize: '1.1rem' }}>
+          {Math.floor(total)} <Typography component="span" variant="body2" sx={{ opacity: 0.7, fontWeight: 700 }}>/ {target} {unit}</Typography>
         </Typography>
       </Stack>
-
-      <Box sx={{ position: 'relative', pt: 3 /* Platz für Marker-Labels */ }}>
-        {/* Marker-Labels */}
-        {Array.from({ length: milestones }).map((_, idx) => {
-          const i = idx + 1;
-          const left = (i * step / target) * 100;
-          const isReached = i <= reached;
-          return (
-            <Typography
-              key={`lbl-${i}`}
-              variant="caption"
-              sx={{
-                position: 'absolute',
-                top: 0,
-                left: `${left}%`,
-                transform: 'translateX(-50%)',
-                whiteSpace: 'nowrap',
-                fontWeight: 700,
-                color: isReached ? color : 'text.secondary',
-                opacity: isReached ? 1 : 0.7,
-                transition: 'color .3s ease, opacity .3s ease'
-              }}
-            >
-              {milestoneLabel(i)}
-            </Typography>
-          );
-        })}
-
-        {/* Track */}
-        <Box
-          sx={{
-            position: 'relative',
-            height: 16,
-            borderRadius: 3,
-            overflow: 'hidden',
-            bgcolor: (t) => alpha(t.palette.text.primary, 0.08)
-          }}
-        >
-          {/* Striche (Marker) */}
-          {Array.from({ length: milestones }).map((_, idx) => {
-            const i = idx + 1;
-            const left = (i * step / target) * 100;
-            const isReached = i <= reached;
-            return (
-              <Box
-                key={`mk-${i}`}
-                sx={{
-                  position: 'absolute',
-                  left: `${left}%`,
-                  top: 0,
-                  bottom: 0,
-                  width: 4,
-                  bgcolor: isReached ? color : 'divider',
-                  opacity: isReached ? 0.95 : 0.6,
-                  transform: 'translateX(-2px)',
-                  zIndex: 2,
-                  borderRadius: 1,
-                  transition: 'background-color .25s ease, opacity .25s ease'
-                }}
-              />
-            );
-          })}
-
-          {/* Füllung */}
-          <Box
-            sx={{
-              position: 'absolute', top: 0, bottom: 0, left: 0,
-              width: `${pct}%`,
-              bgcolor: color,
-              transition: 'width .35s ease, background-color .25s ease',
-              boxShadow: pct > 0 ? `0 0 14px ${alpha(color, 0.4)}` : 'none',
-              zIndex: 1
-            }}
-          />
-        </Box>
+      <Box sx={{ height: 24, bgcolor: alpha('#fff', 0.1), borderRadius: 3, overflow: 'hidden', position: 'relative', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' }}>
+        <Box sx={{ position: 'absolute', inset: 0, width: `${pct}%`, bgcolor: color, transition: 'width 0.5s ease-out', boxShadow: `0 0 20px ${alpha(color, 0.6)}` }} />
+        {Array.from({ length: milestones - 1 }).map((_, i) => (
+          <Box key={i} sx={{ position: 'absolute', left: `${((i + 1) / milestones) * 100}%`, top: 0, bottom: 0, width: 2, bgcolor: 'rgba(0,0,0,0.2)' }} />
+        ))}
       </Box>
     </Box>
   );
 }
 
-/* ---------- main ---------- */
-export default function Highscore() {
-  // Dark
-  const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
-  const [dark, setDark] = useLocalBool('hs_dark', prefersDark);
-  const [autoRotate, setAutoRotate] = useLocalBool('hs_autoRotate', true);
-  const [mode, setMode] = useState('AMOUNT'); // 'AMOUNT' | 'COUNT'
+function GridList({ items, renderItem }) {
+  // We want to fill the first column with up to 9 items (rank 4-12)
+  // and the second column with the rest (rank 13-20).
+  const splitIndex = 9;
+  const col1 = items.slice(0, splitIndex);
+  const col2 = items.slice(splitIndex);
 
-  // Fullscreen
+  return (
+    <Box sx={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 3,
+      height: '100%',
+    }}>
+      <Stack spacing={0} sx={{ height: '100%' }}>
+        {col1.map(renderItem)}
+      </Stack>
+      <Stack spacing={0} sx={{ height: '100%' }}>
+        {col2.map(renderItem)}
+      </Stack>
+    </Box>
+  )
+}
+
+
+function BodyFlag({ active }) {
+  useEffect(() => {
+    if (active) {
+      document.body.setAttribute('data-kiosk', '1');
+    } else {
+      document.body.removeAttribute('data-kiosk');
+    }
+    return () => document.body.removeAttribute('data-kiosk');
+  }, [active]);
+  return null;
+}
+
+export default function Highscore() {
+  const navigate = useNavigate();
+  // const [dark] = useLocalBool('hs_dark', true); // Removed local dark mode to use global theme
+  const [autoRotate] = useLocalBool('hs_autoRotate', true);
+  const [forceKiosk, setForceKiosk] = useLocalBool('hs_forceKiosk', false);
+  const [mode, setMode] = useState('AMOUNT');
+
   const [isFull, setIsFull] = useState(!!document.fullscreenElement);
-  const enterFull = async () => { try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen(); } catch { } };
-  const toggleFull = async () => { try { document.fullscreenElement ? await document.exitFullscreen() : await enterFull(); } catch { } };
+  const toggleFull = async () => { try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch { } };
+
   useEffect(() => {
     const onChange = () => setIsFull(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
-  useEffect(() => { if (KIOSK_PARAM) enterFull(); }, []); // eslint-disable-line
+  useEffect(() => { if (KIOSK_PARAM && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => { }); }, []);
 
-  // Theme
-  const theme = useMemo(
-    () =>
-      createTheme({
-        palette: {
-          mode: dark ? 'dark' : 'light',
-          background: { default: dark ? '#0b0f15' : '#f4f6fb', paper: dark ? '#111824' : '#ffffff' },
-          primary: { main: dark ? '#71a7ff' : '#1976d2' },
-          secondary: { main: dark ? '#b792ff' : '#8e24aa' }
-        },
-        typography: { fontSize: 14 },
-        shape: { borderRadius: 14 },
-        transitions: { duration: { enteringScreen: 220, leavingScreen: 180 } },
-      }),
-    [dark]
-  );
+  /* Theme removed */
 
-  // Data
-  const [loading, setLoading] = useState(true);
-  const [live, setLive] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [startDate, setStartDate] = useState(null);
-
-  const [boards, setBoards] = useState({
-    daily: { amount: { entries: [] }, count: { entries: [] } },
-    yearly: { amount: { entries: [] }, count: { entries: [] } }
-  });
-
-  const [allArticles, setAllArticles] = useState([]);
+  const [boards, setBoards] = useState({ daily: { amount: { entries: [] }, count: { entries: [] } }, yearly: { amount: { entries: [] }, count: { entries: [] } } });
   const [goalProgress, setGoalProgress] = useState({ goals: [], meta: null, loading: true });
-
-  // Goals dialog
+  const [allArticles, setAllArticles] = useState([]);
   const [goalsOpen, setGoalsOpen] = useState(false);
-  const [goalDraft, setGoalDraft] = useState(
-    new Array(4).fill(0).map(() => ({ enabled: false, articleId: '', label: '', targetUnits: 0 }))
-  );
-
-  // Auto-Rotate
-  useEffect(() => {
-    if (!autoRotate) return;
-    const id = setInterval(() => setMode((m) => (m === 'AMOUNT' ? 'COUNT' : 'AMOUNT')), 10000);
-    return () => clearInterval(id);
-  }, [autoRotate]);
+  const [goalDraft, setGoalDraft] = useState([]);
+  const [spark, setSpark] = useState(0);
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
     try {
       const [allHs, arts, progress] = await Promise.all([
         api.get(API_ENDPOINTS.HIGHSCORE_ALL),
         api.get('/articles?includeInactive=true'),
         api.get(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS)
       ]);
-
       const hs = allHs.data || {};
       setBoards({
         daily: { amount: hs?.daily?.amount || { entries: [] }, count: hs?.daily?.count || { entries: [] } },
         yearly: { amount: hs?.yearly?.amount || { entries: [] }, count: hs?.yearly?.count || { entries: [] } }
       });
-      setStartDate(hs?.daily?.amount?.startDate || hs?.daily?.count?.startDate || null);
-
       setAllArticles(arts?.data?.articles || []);
-
-      // Server-Config in Draft laden
-      const serverCfg = progress?.data?.meta?.goalsConfig || null;
-      if (serverCfg) {
-        const arr = new Array(4).fill(0).map((_, i) => {
-          const g = serverCfg[i];
-          return g ? { enabled: true, articleId: g.articleId, label: g.label || '', targetUnits: Number(g.targetUnits) }
-            : { enabled: false, articleId: '', label: '', targetUnits: 0 };
-        });
-        setGoalDraft(arr);
-      }
-
+      const serverCfg = progress?.data?.meta?.goalsConfig || [];
+      setGoalDraft(serverCfg.length ? serverCfg.map(g => ({ ...g, enabled: true })) : [{ enabled: true, articleId: '', label: '', targetUnits: 0 }]);
       setGoalProgress({ goals: progress?.data?.goals || [], meta: progress?.data?.meta || null, loading: false });
-      setLastUpdated(new Date());
-    } finally {
-      setLoading(false);
-    }
+    } catch { }
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Live socket
   useEffect(() => {
     const s = io(WS_URL, { auth: { token: getToken() } });
-    s.on('connect', () => setLive(true));
-    s.on('disconnect', () => setLive(false));
-    const refresh = async () => {
-      try {
-        const [allHs, progress] = await Promise.all([
-          api.get(API_ENDPOINTS.HIGHSCORE_ALL),
-          api.get(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS)
-        ]);
-        const hs = allHs.data || {};
-        setBoards({
-          daily: { amount: hs?.daily?.amount || { entries: [] }, count: hs?.daily?.count || { entries: [] } },
-          yearly: { amount: hs?.yearly?.amount || { entries: [] }, count: hs?.yearly?.count || { entries: [] } }
-        });
-        setGoalProgress((gp) => ({ ...gp, goals: progress?.data?.goals || [], meta: progress?.data?.meta || gp.meta, loading: false }));
-        setLastUpdated(new Date());
-      } catch { }
-    };
+    const refresh = () => fetchAll();
     s.on('highscore:update', refresh);
     s.on('sale:new', refresh);
     return () => s.close();
-  }, []);
+  }, [fetchAll]);
 
-  const manualRefresh = () => fetchAll();
-
-  const LiveBadge = () =>
-    live ? <Chip size="small" color="success" icon={<CheckCircleIcon />} label="Live" sx={{ fontWeight: 700 }} />
-      : <Chip size="small" label="Offline" />;
-
-  const SectionHeader = ({ icon, title, extra }) => (
-    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ pb: 1 }}>
-      {icon}
-      <Typography variant="h4" sx={{ fontWeight: 900, fontSize: clamp('18px', '2.4vw', '30px') }}>{title}</Typography>
-      {extra}
-    </Stack>
-  );
-
-  const rankAccent = (rank) => (rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : rank === 3 ? '#CD7F32' : null);
-
-  const RankRow = ({ entry, isTop }) => (
-    <Stack
-      direction="row"
-      alignItems="center"
-      justifyContent="space-between"
-      sx={{
-        py: isTop ? 1.25 : 1.0,
-        px: 0.2,
-        gap: 1.5,
-        borderRadius: 2,
-        position: 'relative',
-        background: rankAccent(entry.rank) ? `linear-gradient(90deg, ${alpha(rankAccent(entry.rank), 0.08)}, transparent)` : 'transparent',
-        boxShadow: isTop ? `inset 0 0 0 1px ${alpha(theme.palette.primary.main, 0.18)}` : 'none',
-        transition: 'opacity .25s ease, transform .25s ease, background .25s ease',
-        '&:hover': { background: alpha(theme.palette.text.primary, 0.05) },
-      }}
-    >
-      {rankAccent(entry.rank) && (
-        <Box sx={{ position: 'absolute', left: 0, top: 6, bottom: 6, width: 6, borderTopLeftRadius: 8, borderBottomLeftRadius: 8, bgcolor: rankAccent(entry.rank) }} />
-      )}
-      <Stack direction="row" alignItems="center" spacing={1.4} sx={{ minWidth: 0 }}>
-        <Chip label={entry.rank} color={entry.rank === 1 ? 'warning' : entry.rank === 2 ? 'default' : 'primary'} size="small" sx={{ fontWeight: 800 }} />
-        <Typography noWrap sx={{ fontWeight: isTop ? 800 : 700, fontSize: clamp('16px', isTop ? '2vw' : '1.7vw', '22px'), minWidth: 0 }}>
-          {entry.customerNickname || entry.customerName}
-        </Typography>
-        {entry.rank <= 3 && <MilitaryTechIcon fontSize="small" sx={{ color: rankAccent(entry.rank) || 'inherit' }} />}
-      </Stack>
-
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-        <Typography sx={{ opacity: 0.72 }}>
-          {entry.transactionCount} Transaktion{entry.transactionCount === 1 ? '' : 'en'}
-          {mode === 'AMOUNT' && entry.totalItems ? ` • ${entry.totalItems} Stück`
-            : mode === 'COUNT' && entry.totalAmount ? ` • ${money(entry.totalAmount)}`
-              : ''}
-        </Typography>
-        <Typography
-          sx={{
-            fontWeight: 900,
-            fontSize: clamp('18px', isTop ? '2.4vw' : '2.1vw', '28px'),
-            minWidth: { xs: '9ch', md: '11ch' },
-            textAlign: 'right',
-            whiteSpace: 'nowrap',
-            fontVariantNumeric: 'tabular-nums',
-          }}
-          color="primary"
-        >
-          {mode === 'AMOUNT' ? money(entry.score) : `${entry.score} Stück`}
-        </Typography>
-      </Stack>
-    </Stack>
-  );
-
-  const Board = ({ title, data }) => (
-    <Card
-      variant="outlined"
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        /* WICHTIG: */
-        width: '100%',
-        minWidth: 0,
-        minHeight: 0,
-        height: '100%',
-        backgroundImage: 'none'
-      }}
-    >
-      <CardContent
-        sx={{
-          /* WICHTIG: */
-          p: { xs: 2, md: 3 },
-          display: 'flex',
-          flexDirection: 'column',
-          flex: 1,
-          width: '100%',
-          minWidth: 0,
-          minHeight: 0
-        }}
-      >
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-          <SectionHeader icon={<TrophyIcon color="primary" sx={{ fontSize: clamp('24px', '2.8vw', '36px') }} />} title={title} />
-          <Chip size="small" icon={mode === 'AMOUNT' ? <EuroIcon /> : <ShoppingCartIcon />} label={`Nach ${mode === 'AMOUNT' ? 'Umsatz' : 'Anzahl'}`} sx={{ fontWeight: 700 }} />
-        </Stack>
-        <Divider sx={{ mb: 1 }} />
-        {loading ? (
-          <Typography color="text.secondary">Lade…</Typography>
-        ) : (data?.entries?.length ?? 0) === 0 ? (
-          <Typography color="text.secondary">Keine Einträge vorhanden</Typography>
-        ) : (
-          <Stack spacing={0.5} sx={{ flex: 1, minHeight: 0, overflow: 'auto', pr: 1 }}>
-            {data.entries.map((e, idx) => (
-              <React.Fragment key={e.customerId ?? idx}>
-                <RankRow entry={e} isTop={idx === 0} />
-                {idx < data.entries.length - 1 && <Divider sx={{ opacity: 0.4 }} />}
-              </React.Fragment>
-            ))}
-          </Stack>
-        )}
-      </CardContent>
-    </Card>
-  );
-
-
-
-  /* ---------- Ziele ---------- */
-  const openGoals = () => setGoalsOpen(true);
-  const closeGoals = () => setGoalsOpen(false);
-
-  const purchaseInfoFor = (articleId) => {
-    const a = allArticles.find(x => x.id === articleId);
-    if (!a) return { step: 1, unit: 'Stück', label: 'Stück' };
-    const step = Number(a.unitsPerPurchase || 1) || 1;
-    const unit = a.purchaseUnit || (a.unit || 'Stück');
-    const label = step > 1 ? `${unit} (×${step})` : unit;
-    return { step, unit, label };
-  };
+  useEffect(() => {
+    if (!autoRotate) return;
+    const id = setInterval(() => {
+      setMode(m => m === 'AMOUNT' ? 'COUNT' : 'AMOUNT');
+    }, 15000);
+    return () => clearInterval(id);
+  }, [autoRotate]);
 
   const saveGoals = async () => {
-    const payload = goalDraft
-      .filter(g => g.enabled && g.articleId && Number(g.targetUnits) > 0)
-      .slice(0, 4)
-      .map(g => ({ articleId: g.articleId, targetUnits: Number(g.targetUnits), label: g.label || '' }));
+    const payload = goalDraft.filter(g => g.articleId && g.targetUnits > 0).map(g => ({ articleId: g.articleId, targetUnits: Number(g.targetUnits), label: g.label || '' })).slice(0, 4);
     await api.post(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS, { goals: payload });
-    const res = await api.get(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS);
-    setGoalProgress({ goals: res?.data?.goals || [], meta: res?.data?.meta || null, loading: false });
+    fetchAll();
     setGoalsOpen(false);
   };
 
-  // Fullscreen-Konfetti triggern
-  const [spark, setSpark] = useState(0);
-  const triggerMilestone = () => setSpark(n => n + 1);
+  const hideChrome = KIOSK_PARAM || isFull || forceKiosk;
 
-  const hideChrome = KIOSK_PARAM || isFull;
+  const handleKioskExit = async () => {
+    setForceKiosk(false);
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+    } catch { }
+    if (KIOSK_PARAM) {
+      navigate('/dashboard'); // If launched in kiosk mode, go to dashboard
+    }
+  };
 
+  const RankRow = ({ entry }) => (
+    <Stack direction="row" alignItems="center" justifyContent="space-between"
+      sx={{
+        py: 1, px: 2,
+        borderBottom: '1px solid', borderColor: 'divider',
+        transition: 'background-color 0.2s',
+        flexGrow: 0,
+        '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+      }}
+    >
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 0 }}>
+        <Box sx={{
+          width: 28, height: 28,
+          borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.05)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontWeight: 800, fontSize: '0.9rem', color: 'text.secondary'
+        }}>
+          {entry.rank}
+        </Box>
+        <Typography noWrap sx={{ fontWeight: 600, fontSize: '1rem' }}>{entry.customerNickname || entry.customerName}</Typography>
+      </Stack>
+      <Typography sx={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', fontSize: '1.1rem' }} color="primary">
+        {mode === 'AMOUNT' ? money(entry.score) : `${entry.score}`}
+      </Typography>
+    </Stack>
+  );
+
+  /* 
+     Removed local ThemeProvider to use global App theme (Neon). 
+     We still want to enforce some specific layout stuff for Kiosk/TV mode if needed, 
+     but visual style should come from global.
+  */
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
+    <>
       <GlobalStyles styles={{
-        '@keyframes confettiFall': { '0%': { transform: 'translateY(0) rotate(0deg)', opacity: 1 }, '100%': { transform: 'translateY(110vh) rotate(720deg)', opacity: 0.9 } },
-        '@keyframes flash': { '0%': { opacity: 0 }, '30%': { opacity: 1 }, '100%': { opacity: 0 } },
-        'body[data-kiosk="1"] .MuiDrawer-root, body[data-kiosk="1"] aside, body[data-kiosk="1"] nav': { display: 'none !important' },
-        'body[data-kiosk="1"] #root, body[data-kiosk="1"] main': { marginLeft: '0 !important' }
+        'body[data-kiosk="1"]': { overflow: 'hidden' },
+        '#root': { height: '100vh', display: 'flex', flexDirection: 'column' },
+        '::-webkit-scrollbar': { width: 0, height: 0 }
       }} />
       <BodyFlag active={hideChrome} />
-
-      {/* Vollbild-Konfetti bei Zwischenziel */}
       <ConfettiOverlay trigger={spark} />
 
-      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', color: 'text.primary' }}>
-        {/* Header */}
-        <Box sx={{ px: { xs: 2, md: 3 }, pt: { xs: 2, md: 3 }, pb: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-          <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
-            <TrophyIcon color="primary" sx={{ fontSize: clamp('26px', '3.2vw', '40px') }} />
-            <Typography variant="h3" sx={{ fontWeight: 900, fontSize: clamp('22px', '3.6vw', '44px') }}>Highscore</Typography>
-            <Chip size="small" icon={<EuroIcon />} label="UMSATZ" onClick={() => setMode('AMOUNT')} variant={mode === 'AMOUNT' ? 'filled' : 'outlined'} />
-            <Chip size="small" icon={<ShoppingCartIcon />} label="ANZAHL" onClick={() => setMode('COUNT')} variant={mode === 'COUNT' ? 'filled' : 'outlined'} />
-            <LiveBadge />
-          </Stack>
+      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-            <Button variant="outlined" startIcon={<FlagIcon />} onClick={openGoals}>Ziele</Button>
-            <Stack direction="row" alignItems="center" spacing={0.5}>
-              <AutorenewIcon sx={{ opacity: 0.7 }} />
-              <Typography variant="body2" sx={{ opacity: 0.7 }}>Auto-Rotate</Typography>
-              <Switch size="small" checked={autoRotate} onChange={(e) => setAutoRotate(e.target.checked)} />
+        {!hideChrome && (
+          <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid', borderColor: 'divider', flexShrink: 0, bgcolor: 'background.paper', zIndex: 10 }}>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 10px rgba(0, 230, 118, 0.5)' }}>
+                <TrophyIcon sx={{ color: '#000' }} />
+              </Box>
+              <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>Clubscore</Typography>
             </Stack>
-            <Stack direction="row" alignItems="center" spacing={0.5}>
-              {dark ? <DarkModeIcon /> : <LightModeIcon />}
-              <Typography variant="body2" sx={{ opacity: 0.7 }}>{dark ? 'Dark' : 'Light'}</Typography>
-              <Switch size="small" checked={dark} onChange={(e) => setDark(e.target.checked)} />
+            <Stack direction="row" spacing={1}>
+              <Button variant="outlined" startIcon={<FlagIcon />} onClick={() => setGoalsOpen(true)}>Ziele</Button>
+              <Button onClick={() => setMode(m => m === 'AMOUNT' ? 'COUNT' : 'AMOUNT')} variant="outlined">{mode === 'AMOUNT' ? 'UMSATZ' : 'ANZAHL'}</Button>
+              <Tooltip title="TV Modus (Versteckt Menü)">
+                <IconButton onClick={() => setForceKiosk(true)} color="primary"><MonitorIcon /></IconButton>
+              </Tooltip>
+              <IconButton onClick={toggleFull}><FullscreenIcon /></IconButton>
             </Stack>
-            <Tooltip title="Aktualisieren"><IconButton onClick={manualRefresh}><RefreshIcon /></IconButton></Tooltip>
-            <Tooltip title={isFull ? 'Vollbild verlassen' : 'Vollbild'}><IconButton onClick={toggleFull}>{isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}</IconButton></Tooltip>
+          </Box>
+        )}
 
-            {/* dezentes Icon, wenn gerade Konfetti lief */}
-            <Box key={spark} sx={{ ml: 1, opacity: 0, animation: 'flash 800ms ease-out' }}>
-              <CelebrationIcon color="secondary" />
-            </Box>
-          </Stack>
-        </Box>
+        {hideChrome && (
+          <Box sx={{
+            position: 'absolute', top: 16, right: 16, zIndex: 9000,
+            display: 'flex', gap: 1,
+            opacity: 0.15, // Slightly visible by default
+            transition: 'opacity 0.3s',
+            '&:hover': { opacity: 1 }
+          }}>
+            <Button variant="contained" color="error" size="small" onClick={handleKioskExit} startIcon={<CloseIcon />}>
+              Exit
+            </Button>
+            {/* Optional: Home button depending on workflow, sticking to simple Exit for now which handles navigate */}
+            <IconButton onClick={toggleFull} sx={{ bgcolor: 'background.paper', boxShadow: 3 }}><FullscreenExitIcon /></IconButton>
+          </Box>
+        )}
 
-        {/* Ziele */}
-        <Box sx={{ px: { xs: 2, md: 3 } }}>
-          <Card variant="outlined">
-            <CardContent sx={{ pb: 1 }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-                <SectionHeader icon={<FlagIcon color="primary" />} title="Tagesziele" />
-                {goalProgress?.meta?.dayLabel && (
-                  <Chip variant="outlined" size="small" label={goalProgress.meta.dayLabel} />
-                )}
-              </Stack>
+        <Box sx={{ flex: 1, minHeight: 0, p: 2, pb: hideChrome ? 2 : 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
 
-              {goalProgress.loading ? (
-                <Typography color="text.secondary">Lade…</Typography>
-              ) : (goalProgress.goals || []).length === 0 ? (
-                <Typography color="text.secondary">Noch keine Ziele definiert.</Typography>
-              ) : (
-                <Box>
+          {!goalProgress.loading && (goalProgress.goals || []).length > 0 && (
+            <Card sx={{ flexShrink: 0 }}>
+              <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 2 } }}>
+                <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                  <FlagIcon color="primary" sx={{ fontSize: 24 }} />
+                  <Typography variant="caption" sx={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, fontSize: '0.9rem' }}>TAGESZIELE</Typography>
+                </Stack>
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3 }}>
                   {goalProgress.goals.map((g, i) => (
-                    <GoalBar key={`${g.articleId}-${i}`} goal={g} onMilestone={triggerMilestone} />
+                    <Box key={i} sx={{ flex: 1, minWidth: 0 }}>
+                      <GoalBar goal={g} onMilestone={() => setSpark(n => n + 1)} />
+                    </Box>
                   ))}
                 </Box>
-              )}
-            </CardContent>
-          </Card>
-        </Box>
-
-        {/* Content – zwei Spalten füllen die Breite */}
-        <Box sx={{ flex: 1, minHeight: 0, px: { xs: 2, md: 3 }, py: { xs: 2, md: 3 } }}>
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, // -> 2 gleich breite Spalten ab md
-              gap: 2.5,
-              alignItems: 'stretch',
-              width: '100%',
-              minHeight: 0,
-            }}
-          >
-            <Box sx={{ minWidth: 0, minHeight: 0 }}>
-              <Board title="Heute" data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count} />
-            </Box>
-
-            <Box sx={{ minWidth: 0, minHeight: 0 }}>
-              <Board title="Saison" data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count} />
-            </Box>
-          </Box>
-        </Box>
-
-
-
-
-        {/* Footer */}
-        <Box sx={{ px: { xs: 2, md: 3 }, pb: { xs: 2, md: 3 }, display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', opacity: 0.85 }}>
-          {startDate && (
-            <Chip size="small" icon={<TimerIcon />} label={`Seit ${new Date(startDate).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`} variant="outlined" />
+              </CardContent>
+            </Card>
           )}
-          <Typography variant="caption" sx={{ ml: 1 }}>
-            Aktualisiert: {lastUpdated ? lastUpdated.toLocaleTimeString('de-DE') : '–'}
-          </Typography>
-        </Box>
-      </Box>
 
-      {/* Ziele-Dialog */}
-      <Dialog open={goalsOpen} onClose={closeGoals} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Stack direction="row" spacing={1} alignItems="center"><SettingsIcon /> <span>Ziele einstellen</span></Stack>
-        </DialogTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" sx={{ mb: 2, opacity: 0.8 }}>
-            Bis zu 4 Artikel auswählen. Ziel in <b>Einheiten</b> (z. B. Flaschen/Kisten). Zwischenziele richten sich nach der <i>Einkaufseinheit</i> des Artikels (z. B. Kiste ×24).
-            Der Tag läuft von <b>12:00</b> bis <b>12:00</b>.
-          </Typography>
+          <Box sx={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3 }}>
+            {['Heute', 'Saison'].map((label, i) => {
+              const data = i === 0
+                ? (mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count)
+                : (mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count);
+              const top3 = (data?.entries || []).slice(0, 3);
+              const rest = (data?.entries || []).slice(3, 20);
 
-          <Stack spacing={1.5}>
-            {goalDraft.map((g, idx) => {
-              const info = purchaseInfoFor(g.articleId);
               return (
-                <Card key={idx} variant="outlined" sx={{ p: 1.2 }}>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                    <FormControlLabel
-                      control={<Checkbox checked={g.enabled} onChange={(e) => { const cp = [...goalDraft]; cp[idx] = { ...cp[idx], enabled: e.target.checked }; setGoalDraft(cp); }} />}
-                      label={`Ziel ${idx + 1}`}
-                    />
-                    <Autocomplete
-                      size="small"
-                      disabled={!g.enabled}
-                      options={allArticles}
-                      getOptionLabel={(o) => o.name || ''}
-                      value={allArticles.find(a => a.id === g.articleId) || null}
-                      onChange={(_, val) => {
-                        const cp = [...goalDraft];
-                        cp[idx] = { ...cp[idx], articleId: val?.id || '', label: cp[idx].label || (val?.name || '') };
-                        setGoalDraft(cp);
-                      }}
-                      sx={{ flex: 1, minWidth: 220 }}
-                      renderInput={(params) => <TextField {...params} label="Artikel" />}
-                    />
-                    <TextField
-                      size="small"
-                      disabled={!g.enabled}
-                      label="Bezeichnung (optional)"
-                      value={g.label}
-                      onChange={(e) => { const cp = [...goalDraft]; cp[idx] = { ...cp[idx], label: e.target.value }; setGoalDraft(cp); }}
-                      sx={{ flex: 1, minWidth: 100 }}
-                    />
-                    <TextField
-                      size="small"
-                      disabled={!g.enabled}
-                      label="Ziel (Einheiten)"
-                      type="number"
-                      value={g.targetUnits}
-                      onChange={(e) => {
-                        const n = Math.max(0, Math.floor(Number(e.target.value || 0)));
-                        const cp = [...goalDraft];
-                        cp[idx] = { ...cp[idx], targetUnits: n };
-                        setGoalDraft(cp);
-                      }}
-                      sx={{ width: 160 }}
-                      helperText={g.articleId ? `Einkaufseinheit: ${info.label}` : ' '}
-                    />
-                  </Stack>
+                <Card key={label} sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                  <CardContent sx={{ flex: 1, display: 'flex', flexDirection: 'column', p: 1.5, pb: 1, overflow: 'hidden' }}>
+                    <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <TrophyIcon color="primary" sx={{ fontSize: 28 }} />
+                        <Typography variant="h5" sx={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Typography>
+                      </Stack>
+                      <Chip
+                        label={mode === 'AMOUNT' ? 'UMSATZ' : 'ANZAHL'}
+                        color="primary"
+                        size="small"
+                        sx={{ fontWeight: 800, borderRadius: 1.5, height: 24, fontSize: '0.75rem' }}
+                      />
+                    </Stack>
+
+                    <Box sx={{ flexShrink: 0, mb: 0.5 }}>
+                      <Podium topThree={top3} mode={mode} moneyFormatter={money} />
+                    </Box>
+
+                    <Grid container spacing={2} sx={{ px: 1, mb: 0.5, opacity: 0.5 }}>
+                      <Grid item xs={6} display="flex" justifyContent="space-between">
+                        <Typography variant="caption" fontWeight={800} fontSize="0.7rem"># NAME</Typography>
+                        <Typography variant="caption" fontWeight={800} fontSize="0.7rem">{mode === 'AMOUNT' ? 'UMSATZ' : 'ANZAHL'}</Typography>
+                      </Grid>
+                      <Grid item xs={6} display="flex" justifyContent="space-between">
+                        <Typography variant="caption" fontWeight={800} fontSize="0.7rem"># NAME</Typography>
+                        <Typography variant="caption" fontWeight={800} fontSize="0.7rem">{mode === 'AMOUNT' ? 'UMSATZ' : 'ANZAHL'}</Typography>
+                      </Grid>
+                    </Grid>
+
+                    <Box sx={{ flex: 1, minHeight: 0, overflowY: 'hidden' }}>
+                      <GridList
+                        items={rest}
+                        renderItem={(e) => <RankRow key={e.rank} entry={e} />}
+                      />
+                    </Box>
+                  </CardContent>
                 </Card>
               );
             })}
+          </Box>
+        </Box>
+      </Box>
+
+      <Dialog open={goalsOpen} onClose={() => setGoalsOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Stack direction="row" spacing={1} alignItems="center"><FlagIcon /> <Typography variant="h6" fontWeight={700}>Ziele konfigurieren</Typography></Stack>
+          <IconButton onClick={() => setGoalsOpen(false)}><CloseIcon /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={3} sx={{ mt: 1 }}>
+            {goalDraft.map((g, idx) => (
+              <Stack key={idx} spacing={1} sx={{ p: 2, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="subtitle2" fontWeight={700}>Ziel #{idx + 1}</Typography>
+                  <IconButton size="small" color="error" onClick={() => { const cp = [...goalDraft]; cp.splice(idx, 1); setGoalDraft(cp); }}><CloseIcon fontSize="small" /></IconButton>
+                </Stack>
+                <Grid container spacing={2}>
+                  <Grid item xs={8}>
+                    <Autocomplete
+                      size="small" options={allArticles} getOptionLabel={o => o.name || ''}
+                      value={allArticles.find(a => a.id === g.articleId) || null}
+                      onChange={(_, v) => {
+                        const cp = [...goalDraft];
+                        cp[idx].articleId = v?.id || '';
+                        cp[idx].label = v?.name || '';
+                        setGoalDraft(cp);
+                      }}
+                      renderInput={params => <TextField {...params} label="Artikel wählen" />}
+                    />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField
+                      size="small" type="number" label="Zielmenge" fullWidth
+                      value={g.targetUnits}
+                      onChange={e => { const cp = [...goalDraft]; cp[idx].targetUnits = e.target.value; setGoalDraft(cp); }}
+                    />
+                  </Grid>
+                </Grid>
+              </Stack>
+            ))}
+            {goalDraft.length < 4 && <Button variant="dashed" startIcon={<FlagIcon />} onClick={() => setGoalDraft([...goalDraft, { articleId: '', targetUnits: 0 }])} sx={{ border: '1px dashed', borderColor: 'divider', py: 2 }}>Ziel hinzufügen</Button>}
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={closeGoals}>Schließen</Button>
-          <Button variant="contained" onClick={saveGoals}>Übernehmen</Button>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setGoalsOpen(false)}>Abbrechen</Button>
+          <Button onClick={saveGoals} variant="contained" disabled={goalProgress.loading}>Speichern</Button>
         </DialogActions>
       </Dialog>
-    </ThemeProvider>
+    </>
   );
-}
-
-function BodyFlag({ active }) {
-  useEffect(() => {
-    if (active) document.body.setAttribute('data-kiosk', '1');
-    else document.body.removeAttribute('data-kiosk');
-    return () => document.body.removeAttribute('data-kiosk');
-  }, [active]);
-  return null;
 }

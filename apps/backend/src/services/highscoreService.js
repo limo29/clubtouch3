@@ -7,7 +7,7 @@ class HighscoreService {
     // Kannst du später aus DB/ENV laden
     return {
       dailyResetHour: 12,          // 12:00 -> Tag läuft 12:00 bis 12:00
-      displayCount: 10,            // Top 10
+      displayCount: 20,            // Top 20
       countInactiveArticles: false,
       scoreMode: 'AMOUNT'
     };
@@ -306,10 +306,10 @@ class HighscoreService {
       `,
     ]);
 
-    if (totalTransactions >= 100) achievements.push({ id:'century', name:'Jahrhundert-Kunde', description:'100 Einkäufe getätigt', icon:'💯' });
-    if (totalTransactions >= 10)  achievements.push({ id:'regular',  name:'Stammkunde',        description:'10 Einkäufe getätigt',  icon:'⭐'  });
-    if (Number(totalSpent._sum.totalAmount || 0) >= 500) achievements.push({ id:'big_spender', name:'Großzügig', description:'500€ ausgegeben', icon:'💰' });
-    if (favoriteArticle.length && Number(favoriteArticle[0].count) >= 50) achievements.push({ id:'loyal_fan', name:`${favoriteArticle[0].name}-Fan`, description:`50x ${favoriteArticle[0].name} gekauft`, icon:'❤️' });
+    if (totalTransactions >= 100) achievements.push({ id: 'century', name: 'Jahrhundert-Kunde', description: '100 Einkäufe getätigt', icon: '💯' });
+    if (totalTransactions >= 10) achievements.push({ id: 'regular', name: 'Stammkunde', description: '10 Einkäufe getätigt', icon: '⭐' });
+    if (Number(totalSpent._sum.totalAmount || 0) >= 500) achievements.push({ id: 'big_spender', name: 'Großzügig', description: '500€ ausgegeben', icon: '💰' });
+    if (favoriteArticle.length && Number(favoriteArticle[0].count) >= 50) achievements.push({ id: 'loyal_fan', name: `${favoriteArticle[0].name}-Fan`, description: `50x ${favoriteArticle[0].name} gekauft`, icon: '❤️' });
     return achievements;
   }
 }

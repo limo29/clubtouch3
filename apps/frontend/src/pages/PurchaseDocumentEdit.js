@@ -40,14 +40,47 @@ import {
   CloudUpload as CloudUploadIcon,
   CheckCircle as CheckCircleIcon,
 } from "@mui/icons-material";
-import { useTheme } from "@mui/material/styles";
+import { useTheme, alpha } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 
 /* --- ArtikelCard / QuantityRow wie in Create (identisch) ----------------- */
 
+/* -------------------------------------------------------------------------- */
+/*                              ArtikelCard                                   */
+/* -------------------------------------------------------------------------- */
+
+const PlaceholderImage = () => (
+  <Box
+    sx={{
+      width: "100%",
+      height: "100%",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      bgcolor: "grey.100",
+      color: "grey.300",
+    }}
+  >
+    <svg
+      width="40%"
+      height="40%"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z" />
+      <path d="M7 2v6" />
+      <path d="M13 2v6" />
+      <path d="M17 8h1a4 4 0 0 1 0 8h-1" />
+    </svg>
+  </Box>
+);
+
 function ArtikelCard({ control, index, article, getValues, setValue }) {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const baseUnit = article?.unit || "Flasche";
   const purchaseUnit = article?.purchaseUnit || "Kiste";
@@ -67,83 +100,115 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
 
   return (
     <Paper
-      elevation={1}
+      elevation={0}
       sx={{
-        p: 2,
-        borderRadius: 2,
-        border: "1px solid #f0f0f0",
-        width: "100%",
-        minHeight: 280,
+        p: 1.5,
+        borderRadius: 3,
+        height: "100%",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        boxShadow: 1,
-        transition: "box-shadow 0.2s ease",
-        "&:hover": { boxShadow: 3 },
+        border: "1px solid",
+        borderColor: "divider",
+        transition: "all 0.2s ease-in-out",
+        "&:hover": {
+          borderColor: "primary.main",
+          boxShadow: theme.shadows[4],
+          transform: "translateY(-2px)",
+        },
       }}
     >
-      {/* Bild */}
-      <Box sx={{ width: "100%", aspectRatio: "4/3", mb: 1.5, borderRadius: 1, bgcolor: "#fafafa", overflow: "hidden" }}>
-        <img
-          src={article?.imageSmall || article?.imageThumbnail || "/logo192.png"}
-          alt={article?.name || "Artikel"}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
+      {/* Bild & Badge */}
+      <Box
+        sx={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: "1", // Square for consistent grid look
+          mb: 1.5,
+          borderRadius: 2,
+          overflow: "hidden",
+          bgcolor: "background.paper",
+        }}
+      >
+        {article?.imageSmall || article?.imageThumbnail ? (
+          <img
+            src={article.imageSmall || article.imageThumbnail}
+            alt={article.name}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              padding: "8px",
+            }}
+          />
+        ) : (
+          <PlaceholderImage />
+        )}
+
+        {/* Info Chip f. Faktor */}
+        {factor > 1 && (
+          <Box
+            sx={{
+              position: "absolute",
+              top: 6,
+              right: 6,
+              bgcolor: "background.paper",
+              boxShadow: 1,
+              borderRadius: 1.5,
+              px: 0.8,
+              py: 0.25,
+              fontSize: "0.65rem",
+              fontWeight: 700,
+              color: "text.secondary",
+              border: "1px solid",
+              borderColor: "divider",
+            }}
+          >
+            1{purchaseUnit.charAt(0)}={factor}
+          </Box>
+        )}
       </Box>
 
       {/* Titel */}
       <Typography
-        variant={isMobile ? "body1" : "subtitle1"}
-        fontWeight={600}
+        variant="subtitle2"
+        fontWeight={700}
         align="center"
         sx={{
-          minHeight: "2.5em",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
+          mb: 1.5,
+          lineHeight: 1.25,
+          height: "2.5em", // Fixed height for 2 lines
           display: "-webkit-box",
           WebkitLineClamp: 2,
           WebkitBoxOrient: "vertical",
-          lineHeight: 1.2,
-          mb: 1,
-          width: "100%",
+          overflow: "hidden",
+          px: 0.5,
         }}
+        title={article?.name}
       >
-        {article?.name || "Unbenannter Artikel"}
+        {article?.name || "Artikel"}
       </Typography>
 
-      {/* Faktor-Hinweis unter dem Titel */}
-      {factor > 0 && (
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-          {purchaseUnit} = ×{factor} {baseUnit}
-        </Typography>
-      )}
+      <Divider sx={{ width: "100%", mb: 1.5, opacity: 0.5 }} />
 
-      {/* Mengensteuerung */}
-      <Stack spacing={1.75} width="100%">
-        {/* Kisten / Kauf-Einheit mit Faktor */}
+      {/* Inputs */}
+      <Stack spacing={1} width="100%" mt="auto">
         <QuantityRow
-          label={
-            factor > 0
-              ? `${purchaseUnit} (×${factor} ${baseUnit})`
-              : purchaseUnit
-          }
+          label={purchaseUnit}
           fieldName={`items.${index}.kisten`}
           control={control}
           handleIncrement={handleIncrement}
           handleInputChange={handleInputChange}
-          isMobile={isMobile}
-        //emphasize // macht Buttons dezent größer
+          color="primary"
         />
 
-        {/* Basis-Einheit */}
         <QuantityRow
           label={baseUnit}
           fieldName={`items.${index}.flaschen`}
           control={control}
           handleIncrement={handleIncrement}
           handleInputChange={handleInputChange}
-          isMobile={isMobile}
-        //emphasize
+          color="secondary"
         />
       </Stack>
     </Paper>
@@ -151,35 +216,86 @@ function ArtikelCard({ control, index, article, getValues, setValue }) {
 }
 
 
-const QuantityRow = ({ label, fieldName, control, handleIncrement, handleInputChange, isMobile }) => {
+const QuantityRow = ({
+  label,
+  fieldName,
+  control,
+  handleIncrement,
+  handleInputChange,
+  color = "primary"
+}) => {
   const fieldKey = fieldName.split(".").pop();
+  const theme = useTheme();
+
   return (
-    <Stack direction="row" alignItems="center" justifyContent="center" spacing={1} width="100%">
-      <Typography variant="body2" sx={{ minWidth: "25%", textAlign: "right", fontSize: { xs: "0.75rem", sm: "0.875rem" }, pr: 0.5 }}>
+    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+      <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ width: 45, textTransform: "uppercase" }}>
         {label}
       </Typography>
-      <IconButton size={isMobile ? "small" : "medium"} onClick={() => handleIncrement(fieldKey, -1)} sx={{ border: "1px solid #d0d0d0", borderRadius: 1, p: { xs: 0.3, sm: 0.5 } }}>
-        <Typography variant="body2">-</Typography>
-      </IconButton>
-      <Controller
-        name={fieldName}
-        control={control}
-        defaultValue={0}
-        render={({ field }) => (
-          <TextField
-            {...field}
-            type="number"
-            size="small"
-            onChange={(e) => handleInputChange(fieldKey, e)}
-            value={field.value ?? 0}
-            inputProps={{ min: 0, style: { textAlign: "center", fontSize: isMobile ? "0.75rem" : "0.875rem" } }}
-            sx={{ width: "25%", minWidth: 40, "& .MuiInputBase-input": { py: { xs: 0.5, sm: 0.75 } } }}
-          />
-        )}
-      />
-      <IconButton size={isMobile ? "small" : "medium"} onClick={() => handleIncrement(fieldKey, 1)} sx={{ border: "1px solid #d0d0d0", borderRadius: 1, p: { xs: 0.3, sm: 0.5 } }}>
-        <Typography variant="body2">+</Typography>
-      </IconButton>
+
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          bgcolor: alpha(theme.palette[color].main, 0.08),
+          borderRadius: 50,
+          p: 0.5,
+          border: "1px solid",
+          borderColor: alpha(theme.palette[color].main, 0.2)
+        }}
+      >
+        <IconButton
+          size="small"
+          onClick={() => handleIncrement(fieldKey, -1)}
+          sx={{
+            width: 28, height: 28,
+            bgcolor: "background.paper",
+            boxShadow: 1,
+            "&:hover": { bgcolor: "white" }
+          }}
+        >
+          <Typography fontWeight={700} lineHeight={1}>-</Typography>
+        </IconButton>
+
+        <Controller
+          name={fieldName}
+          control={control}
+          defaultValue={0}
+          render={({ field }) => (
+            <input
+              {...field}
+              type="number"
+              min="0"
+              onChange={(e) => handleInputChange(fieldKey, e)}
+              value={field.value ?? 0}
+              style={{
+                width: 50,
+                textAlign: "center",
+                border: "none",
+                background: "transparent",
+                outline: "none",
+                fontWeight: 700,
+                fontSize: "1rem",
+                fontFamily: "inherit"
+              }}
+            />
+          )}
+        />
+
+        <IconButton
+          size="small"
+          onClick={() => handleIncrement(fieldKey, 1)}
+          sx={{
+            width: 28, height: 28,
+            bgcolor: theme.palette[color].main,
+            color: "white",
+            boxShadow: 2,
+            "&:hover": { bgcolor: theme.palette[color].dark }
+          }}
+        >
+          <Typography fontWeight={700} lineHeight={1}>+</Typography>
+        </IconButton>
+      </Box>
     </Stack>
   );
 };
@@ -351,7 +467,7 @@ export default function PurchaseDocumentEdit() {
     Promise.all(promises).finally(() => {
       queryClient.invalidateQueries(["purchaseDocuments"]);
       queryClient.invalidateQueries(["purchaseDocument", id]);
-      navigate("/PurchaseDocuments");
+      navigate("/purchases");
     });
   };
 
@@ -377,7 +493,7 @@ export default function PurchaseDocumentEdit() {
       <Paper square elevation={0} sx={{ position: "sticky", top: 0, zIndex: 49, bgcolor: "background.paper", borderBottom: "1px solid #ededed", py: 2, px: { xs: 2, sm: 4, md: 6 } }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" alignItems="center" spacing={1}>
-            <IconButton color="primary" onClick={() => navigate("/PurchaseDocuments")}>
+            <IconButton color="primary" onClick={() => navigate("/purchases")}>
               <ArrowBackIcon />
             </IconButton>
             <Box>
@@ -390,7 +506,7 @@ export default function PurchaseDocumentEdit() {
             </Box>
           </Stack>
           <Stack direction="row" spacing={1} sx={{ display: { xs: "none", md: "flex" } }}>
-            <Button startIcon={<CancelIcon />} color="secondary" onClick={() => navigate("/PurchaseDocuments")}>
+            <Button startIcon={<CancelIcon />} color="secondary" onClick={() => navigate("/purchases")}>
               Abbrechen
             </Button>
             <Button type="submit" startIcon={<SaveIcon />} color="primary" variant="contained" disabled={isSaving || !initializedRef.current}>
@@ -537,7 +653,7 @@ export default function PurchaseDocumentEdit() {
       {/* Floating Action Bar */}
       {showFloatingActions && (
         <Paper square elevation={10} sx={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 100, py: 1.5, px: 2, borderTop: "1px solid #e0e0e0", bgcolor: "background.paper", display: "flex", gap: 1 }}>
-          <Button startIcon={<CancelIcon />} color="secondary" onClick={() => navigate("/PurchaseDocuments")} fullWidth>
+          <Button startIcon={<CancelIcon />} color="secondary" onClick={() => navigate("/purchases")} fullWidth>
             Abbrechen
           </Button>
           <Button type="submit" startIcon={<SaveIcon />} color="primary" variant="contained" disabled={isSaving || !initializedRef.current} fullWidth>

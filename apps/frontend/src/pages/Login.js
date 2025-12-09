@@ -16,15 +16,15 @@ import {
 import {
   Visibility,
   VisibilityOff,
-  LocalDrink,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import logo from '../logo_neon_v2.png';
 
 const Login = () => {
   const navigate = useNavigate();
   const { login, error } = useAuth();
   const [formData, setFormData] = useState({
-    email: '',
+    identifier: '',
     password: '',
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -41,7 +41,7 @@ const Login = () => {
     e.preventDefault();
     setLoading(true);
 
-    const result = await login(formData.email, formData.password);
+    const result = await login(formData.identifier, formData.password);
 
     if (result.success) {
       navigate('/dashboard');
@@ -63,12 +63,22 @@ const Login = () => {
       <Card sx={{ maxWidth: 400, width: '100%', mx: 2 }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <LocalDrink sx={{ fontSize: 60, color: 'primary.main', mb: 2 }} />
-            <Typography variant="h4" component="h1" gutterBottom>
-              Clubtouch3
+            <Box
+              component="img"
+              src={logo}
+              alt="Clubtouch3"
+              sx={{
+                width: 150,
+                height: 'auto',
+                mb: 2,
+                filter: 'drop-shadow(0 0 10px rgba(255, 68, 0, 0.4))'
+              }}
+            />
+            <Typography variant="h4" component="h1" gutterBottom sx={{ fontFamily: '"Orbitron", "Roboto", "Helvetica", "Arial", sans-serif' }}>
+              Clubtouch 3.0
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Kassenverwaltungssystem
+              Kassenverwaltungssystem von Elias
             </Typography>
           </Box>
 
@@ -80,15 +90,14 @@ const Login = () => {
 
           <form onSubmit={handleSubmit}>
             <TextField
-              name="email"
-              label="E-Mail"
-              type="email"
-              value={formData.email}
+              name="identifier"
+              label="E-Mail oder Benutzername"
+              value={formData.identifier}
               onChange={handleChange}
               margin="normal"
               required
               autoFocus
-              autoComplete="email"
+              autoComplete="username"
             />
 
             <TextField
@@ -136,6 +145,9 @@ const Login = () => {
               </Button>
               <Button variant="outlined" onClick={() => navigate('/check-balance')}>
                 Guthaben prüfen
+              </Button>
+              <Button variant="outlined" onClick={() => window.open('/public/ads', '_blank')}>
+                Werbung öffnen
               </Button>
             </Stack>
           </Box>

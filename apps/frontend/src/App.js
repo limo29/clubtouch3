@@ -73,14 +73,12 @@ function App() {
                 }
               />
               <Route path="reports" element={<Reports />} />
-              <Route path="PurchaseDocuments" element={<PurchaseDocuments />} />
-              <Route path="PurchaseDocumentsCreate" element={<PurchaseDocumentsCreate />} />
+              <Route path="reports" element={<Reports />} />
+              <Route path="purchases" element={<PurchaseDocuments />} />
+              <Route path="purchases/create" element={<PurchaseDocumentsCreate />} />
               <Route path="profit-loss" element={<ProfitLoss />} />
               <Route path="invoices" element={<Invoices />} />
-              <Route path="/PurchaseDocuments/edit/:id" element={<PurchaseDocumentEdit />} />
-              <Route path="profit-loss" element={<ProfitLoss />} />
-              <Route path="invoices" element={<Invoices />} />
-              <Route path="/PurchaseDocuments/edit/:id" element={<PurchaseDocumentEdit />} />
+              <Route path="purchases/edit/:id" element={<PurchaseDocumentEdit />} />
               <Route path="ads" element={<AdminAds />} />
             </Route>
 
