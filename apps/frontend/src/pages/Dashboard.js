@@ -12,11 +12,8 @@ import {
   ListItemAvatar,
   Avatar,
   Chip,
-  IconButton,
   Button,
-  Skeleton,
   Stack,
-  Divider,
   Paper,
   Tooltip,
 } from "@mui/material";
@@ -25,12 +22,9 @@ import {
   Inventory,
   Warning,
   EmojiEvents,
-  Refresh,
   ShoppingCart,
   Description,
-  ArrowForward,
   ShoppingBasket,
-  NotificationsActive,
   CheckCircle,
   LocalBar,
   ReceiptLong,
@@ -144,8 +138,6 @@ export default function Dashboard() {
   const {
     data: dailySummary,
     isLoading: loadingSummary,
-    refetch: refetchSummary,
-    dataUpdatedAt,
   } = useQuery({
     queryKey: ["daily-summary"],
     queryFn: async () => (await api.get(API_ENDPOINTS.DAILY_SUMMARY)).data,
