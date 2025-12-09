@@ -18,7 +18,7 @@ async function main() {
     initializeWebSocket(server);
     console.log('✅ WebSocket-Server initialisiert');
 
-    server.listen(PORT, '::', () => {
+    server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
       console.log(`📂 Working Directory: ${process.cwd()}`);
