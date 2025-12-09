@@ -32,11 +32,14 @@ import {
   FileUpload as UploadIcon,
   ExpandMore,
   ExpandLess,
+  MoneyOff,
+  ReceiptLong,
 } from "@mui/icons-material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { useTheme, alpha } from "@mui/material/styles";
+import KPICard from '../components/common/KPICard';
 
 /* ---------------- helpers ---------------- */
 const num = (v) => {
@@ -461,16 +464,20 @@ export default function PurchaseDocuments() {
       {/* Quick Stats & Actions Grid */}
       <Grid container spacing={2} sx={{ mb: 3 }} alignItems="stretch">
         <Grid item xs={6} md={3}>
-          <Paper sx={{ p: 2, height: "100%", borderRadius: 3, bgcolor: alpha(theme.palette.error.main, 0.1), border: `1px solid ${alpha(theme.palette.error.main, 0.2)}`, display: "flex", flexDirection: "column", justifyContent: "center" }} elevation={0}>
-            <Typography variant="caption" fontWeight={700} color="error.dark">OFFEN / UNBEZAHLT</Typography>
-            <Typography variant="h4" fontWeight={800} color="error.main">{stats.offeneRechnungen}</Typography>
-          </Paper>
+          <KPICard
+            title="Offen / Unbezahlt"
+            value={stats.offeneRechnungen}
+            icon={MoneyOff}
+            color="error"
+          />
         </Grid>
         <Grid item xs={6} md={3}>
-          <Paper sx={{ p: 2, height: "100%", borderRadius: 3, bgcolor: alpha(theme.palette.warning.main, 0.1), border: `1px solid ${alpha(theme.palette.warning.main, 0.2)}`, display: "flex", flexDirection: "column", justifyContent: "center" }} elevation={0}>
-            <Typography variant="caption" fontWeight={700} color="warning.dark">OHNE NACHWEIS</Typography>
-            <Typography variant="h4" fontWeight={800} color="warning.main">{stats.ohneNachweis}</Typography>
-          </Paper>
+          <KPICard
+            title="Ohne Nachweis"
+            value={stats.ohneNachweis}
+            icon={ReceiptLong}
+            color="warning"
+          />
         </Grid>
 
         {/* Desktop Action Buttons: Visible only on md+ */}

@@ -19,6 +19,8 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
+import KPICard from '../components/common/KPICard';
+import { Drafts, MarkEmailRead, Warning, CheckCircle } from '@mui/icons-material';
 
 /* ----------------------- kleine Helfer ----------------------- */
 const num = (v) => { const x = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return Number.isNaN(x) ? 0 : x; };
@@ -245,6 +247,46 @@ export default function Invoices() {
       }}
     >
       <Typography variant="h4" gutterBottom>Rechnungen</Typography>
+
+      {/* KPI Cards */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <KPICard
+            title="Offen"
+            value={invoices.filter(i => i.status === 'SENT').length}
+            icon={MarkEmailRead}
+            color="info"
+            subTitle={money(invoices.filter(i => i.status === 'SENT').reduce((acc, curr) => acc + curr.totalAmount, 0))}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <KPICard
+            title="Überfällig"
+            value={invoices.filter(i => i.status === 'SENT' && new Date(i.dueDate) < new Date()).length}
+            icon={Warning}
+            color="error"
+            subTitle={money(invoices.filter(i => i.status === 'SENT' && new Date(i.dueDate) < new Date()).reduce((acc, curr) => acc + curr.totalAmount, 0))}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <KPICard
+            title="Bezahlt"
+            value={invoices.filter(i => i.status === 'PAID').length}
+            icon={CheckCircle}
+            color="success"
+            subTitle="Bestätigt"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <KPICard
+            title="Entwürfe"
+            value={invoices.filter(i => i.status === 'DRAFT').length}
+            icon={Drafts}
+            color="default"
+            subTitle="In Bearbeitung"
+          />
+        </Grid>
+      </Grid>
 
       <Box component={Card} sx={{
         p: 2, mb: 3,

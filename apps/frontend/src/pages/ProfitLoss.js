@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
+import KPICard from '../components/common/KPICard';
 
 /* ---------------- helpers ---------------- */
 const asNum = (v) => {
@@ -652,58 +653,31 @@ export default function ProfitLoss() {
       {/* Summary */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} md={4}>
-          <Card sx={{
-            background: theme.palette.mode === 'dark'
-              ? `linear-gradient(135deg, ${theme.palette.success.dark} 0%, ${theme.palette.success.main} 100%)`
-              : `linear-gradient(135deg, ${theme.palette.success.light} 0%, ${theme.palette.success.main} 100%)`,
-            color: 'white'
-          }}>
-            <CardContent>
-              <Box display="flex" alignItems="center" mb={1}>
-                <TrendingUp sx={{ color: 'inherit', mr: 2, opacity: 0.9 }} />
-                <Typography color="inherit" variant="subtitle1" fontWeight="bold">Einnahmen</Typography>
-              </Box>
-              <Typography variant="h4" color="inherit" fontWeight="bold">{fmt(summary.totalIncome)}</Typography>
-            </CardContent>
-          </Card>
+          <KPICard
+            title="Einnahmen"
+            value={fmt(summary.totalIncome)}
+            icon={TrendingUp}
+            color="success"
+            loading={!plData}
+          />
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card sx={{
-            background: theme.palette.mode === 'dark'
-              ? `linear-gradient(135deg, ${theme.palette.error.dark} 0%, ${theme.palette.error.main} 100%)`
-              : `linear-gradient(135deg, ${theme.palette.error.light} 0%, ${theme.palette.error.main} 100%)`,
-            color: 'white'
-          }}>
-            <CardContent>
-              <Box display="flex" alignItems="center" mb={1}>
-                <TrendingDown sx={{ color: 'inherit', mr: 2, opacity: 0.9 }} />
-                <Typography color="inherit" variant="subtitle1" fontWeight="bold">Ausgaben</Typography>
-              </Box>
-              <Typography variant="h4" color="inherit" fontWeight="bold">{fmt(summary.totalExpenses)}</Typography>
-            </CardContent>
-          </Card>
+          <KPICard
+            title="Ausgaben"
+            value={fmt(summary.totalExpenses)}
+            icon={TrendingDown}
+            color="error"
+            loading={!plData}
+          />
         </Grid>
         <Grid item xs={12} md={4}>
-          <Card sx={{
-            background: summary.profit >= 0
-              ? (theme.palette.mode === 'dark'
-                ? `linear-gradient(135deg, ${theme.palette.info.dark} 0%, ${theme.palette.info.main} 100%)` // Dark mode: Blueish
-                : `linear-gradient(135deg, #ffd700 0%, #fbc02d 100%)`) // Light mode: Gold/Yellow
-              : (theme.palette.mode === 'dark'
-                ? `linear-gradient(135deg, ${theme.palette.warning.dark} 0%, ${theme.palette.warning.main} 100%)`
-                : `linear-gradient(135deg, ${theme.palette.warning.light} 0%, ${theme.palette.warning.main} 100%)`),
-            color: summary.profit >= 0 && theme.palette.mode === 'light' ? 'rgba(0,0,0,0.87)' : 'white'
-          }}>
-            <CardContent>
-              <Box display="flex" alignItems="center" mb={1}>
-                <AccountBalance sx={{ color: 'inherit', mr: 2, opacity: 0.9 }} />
-                <Typography color="inherit" variant="subtitle1" fontWeight="bold">Gewinn/Verlust</Typography>
-              </Box>
-              <Typography variant="h4" color="inherit" fontWeight="bold">
-                {summary.profit > 0 ? '+' : ''}{fmt(summary.profit)}
-              </Typography>
-            </CardContent>
-          </Card>
+          <KPICard
+            title="Gewinn/Verlust"
+            value={(summary.profit > 0 ? '+' : '') + fmt(summary.profit)}
+            icon={AccountBalance}
+            color={summary.profit >= 0 ? "info" : "warning"}
+            loading={!plData}
+          />
         </Grid>
       </Grid>
 

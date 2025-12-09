@@ -71,6 +71,7 @@ const Sales = () => {
   const [mobileTab, setMobileTab] = useState(1); // Default to Products on mobile
 
   const [overdraftDialog, setOverdraftDialog] = useState({ open: false, type: 'WARNING', balance: 0, newBalance: 0, amount: 0, limit: 10 });
+  const [showOwnerConfirm, setShowOwnerConfirm] = useState(false);
 
   const [customerSearch, setCustomerSearch] = useState('');
   const [articleSearch, setArticleSearch] = useState('');
@@ -226,9 +227,7 @@ const Sales = () => {
       }
       quickSaleMutation.mutate({ paymentMethod: 'ACCOUNT', customerId: bookingTarget.data.id, items });
     } else if (bookingTarget.type === 'OWNER') {
-      if (window.confirm('Wirklich "Auf den Wirt" buchen?')) {
-        quickSaleMutation.mutate({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items });
-      }
+      setShowOwnerConfirm(true);
     }
   };
 
@@ -889,6 +888,35 @@ const Sales = () => {
               <Button variant="contained" color="warning" fullWidth onClick={overdraftDialog.onConfirm} sx={{ fontWeight: 800 }}>Trotzdem buchen</Button>
             </>
           )}
+        </DialogActions>
+      </Dialog>
+      <Dialog open={showOwnerConfirm} onClose={() => setShowOwnerConfirm(false)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3, p: 1 } }}>
+        <DialogTitle sx={{ textAlign: 'center', fontWeight: 900, color: 'warning.main', fontSize: '1.4rem' }}>
+          Auf den Wirt?
+        </DialogTitle>
+        <DialogContent sx={{ textAlign: 'center', py: 2 }}>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            Möchtest du den Warenkorb wirklich auf den Wirt buchen?
+          </Typography>
+          <Typography variant="h4" fontWeight={900} color="warning.main" sx={{ mb: 2 }}>
+            {money(total)}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2, px: 2, gap: 1 }}>
+          <Button variant="outlined" color="inherit" fullWidth onClick={() => setShowOwnerConfirm(false)}>Abbrechen</Button>
+          <Button
+            variant="contained"
+            color="warning"
+            fullWidth
+            onClick={() => {
+              const items = cart.map(i => ({ articleId: i.id, quantity: i.quantity }));
+              quickSaleMutation.mutate({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items });
+              setShowOwnerConfirm(false);
+            }}
+            sx={{ fontWeight: 800 }}
+          >
+            Ja, Buchen
+          </Button>
         </DialogActions>
       </Dialog>
       <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>

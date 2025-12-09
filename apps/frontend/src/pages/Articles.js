@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Card,
-  CardContent,
   Dialog,
   DialogActions,
   DialogContent,
@@ -62,6 +61,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
+import KPICard from '../components/common/KPICard';
 
 /* ----------------------------- Helper Components ----------------------------- */
 
@@ -129,57 +129,7 @@ const StockIndicator = ({ stock, minStock, unit, purchaseUnit, unitsPerPurchase 
   );
 };
 
-const StatCard = ({ title, value, icon, color, gradient }) => {
-  const theme = useTheme();
-  const isLight = theme.palette.mode === 'light';
 
-  // Subtle gradient based on primary color
-  const activeGradient = gradient || (isLight
-    ? `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.background.paper} 100%)`
-    : `linear-gradient(135deg, ${alpha(color || theme.palette.primary.main, 0.15)} 0%, ${alpha(theme.palette.background.paper, 0.4)} 100%)`);
-
-  return (
-    <Card
-      elevation={0}
-      sx={{
-        height: '100%',
-        borderRadius: 3,
-        background: activeGradient,
-        border: `1px solid ${alpha(color || theme.palette.divider, isLight ? 0.2 : 0.1)}`,
-        position: 'relative',
-        overflow: 'hidden',
-        boxShadow: isLight ? `0 4px 12px ${alpha(theme.palette.common.black, 0.05)}` : 'none',
-        transition: 'transform 0.2s',
-        '&:hover': { transform: 'translateY(-2px)' }
-      }}
-    >
-      <CardContent>
-        <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-          <Box>
-            <Typography variant="subtitle2" color="text.secondary" gutterBottom fontWeight={600}>
-              {title}
-            </Typography>
-            <Typography variant="h3" fontWeight={800} sx={{ color: color || 'text.primary' }}>
-              {value}
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              p: 1.5,
-              borderRadius: 2,
-              bgcolor: alpha(color || theme.palette.primary.main, 0.1),
-              color: color || theme.palette.primary.main,
-              display: 'flex',
-              boxShadow: `0 4px 12px ${alpha(color || theme.palette.primary.main, 0.2)}`
-            }}
-          >
-            {icon}
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
-};
 
 const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus }) => {
   const theme = useTheme();
@@ -634,38 +584,39 @@ const Articles = () => {
       </Box>
 
       {/* --- KPI Cards --- */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
+      {/* --- KPI Cards --- */}
+      <Grid container spacing={3} sx={{ mb: 4 }} alignItems="stretch">
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
+          <KPICard
             title="Artikel gesamt"
             value={articles.length}
-            icon={<Inventory />}
-            color={theme.palette.primary.main}
+            icon={Inventory}
+            color="primary"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
+          <KPICard
             title="Aktive Artikel"
             value={articles.filter(a => a.active).length}
-            icon={<CheckCircle />}
-            color={theme.palette.success.main} // Green
+            icon={CheckCircle}
+            color="success"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
+          <KPICard
             title="Niedriger Bestand"
             value={lowStockData?.count || 0}
-            icon={<Warning />}
-            color={theme.palette.warning.main}
-            gradient={lowStockData?.count > 0 ? `linear-gradient(135deg, ${alpha(theme.palette.warning.dark, 0.8)} 0%, ${alpha(theme.palette.warning.main, 0.4)} 100%)` : undefined}
+            icon={Warning}
+            color="warning"
+            subTitle={lowStockData?.count > 0 ? "Handlungsbedarf" : "Alles OK"}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
+          <KPICard
             title="Kategorien"
             value={categories.length}
-            icon={<Category />}
-            color={theme.palette.info.main}
+            icon={Category}
+            color="info"
           />
         </Grid>
       </Grid>
