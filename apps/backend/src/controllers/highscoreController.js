@@ -79,8 +79,8 @@ class HighscoreController {
 
   async setGoals(req, res) {
     try {
-      const { goals } = req.body;
-      const saved = await highscoreService.setGoals(goals || [], req.user?.id || 'system');
+      const { goals, movingTargets } = req.body;
+      const saved = await highscoreService.setGoals(goals || [], movingTargets, req.user?.id || 'system');
       const progress = await highscoreService.getGoalsProgress();
       res.json({ ...saved, progress });
     } catch (error) {

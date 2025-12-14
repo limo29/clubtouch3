@@ -3,14 +3,16 @@ const router = express.Router();
 const highscoreController = require('../controllers/highscoreController');
 const { authenticate, authorize } = require('../middleware/auth');
 
+// Public routes (Display)
+router.get('/all', highscoreController.getAllHighscores);
+router.get('/goals-progress', highscoreController.getGoalsProgress);
+
 router.use(authenticate);
 
-// Highscores
+// Highscores (Personal)
 router.get('/', highscoreController.getHighscore);
-router.get('/all', highscoreController.getAllHighscores);
 
-// Goals
-router.get('/goals-progress', highscoreController.getGoalsProgress);
+// Goals (Admin)
 router.post('/goals-progress', authorize('ADMIN', 'CASHIER'), highscoreController.setGoals);
 
 // Settings / Customer

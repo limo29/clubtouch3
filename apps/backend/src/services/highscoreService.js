@@ -156,36 +156,49 @@ class HighscoreService {
     return last?.changes?.goals || [];
   }
 
-  async _writeGoalsConfig(goals, userId) {
+  async _writeGoalsConfig(goals, movingTargets, userId) {
     await prisma.auditLog.create({
       data: {
         userId: userId || 'system',
         action: 'SET',
         entityType: 'HighscoreGoals',
         entityId: 'daily',
-        changes: { goals },
+        changes: { goals, movingTargets },
       }
     });
   }
 
-  async setGoals(goals, userId) {
+  async setGoals(goals, movingTargets, userId) {
     // goals: [{articleId, targetUnits, label}]
     const clean = (goals || [])
       .filter(g => g && g.articleId && Number(g.targetUnits) > 0)
       .slice(0, 4)
       .map(g => ({ articleId: g.articleId, targetUnits: Number(g.targetUnits), label: String(g.label || '') }));
-    await this._writeGoalsConfig(clean, userId);
-    return { ok: true, goals: clean };
+
+    await this._writeGoalsConfig(clean, !!movingTargets, userId);
+    return { ok: true, goals: clean, movingTargets: !!movingTargets };
   }
 
   async getGoalsProgress() {
     const settings = await this.getSettings();
     const { start, end } = this._getDailyWindow(settings.dailyResetHour);
-    const cfg = await this._readGoalsConfig();
+
+    // Custom read to get movingTargets flag
+    const log = await prisma.auditLog.findFirst({
+      where: { entityType: 'HighscoreGoals', action: 'SET' },
+      orderBy: { createdAt: 'desc' }
+    });
+    const cfg = log?.changes?.goals || [];
+    const movingTargets = log?.changes?.movingTargets ?? false;
+
     if (!cfg.length) {
       return {
         goals: [],
-        meta: { dayLabel: `Tag: ${String(settings.dailyResetHour).padStart(2, '0')}:00 → ${String(settings.dailyResetHour).padStart(2, '0')}:00`, goalsConfig: [] }
+        meta: {
+          dayLabel: `Tag: ${String(settings.dailyResetHour).padStart(2, '0')}:00 → ${String(settings.dailyResetHour).padStart(2, '0')}:00`,
+          goalsConfig: [],
+          movingTargets
+        }
       };
     }
 
@@ -228,7 +241,8 @@ class HighscoreService {
       goals,
       meta: {
         dayLabel: `Tag: ${String(settings.dailyResetHour).padStart(2, '0')}:00 → ${String(settings.dailyResetHour).padStart(2, '0')}:00`,
-        goalsConfig: cfg
+        goalsConfig: cfg,
+        movingTargets
       }
     };
   }

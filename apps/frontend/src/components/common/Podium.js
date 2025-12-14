@@ -78,12 +78,13 @@ const PodiumItem = ({ entry, rank, height, color, delay, moneyFormatter, mode })
     );
 };
 
-export default function Podium({ topThree, mode, moneyFormatter }) {
+export default function Podium({ entries, mode, moneyFormatter }) {
 
     // Map based on rank if available, otherwise index
-    const p1 = topThree.find(x => x.rank === 1) || topThree[0];
-    const p2 = topThree.find(x => x.rank === 2) || topThree[1];
-    const p3 = topThree.find(x => x.rank === 3) || topThree[2];
+    const list = entries || [];
+    const p1 = list.find(x => x.rank === 1) || list[0];
+    const p2 = list.find(x => x.rank === 2) || list[1];
+    const p3 = list.find(x => x.rank === 3) || list[2];
 
     return (
         <Stack direction="row" alignItems="flex-end" justifyContent="center" spacing={{ xs: 1, md: 3 }} sx={{ width: '100%', height: 240, pt: 2 }}>
