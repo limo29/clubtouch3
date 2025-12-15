@@ -38,7 +38,7 @@ COPY --chown=nodejs:nodejs . .
 RUN mkdir -p uploads && chown -R nodejs:nodejs uploads
 
 # Switch to non-root user
-USER nodejs
+# USER nodejs
 
 # Expose port
 #EXPOSE 3001
