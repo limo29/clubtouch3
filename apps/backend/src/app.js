@@ -28,11 +28,6 @@ const uploadsPath = path.join(process.cwd(), 'uploads');
 const fs = require('fs');
 
 
-// Ensure upload directory exists - just in case
-if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath, { recursive: true });
-}
-
 console.log('📂 Serving uploads from:', uploadsPath);
 app.use('/uploads', express.static(uploadsPath));
 // Routes
