@@ -26,8 +26,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 const uploadsPath = path.join(process.cwd(), 'uploads');
 const fs = require('fs');
-const uploadsPath = path.join(process.cwd(), 'uploads');
-const fs = require('fs');
+
 
 // Ensure upload directory exists - just in case
 if (!fs.existsSync(uploadsPath)) {
