@@ -26,12 +26,16 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 const uploadsPath = path.join(process.cwd(), 'uploads');
 const fs = require('fs');
-if (fs.existsSync(uploadsPath)) {
-  console.log('📂 Serving uploads from:', uploadsPath);
-  app.use('/uploads', express.static(uploadsPath));
-} else {
-  console.warn('⚠️ Uploads directory not found, skipping static serve:', uploadsPath);
+const uploadsPath = path.join(process.cwd(), 'uploads');
+const fs = require('fs');
+
+// Ensure upload directory exists - just in case
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
 }
+
+console.log('📂 Serving uploads from:', uploadsPath);
+app.use('/uploads', express.static(uploadsPath));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
