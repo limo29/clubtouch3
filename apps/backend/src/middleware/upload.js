@@ -30,7 +30,8 @@ const upload = multer({
     storage: storage,
     fileFilter: fileFilter,
     limits: {
-        fileSize: 50 * 1024 * 1024 // 50MB limit
+        fileSize: 500 * 1024 * 1024, // 500MB limit
+        fieldSize: 100 * 1024 * 1024 // 100MB limit for text fields (slideData JSON)
     }
 });
 

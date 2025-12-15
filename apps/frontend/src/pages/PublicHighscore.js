@@ -1,81 +1,52 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react'; // Optimization: Removed unused imports
 import {
     Box, Card, CardContent, Chip, Stack, CssBaseline,
-    Typography, GlobalStyles
+    Typography, GlobalStyles, alpha, useTheme, Grid
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
-import EuroIcon from '@mui/icons-material/Euro';
-import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
-import TimerIcon from '@mui/icons-material/Timer';
-import { io } from 'socket.io-client';
-import api from '../services/api';
-import { WS_URL } from '../config/api';
+import FlagIcon from '@mui/icons-material/Flag';
+
 import Podium from '../components/common/Podium';
+import GoalOverlay from '../components/common/GoalOverlay';
+import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
+// import { usePrevious } from '../hooks/usePrevious'; // We still need this for GoalBar's internal logic -> No we don't, GoalBar imports it itself.
+import GoalBar from '../components/common/GoalBar';
 
 // Helper functions
-
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 
-// Enforce Dark Mode? No, let's use global theme.
-// If strict dark mode is needed for public view, we can handle it via URL param or similar, but for now inherit global.
 
+
+/* -------------------------------------------------------------------------- */
+/*                           PUBLIC HIGHSCORE PAGE                            */
+/* -------------------------------------------------------------------------- */
 export default function PublicHighscore() {
-    const [loading, setLoading] = useState(true);
-    const [live, setLive] = useState(false);
-    const [lastUpdated, setLastUpdated] = useState(null);
-    const [startDate, setStartDate] = useState(null);
+    // USE THE HOOK
+    const {
+        boards, goalProgress, loading, live, lastUpdated, startDate,
+        overlay, setOverlay
+    } = useHighscoreLogic();
+
     const [mode, setMode] = useState('AMOUNT'); // 'AMOUNT' | 'COUNT'
 
-    const [boards, setBoards] = useState({
-        daily: { amount: { entries: [] }, count: { entries: [] } },
-        yearly: { amount: { entries: [] }, count: { entries: [] } }
-    });
-
-    // Auto-Rotate Mode
+    // Auto-rotate mode every 15s
     useEffect(() => {
-        const id = setInterval(() => setMode((m) => (m === 'AMOUNT' ? 'COUNT' : 'AMOUNT')), 15000); // Slower rotation
-        return () => clearInterval(id);
+        const t = setInterval(() => setMode(p => p === 'AMOUNT' ? 'COUNT' : 'AMOUNT'), 15000);
+        return () => clearInterval(t);
     }, []);
 
-    const fetchAll = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await api.get('/public/highscore/all');
-            const hs = res.data || {};
+    const theme = useTheme();
 
-            setBoards({
-                daily: { amount: hs?.daily?.amount || { entries: [] }, count: hs?.daily?.count || { entries: [] } },
-                yearly: { amount: hs?.yearly?.amount || { entries: [] }, count: hs?.yearly?.count || { entries: [] } }
-            });
-            setStartDate(hs?.daily?.amount?.startDate || hs?.daily?.count?.startDate || null);
-            setLastUpdated(new Date());
-        } catch (err) {
-            console.error("Failed to fetch highscore", err);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => { fetchAll(); }, [fetchAll]);
-
-    // Live socket
-    useEffect(() => {
-        const s = io(WS_URL);
-        s.on('connect', () => setLive(true));
-        s.on('disconnect', () => setLive(false));
-
-        const refresh = () => fetchAll();
-        s.on('highscore:update', refresh);
-        s.on('sale:new', refresh);
-
-        const poll = setInterval(refresh, 60000);
-
-        return () => {
-            s.close();
-            clearInterval(poll);
-        };
-    }, [fetchAll]);
-
+    // Milestone Handler (UI specific)
+    const handleMilestone = (goal, level) => {
+        const target = Math.max(1, Number(goal.targetUnits));
+        const total = target * (level);
+        setOverlay({
+            active: true,
+            type: 'GOAL',
+            message: `Ziel erreicht! ${goal.label}: ${total} ${goal.purchaseUnit || 'Stk'}!`
+        });
+    };
 
     const RankRow = ({ entry, isTop }) => {
         return (
@@ -87,31 +58,24 @@ export default function PublicHighscore() {
                     py: 1,
                     px: 2,
                     borderRadius: 2,
-                    // background: 'rgba(255,255,255,0.03)', // Let theme handle cards or keep subtle
                     borderBottom: '1px solid', borderColor: 'divider',
-                    mb: 1
+                    mb: 1,
+                    bgcolor: isTop ? alpha(theme.palette.primary.main, 0.1) : 'transparent'
                 }}
             >
                 <Stack direction="row" alignItems="center" spacing={2} sx={{ minWidth: 0 }}>
                     <Box sx={{
                         width: 32, height: 32, borderRadius: '50%', bgcolor: 'action.hover',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 14,
-                        color: 'text.secondary'
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: 'text.secondary'
                     }}>
                         {entry.rank}
                     </Box>
-                    <Typography noWrap sx={{ fontWeight: 600, fontSize: '1.1rem', maxWidth: '18ch' }}>
+                    <Typography variant="body1" noWrap sx={{ fontWeight: isTop ? 700 : 500 }}>
                         {entry.customerNickname || entry.customerName}
                     </Typography>
                 </Stack>
-
                 <Typography
-                    sx={{
-                        fontWeight: 900,
-                        fontSize: '1.2rem',
-                        textAlign: 'right',
-                        fontVariantNumeric: 'tabular-nums',
-                    }}
+                    sx={{ fontWeight: 900, fontSize: '1.2rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
                     color="primary"
                 >
                     {mode === 'AMOUNT' ? money(entry.score) : `${entry.score}`}
@@ -122,129 +86,185 @@ export default function PublicHighscore() {
 
     const Board = ({ title, data }) => {
         const topThree = (data?.entries || []).slice(0, 3);
-        const rest = (data?.entries || []).slice(3, 20); // Show up to 20
+        const rest = (data?.entries || []).slice(3, 20);
 
         return (
-            <Card
-                variant="outlined"
-                sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden'
-                }}
-            >
+            <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: 'background.paper' }}>
                 <CardContent sx={{ p: 4, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
                         <Stack direction="row" spacing={2} alignItems="center">
-                            <TrophyIcon color="primary" sx={{ fontSize: 48 }} />
-                            <Typography variant="h3" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{title}</Typography>
+                            <Box sx={{ p: 1.5, borderRadius: 3, bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main' }}>
+                                <TrophyIcon fontSize="large" />
+                            </Box>
+                            <Box>
+                                <Typography variant="h4" fontWeight={900}>{title}</Typography>
+                                <Typography variant="subtitle1" color="text.secondary">
+                                    {mode === 'AMOUNT' ? 'Nach Umsatz' : 'Nach Anzahl'} &bull; Top 20
+                                </Typography>
+                            </Box>
                         </Stack>
-                        <Chip
-                            icon={mode === 'AMOUNT' ? <EuroIcon /> : <ShoppingCartIcon />}
-                            label={mode === 'AMOUNT' ? 'UMSATZ' : 'ANZAHL'}
-                            color="primary"
-                            variant="filled"
-                            sx={{ fontWeight: 900, borderRadius: 3, height: 40, px: 2, fontSize: '1rem' }}
-                        />
+                        {topThree.length > 0 && (
+                            <Box sx={{ textAlign: 'right' }}>
+                                <Typography variant="caption" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, opacity: 0.6 }}>Top Score</Typography>
+                                <Typography variant="h3" color="primary" sx={{ fontWeight: 900, lineHeight: 1 }}>
+                                    {mode === 'AMOUNT' ? money(topThree[0].score) : topThree[0].score}
+                                </Typography>
+                            </Box>
+                        )}
                     </Stack>
 
-                    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                        {loading ? (
-                            <Typography variant="h5" color="text.secondary" sx={{ mt: 10, textAlign: 'center' }}>Lade Clubscore...</Typography>
-                        ) : (data?.entries?.length ?? 0) === 0 ? (
-                            <Typography variant="h5" color="text.secondary" sx={{ mt: 10, textAlign: 'center' }}>Keine Einträge vorhanden</Typography>
-                        ) : (
-                            <>
-                                {/* Podium Area */}
-                                <Box sx={{ mb: 4, flexShrink: 0 }}>
-                                    <Podium topThree={topThree} mode={mode} moneyFormatter={money} />
-                                </Box>
+                    {data?.entries?.length === 0 ? (
+                        <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
+                            <Typography variant="h5">Noch keine Daten</Typography>
+                        </Box>
+                    ) : (
+                        <>
+                            {/* Podium */}
+                            <Box sx={{ mb: 4 }}>
+                                <Podium entries={topThree} mode={mode} moneyFormatter={money} />
+                            </Box>
 
-                                {/* Grid for Rest */}
-                                <Box sx={{
-                                    flex: 1,
-                                    display: 'grid',
-                                    gridTemplateColumns: '1fr 1fr',
-                                    gridTemplateRows: 'repeat(9, 1fr)', // Force fit rows
-                                    columnGap: 4,
-                                    rowGap: 1,
-                                    alignContent: 'start',
-                                    overflow: 'hidden' // No scroll
-                                }}>
-                                    {rest.map((e, idx) => (
-                                        <RankRow key={e.customerId ?? idx} entry={e} />
-                                    ))}
-                                </Box>
-                            </>
-                        )}
-                    </Box>
+                            {/* List */}
+                            <Box sx={{
+                                flex: 1,
+                                overflowY: 'auto',
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
+                                columnGap: 4,
+                                rowGap: 1,
+                                alignContent: 'start',
+                                overflow: 'hidden'
+                            }}>
+                                {rest.map((e, idx) => (
+                                    <RankRow key={e.customerId ?? idx} entry={e} />
+                                ))}
+                            </Box>
+                        </>
+                    )}
                 </CardContent>
             </Card>
         );
     };
 
+    if (loading) return null; // Or a spinner
+
     return (
-        <>
+        <Box sx={{
+            height: '100vh',
+            width: '100vw',
+            bgcolor: '#0a0a0a',
+            color: 'white',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            p: 3
+        }}>
             <CssBaseline />
             <GlobalStyles styles={{
-                body: { overflow: 'hidden' },
-                '#root': { height: '100vh', overflow: 'hidden' }
+                body: { overflow: 'hidden', backgroundColor: '#0a0a0a' },
+                '::-webkit-scrollbar': { width: 8, height: 8 },
+                '::-webkit-scrollbar-track': { background: 'transparent' },
+                '::-webkit-scrollbar-thumb': { background: '#333', borderRadius: 4 },
+                '::-webkit-scrollbar-thumb:hover': { background: '#555' }
             }} />
 
-            <Box sx={{
-                height: '100vh',
-                display: 'flex',
-                flexDirection: 'column',
-                p: 4,
-                // Inherit background from body/theme usually, or explicit override if needed for standalone feel
-                bgcolor: 'background.default',
-                color: 'text.primary'
-            }}>
+            <GoalOverlay
+                trigger={overlay.active}
+                type={overlay.type}
+                message={overlay.message}
+                onComplete={() => setOverlay({ ...overlay, active: false })}
+            />
 
-                {/* Header */}
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4, flexShrink: 0 }}>
-                    <Stack direction="row" spacing={3} alignItems="center">
-                        <Box sx={{
-                            width: 80, height: 80,
-                            borderRadius: 6,
-                            bgcolor: 'primary.main',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            boxShadow: '0 0 60px rgba(0, 230, 118, 0.4)' // Neon Green Glow
-                        }}>
-                            <TrophyIcon sx={{ fontSize: 48, color: '#000' }} />
-                        </Box>
-                        <Box>
-                            <Typography variant="h2" sx={{ fontWeight: 900, lineHeight: 1, mb: 0.5 }}>Clubscore</Typography>
-                            <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 500, opacity: 0.8 }}>
-                                {live ? <Stack direction="row" spacing={1.5} alignItems="center"><Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: '#4caf50', boxShadow: '0 0 15px #4caf50' }} /><span>LIVE UPDATE</span></Stack> : 'Letztes Update: ' + (lastUpdated?.toLocaleTimeString() || '-')}
-                            </Typography>
-                        </Box>
-                    </Stack>
-
-                    {startDate && (
-                        <Chip
-                            icon={<TimerIcon />}
-                            label={`Saisonstart: ${new Date(startDate).toLocaleDateString('de-DE')}`}
-                            sx={{ bgcolor: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(10px)', height: 48, px: 2, fontSize: '1.1rem', borderRadius: 4 }}
-                        />
-                    )}
+            {/* Header */}
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+                <Stack direction="row" spacing={3} alignItems="center">
+                    <Typography variant="h3" sx={{ fontWeight: 900, letterSpacing: -1, background: 'linear-gradient(45deg, #FFF, #999)', backgroundClip: 'text', textFillColor: 'transparent', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                        Clubscore
+                    </Typography>
+                    {live && <Chip icon={<Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#00e676', boxShadow: '0 0 10px #00e676' }} />} label="LIVE" size="small" sx={{ bgcolor: alpha('#00e676', 0.1), color: '#00e676', fontWeight: 800, border: '1px solid', borderColor: alpha('#00e676', 0.2) }} />}
                 </Stack>
 
-                {/* Content Grid */}
+                <Stack direction="row" spacing={4} alignItems="center">
+                    <Box sx={{ textAlign: 'right' }}>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>Zeitraum</Typography>
+                        <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1 }}>
+                            {startDate ? startDate.toLocaleDateString('de-DE') : 'Heute'}
+                        </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'right' }}>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>Letztes Update</Typography>
+                        <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1, fontFamily: 'monospace' }}>
+                            {lastUpdated ? lastUpdated.toLocaleTimeString('de-DE') : '--:--'}
+                        </Typography>
+                    </Box>
+                </Stack>
+            </Stack>
+
+            {/* Content Grid */}
+            <Box sx={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 3,
+                overflowY: { xs: 'auto', md: 'hidden' }, // Scroll on mobile, auto-fit on desktop
+                pr: { xs: 1, md: 0 } // Right padding for scrollbar on mobile
+            }}>
+                {/* Top: Goals (if any) */}
+                {goalProgress.goals.filter(g => g.articleId).length > 0 && (
+                    <Card variant="outlined" sx={{ flexShrink: 0, bgcolor: 'background.paper' }}>
+                        <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+                                <FlagIcon fontSize="small" color="primary" />
+                                <Typography variant="h6" fontWeight={800}>Tagesziele</Typography>
+                            </Stack>
+                            <Grid container spacing={4} justifyContent="center">
+                                {goalProgress.goals.filter(g => g.articleId).map((g, i, arr) => {
+                                    const count = arr.length;
+                                    const smSize = count === 1 ? 12 : 6;
+                                    const mdSize = count === 1 ? 12 : count === 2 ? 6 : count === 3 ? 4 : 3;
+
+                                    return (
+                                        <Grid size={{ xs: 12, sm: smSize, md: mdSize }} key={g.articleId || i}>
+                                            <GoalBar
+                                                goal={g}
+                                                movingTargets={goalProgress.meta?.movingTargets}
+                                                onMilestone={handleMilestone}
+                                            />
+                                        </Grid>
+                                    );
+                                })}
+                            </Grid>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {/* Boards Split */}
                 <Box sx={{
                     flex: 1,
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' },
-                    gap: 4,
                     minHeight: 0,
-                    overflow: 'hidden'
+                    display: 'flex',
+                    flexDirection: { xs: 'column', md: 'row' }, // Stack on mobile
+                    gap: 3,
+                    pb: { xs: 4, md: 0 } // Bottom padding on mobile
                 }}>
-                    <Board title="Heute" data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count} />
-                    <Board title="Saison" data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count} />
-                </Box>
+                    {/* Daily Board */}
+                    <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
+                        <Board
+                            title="Tages-Ranking"
+                            data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count}
+                        />
+                    </Box>
 
+                    {/* Yearly Board */}
+                    <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
+                        <Board
+                            title="Jahres-Charts"
+                            data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
+                        />
+                    </Box>
+                </Box>
             </Box>
-        </>
+        </Box>
     );
 }

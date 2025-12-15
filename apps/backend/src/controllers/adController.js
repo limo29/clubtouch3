@@ -55,16 +55,30 @@ class AdController {
             const { id } = req.params;
             const data = req.body;
 
+            let imageUrl = data.imageUrl;
+
+            if (req.file) {
+                imageUrl = `/uploads/ads/${req.file.filename}`;
+            }
+
+            const updateData = {
+                duration: data.duration ? Number(data.duration) : undefined,
+                transition: data.transition,
+                order: data.order ? Number(data.order) : undefined,
+                slideData: data.slideData ? JSON.parse(data.slideData) : undefined
+            };
+
+            if (imageUrl !== undefined) {
+                updateData.imageUrl = imageUrl;
+            }
+
+            if (data.active !== undefined) {
+                updateData.active = String(data.active) === 'true';
+            }
+
             const ad = await prisma.adSlide.update({
                 where: { id },
-                data: {
-                    imageUrl: data.imageUrl,
-                    duration: data.duration ? Number(data.duration) : undefined,
-                    transition: data.transition,
-                    active: data.active,
-                    order: data.order ? Number(data.order) : undefined,
-                    slideData: data.slideData ? JSON.parse(data.slideData) : undefined
-                }
+                data: updateData
             });
             res.json(ad);
         } catch (error) {

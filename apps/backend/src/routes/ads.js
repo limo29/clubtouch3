@@ -12,7 +12,7 @@ router.use(authorize('ADMIN'));
 router.get('/', adController.listAds);
 router.post('/', upload.single('image'), adController.createAd);
 router.put('/reorder', adController.reorderAds); // Specific route before :id
-router.put('/:id', adController.updateAd);
+router.put('/:id', upload.single('image'), adController.updateAd);
 router.delete('/:id', adController.deleteAd);
 
 module.exports = router;
