@@ -34,6 +34,17 @@ export const AuthProvider = ({ children }) => {
     };
 
     checkAuth();
+
+    // Listen for session expiry from api.js
+    const handleSessionExpired = () => {
+      clearTokens();
+      setUser(null);
+      // Optional: Set specific error to show on login page
+      setError('Sitzung abgelaufen. Bitte erneut anmelden.');
+    };
+
+    window.addEventListener('auth:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('auth:session-expired', handleSessionExpired);
   }, []);
 
   const login = async (identifier, password) => {

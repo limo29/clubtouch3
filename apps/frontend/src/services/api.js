@@ -65,7 +65,9 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         clearTokens();
-        window.location.href = '/login';
+        clearTokens();
+        // Dispatch event instead of hard redirect to allow app to handle it (e.g., save state)
+        window.dispatchEvent(new CustomEvent('auth:session-expired'));
         return Promise.reject(refreshError);
       }
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box, Button, Card, CardContent, CardMedia, Container,
     Dialog, DialogActions, DialogContent, DialogTitle, IconButton,
@@ -10,6 +10,7 @@ import {
     closestCenter,
     KeyboardSensor,
     PointerSensor,
+    TouchSensor,
     useSensor,
     useSensors
 } from '@dnd-kit/core';
@@ -63,12 +64,48 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
         isDragging
     } = useSortable({ id: ad.id });
 
+    // Local state for performant inputs
+    const [duration, setDuration] = useState(ad.duration);
+    const [transitionType, setTransitionType] = useState(ad.transition);
+    const [active, setActive] = useState(ad.active);
+
+    useEffect(() => {
+        setDuration(ad.duration);
+    }, [ad.duration]);
+
+    useEffect(() => {
+        setTransitionType(ad.transition);
+    }, [ad.transition]);
+
+    useEffect(() => {
+        setActive(ad.active);
+    }, [ad.active]);
+
+    const handleDurationBlur = () => {
+        if (duration !== ad.duration) {
+            onUpdate(ad.id, { duration });
+        }
+    };
+
+    const handleTransitionChange = (e) => {
+        const newVal = e.target.value;
+        setTransitionType(newVal);
+        onUpdate(ad.id, { transition: newVal });
+    };
+
+    const handleActiveChange = (e) => {
+        const newVal = e.target.checked;
+        setActive(newVal); // Optimistic update
+        onUpdate(ad.id, { active: newVal });
+    };
+
     const style = {
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.5 : 1,
         zIndex: isDragging ? 100 : 'auto',
-        position: 'relative'
+        position: 'relative',
+        touchAction: 'none' // Important for touch dragging
     };
 
     return (
@@ -80,7 +117,9 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
                             component="video"
                             src={ad.imageUrl}
                             sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                            controls
+                            controls={false} // Disable controls in card view to prevent interference
+                            muted
+                            preload="metadata"
                         />
                     ) : (
                         ad.slideData ? (
@@ -94,6 +133,7 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
                                 image={ad.imageUrl}
                                 alt="Ad"
                                 sx={{ objectFit: 'contain' }}
+                                loading="lazy"
                             />
                         )
                     )}
@@ -109,7 +149,8 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
                             borderRadius: 1,
                             p: 0.5,
                             cursor: 'grab',
-                            '&:active': { cursor: 'grabbing' }
+                            '&:active': { cursor: 'grabbing' },
+                            zIndex: 10
                         }}
                     >
                         <DragIndicatorIcon />
@@ -122,16 +163,17 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
                                 label="Dauer (s)"
                                 type="number"
                                 size="small"
-                                value={ad.duration}
-                                onChange={(e) => onUpdate(ad.id, { duration: e.target.value })}
+                                value={duration}
+                                onChange={(e) => setDuration(e.target.value)}
+                                onBlur={handleDurationBlur}
                                 sx={{ width: 100 }}
                             />
                             <FormControl size="small" sx={{ minWidth: 120 }}>
                                 <InputLabel>Übergang</InputLabel>
                                 <Select
-                                    value={ad.transition}
+                                    value={transitionType}
                                     label="Übergang"
-                                    onChange={(e) => onUpdate(ad.id, { transition: e.target.value })}
+                                    onChange={handleTransitionChange}
                                 >
                                     <MenuItem value="FADE">Fade</MenuItem>
                                     <MenuItem value="SLIDE">Slide</MenuItem>
@@ -145,12 +187,12 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
                             <FormControlLabel
                                 control={
                                     <Switch
-                                        checked={ad.active}
-                                        onChange={(e) => onUpdate(ad.id, { active: e.target.checked })}
+                                        checked={active}
+                                        onChange={handleActiveChange}
                                         size="small"
                                     />
                                 }
-                                label={ad.active ? "Aktiv" : "Inaktiv"}
+                                label={active ? "Aktiv" : "Inaktiv"}
                             />
                             <Box>
                                 <Tooltip title="Vorschau">
@@ -190,9 +232,19 @@ export default function AdminAds() {
     const [previewAd, setPreviewAd] = useState(null);
 
     const sensors = useSensors(
-        useSensor(PointerSensor),
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 8,
+            },
+        }),
         useSensor(KeyboardSensor, {
             coordinateGetter: sortableKeyboardCoordinates,
+        }),
+        useSensor(TouchSensor, {
+            activationConstraint: {
+                delay: 250,
+                tolerance: 5,
+            },
         })
     );
 

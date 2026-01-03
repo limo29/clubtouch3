@@ -83,15 +83,21 @@ const Reports = () => {
     const list = exportsData?.exports || [];
     const hasEur = list.find(e => e.id === 'eur');
     if (!hasEur) {
-      return [
-        ...list,
-        {
-          id: 'eur',
-          name: 'Einnahmen-Überschuss-Rechnung (EÜR)',
-          description: 'Detaillierte Aufstellung aller Einnahmen und Ausgaben inkl. Gewinnermittlung.',
-          format: 'PDF'
-        }
-      ];
+      list.push({
+        id: 'eur',
+        name: 'Einnahmen-Überschuss-Rechnung (EÜR)',
+        description: 'Detaillierte Aufstellung aller Einnahmen und Ausgaben inkl. Gewinnermittlung.',
+        format: 'PDF'
+      });
+    }
+    // Add Proofs Export if not present
+    if (!list.find(e => e.id === 'proofs')) {
+      list.push({
+        id: 'proofs',
+        name: 'Beleg-Nachweise (PDF)',
+        description: 'Alle Rechnungen und Lieferscheine inkl. Scans hintereinander.',
+        format: 'PDF'
+      });
     }
     return list;
   }, [exportsData]);
@@ -134,6 +140,16 @@ const Reports = () => {
           if (parameters.startDate) params.append('startDate', format(parameters.startDate, 'yyyy-MM-dd'));
           if (parameters.endDate) params.append('endDate', format(parameters.endDate, 'yyyy-MM-dd'));
           break;
+        case 'proofs':
+          if (!parameters.startDate || !parameters.endDate) {
+            setError('Bitte Start- und Enddatum wählen');
+            setDownloading(false);
+            return;
+          }
+          url = '/exports/proofs';
+          params.append('startDate', format(parameters.startDate, 'yyyy-MM-dd'));
+          params.append('endDate', format(parameters.endDate, 'yyyy-MM-dd'));
+          break;
         case 'eur':
           // Validierung
           if (!parameters.startDate || !parameters.endDate) {
@@ -155,16 +171,23 @@ const Reports = () => {
 
       const response = await api.get(url, { responseType: 'blob' });
 
-      const blob = new Blob([response.data]);
+      // Create blob with explicit type
+      const blob = new Blob([response.data], { type: 'application/pdf' });
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
+      link.target = '_blank'; // Fail-safe: try opening in new tab if download fails
 
       const cd = response.headers['content-disposition'];
-      let filename = `export_${selectedReport.id}_${Date.now()}.${selectedReport.format?.toLowerCase?.() || 'pdf'}`;
+      let filename = `export_${selectedReport.id}_${Date.now()}.pdf`; // Default to .pdf
       if (cd) {
-        const m = cd.match(/filename="(.+)"/);
-        if (m) filename = m[1];
+        // Match filename with or without quotes
+        const m = cd.match(/filename="?([^"]+)"?/);
+        if (m && m[1]) filename = m[1];
+      }
+      // Ensure .pdf extension if it's missing (and it's a PDF report)
+      if (selectedReport.format === 'PDF' && !filename.toLowerCase().endsWith('.pdf')) {
+        filename += '.pdf';
       }
       link.download = filename;
       document.body.appendChild(link);
@@ -189,6 +212,7 @@ const Reports = () => {
       case 'monthly-summary': return <Assessment color="warning" />;
       case 'customer-statement': return <AccountBalance color="action" />;
       case 'eur': return <EuroSymbol color="error" />;
+      case 'proofs': return <Description color="primary" />;
       default: return <Description />;
     }
   };
@@ -201,6 +225,7 @@ const Reports = () => {
       case 'transactions':
       case 'customer-statement':
       case 'eur':
+      case 'proofs':
         return (
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6}>

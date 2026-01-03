@@ -288,11 +288,6 @@ export default function Highscore() {
               {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
             </IconButton>
           </Tooltip>
-          <Tooltip title="Kiosk Mode (Locked)">
-            <IconButton onClick={() => { if (window.confirm('Kiosk Modus aktivieren? (Double Click oben rechts zum Beenden)')) setForceKiosk(true); }}>
-              <MonitorIcon />
-            </IconButton>
-          </Tooltip>
         </Box>
       )}
 

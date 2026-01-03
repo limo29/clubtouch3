@@ -66,7 +66,8 @@ class CustomerService {
         gender: data.gender || 'OTHER',
         active: data.active !== undefined ? data.active : true, // Default true
         balance: 0,
-        lastActivity: new Date()
+        lastActivity: new Date(),
+        group: data.group || null // Optional group
       }
     });
   }
@@ -95,7 +96,8 @@ class CustomerService {
         nickname: data.nickname,
         gender: data.gender,
         active: data.active,
-        lastActivity: new Date()
+        lastActivity: new Date(),
+        group: data.group // Update group
       }
     });
   }

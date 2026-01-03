@@ -17,6 +17,7 @@
     "cra-template-pwa": "2.0.0",
     "date-fns": "^4.1.0",
     "html-to-image": "^1.11.13",
+    "pdf-lib": "^1.17.1",
     "react": "^19.1.0",
     "react-confetti": "^6.4.0",
     "react-dom": "^19.1.0",

@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import { useOffline } from '../context/OfflineContext';
+import { useSales } from '../context/SalesContext';
 
 /* Helpers */
 const num = (v) => { if (v === null || v === undefined) return 0; if (typeof v === 'number') return v; const x = parseFloat(String(v).replace(',', '.')); return Number.isNaN(x) ? 0 : x; };
@@ -76,13 +77,28 @@ const Sales = () => {
   const [customerSearch, setCustomerSearch] = useState('');
   const [articleSearch, setArticleSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sales_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error('Failed to load cart from storage', e);
+      return [];
+    }
+  });
+
+  // Persist cart changes
+  useEffect(() => {
+    localStorage.setItem('sales_cart', JSON.stringify(cart));
+  }, [cart]);
   const [showTopUp, setShowTopUp] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState('');
   const [topUpMethod, setTopUpMethod] = useState('CASH');
   const [showChangeCalc, setShowChangeCalc] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [historyCustomer, setHistoryCustomer] = useState(null);
+
+  const { setLastTransaction } = useSales();
 
   // Feedback Snackbar
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -142,12 +158,79 @@ const Sales = () => {
 
   const topUpMutation = useMutation({
     mutationFn: async (data) => api.post(`/customers/${data.customerId}/topup`, { amount: num(data.amount), method: data.method, reference: data.reference }),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); setShowTopUp(false); setTopUpAmount(''); }
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries(['customers-sales']);
+
+      // Update Global State
+      setLastTransaction({
+        id: data.data?.topUp?.id, // Corrected extraction based on CustomerController
+        type: 'TOPUP',
+        isTopUp: true,
+        customerId: variables.customerId,
+        description: `${money(variables.amount)} eingezahlt von ${variables.customerName || '?'}`,
+        amount: variables.amount,
+        timestamp: Date.now()
+      });
+
+      setShowTopUp(false);
+      setTopUpAmount('');
+    }
   });
 
   const quickSaleMutation = useMutation({
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); queryClient.invalidateQueries(['articles', 'sales']); setCart([]); setShowChangeCalc(false); }
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries(['customers-sales']);
+      queryClient.invalidateQueries(['articles', 'sales']);
+
+      // Construct Description
+      const itemCount = variables.items.reduce((acc, i) => acc + i.quantity, 0);
+      const itemNames = variables.items.slice(0, 2).map(i => {
+        // items here only have articleId and quantity. Need to find name from cart or fetch it? 
+        // variables.items comes from handleBooking where we map cart.
+        // BUT cart is cleared in handleBooking AFTER mutation call? No, quickSaleMutation is called then setCart([]) is in onSuccess?
+        // Actually, in the code snippet:
+        // quickSaleMutation.mutate(...)
+        // then cart is NOT cleared in the current scope because mutation is async?
+        // Wait, I should look at `handleBooking`.
+        // `handleBooking` does NOT accept arguments, it uses `cart` state.
+        // However, inside onSuccess `setCart([])` is called. So before that, `cart` is available? 
+        // `cart` is a state variable. It will still hold the value until the re-render.
+        return `${i.quantity}x ${cart.find(c => c.id === i.articleId)?.name}`;
+      }).join(', ');
+      const moreCount = variables.items.length - 2;
+      const itemsStr = moreCount > 0 ? `${itemNames} (+${moreCount})` : itemNames;
+
+      let desc = '';
+      let type = 'CASH';
+      let custName = '';
+
+      if (variables.type === 'OWNER_USE') {
+        type = 'OWNER';
+        desc = `${itemsStr} (Auf den Wirt)`;
+      } else if (variables.paymentMethod === 'CASH') {
+        desc = `${itemsStr} verkauft (Bar)`;
+        type = 'CASH';
+      } else if (variables.customerId) {
+        const c = customersData.customers.find(c => c.id === variables.customerId);
+        custName = c ? (c.nickname || c.name) : 'Kunde';
+        desc = `${itemsStr} verkauft an ${custName}`;
+        type = 'CUSTOMER';
+      }
+
+      setLastTransaction({
+        id: data.data?.transaction?.id, // Corrected extraction based on TransactionController
+        type,
+        description: desc,
+        amount: total, // current scope 'total'
+        customerName: custName,
+        itemCount,
+        timestamp: Date.now()
+      });
+
+      setCart([]);
+      setShowChangeCalc(false);
+    }
   });
 
   /* Logic & Actions */
@@ -569,8 +652,8 @@ const Sales = () => {
                   bookingTarget.type === 'CUSTOMER'
                     ? (bookingTarget.data && (bookingTarget.data.balance - total < 0)
                       ? (bookingTarget.data.balance - total < -10 ? 'error' : 'warning')
-                      : 'primary')
-                    : bookingTarget.type === 'OWNER' ? 'warning' : 'success'
+                      : 'success')
+                    : bookingTarget.type === 'OWNER' ? 'warning' : 'secondary'
                 }
                 onClick={handleBooking}
                 sx={{ py: 2, fontWeight: 800, fontSize: '1.2rem', boxShadow: 6, borderRadius: 2 }}
@@ -727,7 +810,12 @@ const Sales = () => {
                 showFeedback('Offline: Aufladung gespeichert', 'info');
                 return;
               }
-              topUpMutation.mutate({ customerId: bookingTarget.data.id, amount: num(topUpAmount), method: topUpMethod });
+              topUpMutation.mutate({
+                customerId: bookingTarget.data.id,
+                amount: num(topUpAmount),
+                method: topUpMethod,
+                customerName: bookingTarget.data.nickname || bookingTarget.data.name
+              });
             }}
             sx={{ py: 1.5, fontWeight: 800, borderRadius: 2, boxShadow: 4 }}
           >

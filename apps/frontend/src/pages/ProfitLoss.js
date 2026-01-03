@@ -587,6 +587,27 @@ export default function ProfitLoss() {
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   };
 
+  const downloadProofs = async () => {
+    try {
+      const res = await api.get('/exports/proofs', {
+        params: {
+          startDate: format(dateRange.startDate, 'yyyy-MM-dd'),
+          endDate: format(dateRange.endDate, 'yyyy-MM-dd'),
+        },
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Belege_${format(dateRange.startDate, 'yyyy-MM-dd')}_${format(dateRange.endDate, 'yyyy-MM-dd')}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Proofs export failed', error);
+      alert('Fehler beim Beleg-Export (ggf. keine Belege vorhanden?)');
+    }
+  };
+
   /* Geschäftsjahre */
   const { data: fyData, error: fyError } = useQuery({
     queryKey: ['fiscal-years'],
@@ -645,6 +666,7 @@ export default function ProfitLoss() {
           <Grid item><DatePicker label="Von" value={dateRange.startDate} onChange={(d) => d && setDateRange(r => ({ ...r, startDate: d }))} /></Grid>
           <Grid item><DatePicker label="Bis" value={dateRange.endDate} onChange={(d) => d && setDateRange(r => ({ ...r, endDate: d }))} /></Grid>
           <Grid item><Button variant="contained" startIcon={<Download />} onClick={downloadEUR}>PDF Export</Button></Grid>
+          <Grid item><Button variant="outlined" startIcon={<Download />} onClick={downloadProofs}>Beleg-Export</Button></Grid>
         </Grid>
       </Paper>
 

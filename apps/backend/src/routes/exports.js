@@ -46,6 +46,11 @@ router.get('/eur',
   exportController.exportEUR
 );
 
+router.get('/proofs',
+  authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
+  exportController.exportProofs
+);
+
 
 router.get('/customer/:customerId/statement',
   authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),

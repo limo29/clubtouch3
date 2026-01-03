@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Box,
   Button,
+  Autocomplete,
   Card,
   CardContent,
   Dialog,
@@ -149,6 +150,12 @@ const Customers = () => {
 
   const customers = customersData?.customers || [];
 
+  // Extract unique groups for suggestions
+  const uniqueGroups = [...new Set(customers
+    .map(c => c.group)
+    .filter(g => g && g.trim() !== '')
+  )].sort();
+
   // In der handleOpenDialog Funktion
   const handleOpenDialog = (customer = null) => {
     setEditingCustomer(customer);
@@ -156,15 +163,17 @@ const Customers = () => {
       reset({
         name: customer.name,
         nickname: customer.nickname || '',
-        gender: customer.gender || 'OTHER', // NEU
+        gender: customer.gender || 'OTHER',
         active: customer.active !== false,
+        group: customer.group || '', // Group field
       });
     } else {
       reset({
         name: '',
         nickname: '',
-        gender: 'OTHER', // NEU
+        gender: 'OTHER',
         active: true,
+        group: '', // Group field
       });
     }
     setOpenDialog(true);
@@ -313,6 +322,7 @@ const Customers = () => {
             <TableRow>
               <TableCell>Name / Status</TableCell>
               {!isMobile && <TableCell>Spitzname</TableCell>}
+              {!isMobile && <TableCell>Gruppe</TableCell>}
               <TableCell align="right">Guthaben</TableCell>
               {!isMobile && <TableCell align="right">Letzte Transaktion</TableCell>}
               {!isMobile && <TableCell align="right">Transaktionen</TableCell>}
@@ -359,6 +369,7 @@ const Customers = () => {
                   </Box>
                 </TableCell>
                 {!isMobile && <TableCell>{customer.nickname || '-'}</TableCell>}
+                {!isMobile && <TableCell>{customer.group || '-'}</TableCell>}
                 <TableCell align="right">
                   <Typography
                     variant="body2"
@@ -400,7 +411,7 @@ const Customers = () => {
           </DialogTitle>
           <DialogContent>
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <Controller
                   name="name"
                   control={control}
@@ -409,13 +420,14 @@ const Customers = () => {
                     <TextField
                       {...field}
                       label="Name"
+                      fullWidth
                       error={!!errors.name}
                       helperText={errors.name?.message}
                     />
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <Controller
                   name="nickname"
                   control={control}
@@ -424,11 +436,12 @@ const Customers = () => {
                     <TextField
                       {...field}
                       label="Spitzname (optional)"
+                      fullWidth
                     />
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <Controller
                   name="gender"
                   control={control}
@@ -444,6 +457,35 @@ const Customers = () => {
                       <MenuItem value="MALE">Männlich</MenuItem>
                       <MenuItem value="OTHER">Andere/Nicht angegeben</MenuItem>
                     </TextField>
+                  )}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Controller
+                  name="group"
+                  control={control}
+                  defaultValue=""
+                  render={({ field: { onChange, value } }) => (
+                    <Autocomplete
+                      freeSolo
+                      fullWidth
+                      options={uniqueGroups}
+                      value={value}
+                      onChange={(event, newValue) => {
+                        onChange(newValue);
+                      }}
+                      onInputChange={(event, newInputValue) => {
+                        onChange(newInputValue);
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Gruppe (optional)"
+                          placeholder="z.B. Panther"
+                          fullWidth
+                        />
+                      )}
+                    />
                   )}
                 />
               </Grid>
@@ -474,10 +516,10 @@ const Customers = () => {
             </Button>
           </DialogActions>
         </form>
-      </Dialog>
+      </Dialog >
 
       {/* Top Up Dialog */}
-      <Dialog open={openTopUpDialog} onClose={handleCloseTopUpDialog}>
+      < Dialog open={openTopUpDialog} onClose={handleCloseTopUpDialog} >
         <form onSubmit={handleTopUpSubmit(onTopUpSubmit)}>
           <DialogTitle>
             Guthaben aufladen: {selectedCustomer?.name}
@@ -556,10 +598,10 @@ const Customers = () => {
             </Button>
           </DialogActions>
         </form>
-      </Dialog>
+      </Dialog >
 
       {/* Customer Detail Dialog */}
-      <Dialog open={openDetailDialog} onClose={handleCloseDetailDialog} maxWidth="md" fullWidth>
+      < Dialog open={openDetailDialog} onClose={handleCloseDetailDialog} maxWidth="md" fullWidth >
         <DialogTitle>
           <Box display="flex" alignItems="center" justifyContent="space-between">
             <Box display="flex" alignItems="center">
@@ -705,8 +747,8 @@ const Customers = () => {
           </Button>
           <Button onClick={handleCloseDetailDialog}>Schließen</Button>
         </DialogActions>
-      </Dialog>
-    </Box>
+      </Dialog >
+    </Box >
   );
 };
 

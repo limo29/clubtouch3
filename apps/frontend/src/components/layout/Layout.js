@@ -49,6 +49,7 @@ import {
 import { useOffline } from '../../context/OfflineContext';
 import { useAuth } from '../../context/AuthContext';
 import { useColorMode } from '../../theme';
+import LastTransactionDisplay from '../sales/LastTransactionDisplay';
 
 import LogoNeon from '../../logo_neon_v2.png';
 
@@ -249,9 +250,18 @@ const Layout = () => {
               <MenuIcon />
             </IconButton>
 
-            <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
-              {currentTitle}
-            </Typography>
+            {(!isMobile || !location.pathname.startsWith('/sales')) && (
+              <Typography variant="h6" noWrap sx={{ flexGrow: location.pathname.startsWith('/sales') ? 0 : 1, mr: 2 }}>
+                {currentTitle}
+              </Typography>
+            )}
+
+            {/* Sales Info Bar (Only on Sales Page) */}
+            {location.pathname.startsWith('/sales') && (
+              <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', overflow: 'hidden' }}>
+                <LastTransactionDisplay />
+              </Box>
+            )}
 
             {showCenterSalesBtn && (
               <Box

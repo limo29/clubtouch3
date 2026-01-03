@@ -52,6 +52,7 @@ model Customer {
   accountTopUps   AccountTopUp[]
   highscorePoints HighscoreEntry[]
   invoices        Invoice[]
+  group           String?          // Gruppe für Wettbewerbe usw.
 }
 
 // Artikel/Produkte 

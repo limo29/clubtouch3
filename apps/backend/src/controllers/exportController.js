@@ -1,7 +1,153 @@
 const exportService = require('../services/exportService');
 const prisma = require('../utils/prisma');
+const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+const fs = require('fs');
+const path = require('path');
+const { format } = require('date-fns');
 
 class ExportController {
+  // --- NEU: BELEG-NACHWEIS EXPORT (PDF) ---
+  async exportProofs(req, res) {
+    try {
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'Start- und Enddatum erforderlich' });
+      }
+
+      // 1. Rechnungen (Invoices) laden, die einen Nachweis haben
+      const invoices = await prisma.purchaseDocument.findMany({
+        where: {
+          type: 'RECHNUNG',
+          documentDate: {
+            gte: new Date(startDate),
+            lte: new Date(endDate),
+          },
+          nachweisUrl: { not: null },
+        },
+        include: {
+          lieferscheine: true, // Auch Lieferscheine laden
+        },
+        orderBy: { documentDate: 'asc' },
+      });
+
+      if (invoices.length === 0) {
+        return res.status(404).json({ error: 'Keine Belege mit Nachweis im Zeitraum gefunden.' });
+      }
+
+      // 2. PDF erstellen
+      const finalPdf = await PDFDocument.create();
+      const font = await finalPdf.embedFont(StandardFonts.HelveticaBold);
+
+      for (const inv of invoices) {
+        // --- RECHNUNG ---
+        const invFile = path.resolve(process.cwd(), inv.nachweisUrl.replace(/^\//, ''));
+
+        if (fs.existsSync(invFile)) {
+          const ext = path.extname(invFile).toLowerCase();
+
+          // Trennseite / Header für Rechnung
+          const page = finalPdf.addPage([595, 842]); // A4
+          const { width, height } = page.getSize();
+
+          page.drawText(`RECHNUNG: ${inv.documentNumber}`, { x: 50, y: height - 50, size: 20, font });
+          page.drawText(`Datum: ${format(new Date(inv.documentDate), 'dd.MM.yyyy')}`, { x: 50, y: height - 80, size: 14 });
+          page.drawText(`Lieferant: ${inv.supplier}`, { x: 50, y: height - 100, size: 14 });
+          page.drawText(`Betrag: ${inv.totalAmount ? Number(inv.totalAmount).toFixed(2) : '0.00'} €`, { x: 50, y: height - 120, size: 14 });
+
+          // Rechnung einfügen
+          if (ext === '.pdf') {
+            const content = fs.readFileSync(invFile);
+            try {
+              const srcDoc = await PDFDocument.load(content);
+              const indices = srcDoc.getPageIndices();
+              const copiedPages = await finalPdf.copyPages(srcDoc, indices);
+              copiedPages.forEach((cp) => finalPdf.addPage(cp));
+            } catch (e) {
+              console.error('Fehler beim Laden von PDF:', invFile, e);
+              page.drawText('(Fehler beim Laden des PDF-Nachweises)', { x: 50, y: height - 200, size: 12, color: rgb(1, 0, 0) });
+            }
+          } else if (['.jpg', '.jpeg', '.png'].includes(ext)) {
+            const content = fs.readFileSync(invFile);
+            let image;
+            if (ext === '.png') image = await finalPdf.embedPng(content);
+            else image = await finalPdf.embedJpg(content);
+
+            const imgDims = image.scale(1);
+            const maxWidth = width - 100;
+            const maxHeight = height - 250;
+
+            let scale = 1;
+            if (imgDims.width > maxWidth) scale = maxWidth / imgDims.width;
+            if (imgDims.height * scale > maxHeight) scale = maxHeight / imgDims.height;
+
+            page.drawImage(image, {
+              x: 50,
+              y: height - 150 - (imgDims.height * scale),
+              width: imgDims.width * scale,
+              height: imgDims.height * scale,
+            });
+          }
+        }
+
+        // --- ZUGEHÖRIGE LIEFERSCHEINE ---
+        for (const ls of inv.lieferscheine) {
+          if (ls.nachweisUrl) {
+            const lsFile = path.resolve(process.cwd(), ls.nachweisUrl.replace(/^\//, ''));
+            if (fs.existsSync(lsFile)) {
+              const ext = path.extname(lsFile).toLowerCase();
+
+              // Trennseite für LS
+              const lsPage = finalPdf.addPage([595, 842]);
+              const { height: h2 } = lsPage.getSize();
+              lsPage.drawText(`LIEFERSCHEIN: ${ls.documentNumber}`, { x: 50, y: h2 - 50, size: 16, font });
+              lsPage.drawText(`Gehört zu Rechnung: ${inv.documentNumber}`, { x: 50, y: h2 - 75, size: 12 });
+
+              if (ext === '.pdf') {
+                const content = fs.readFileSync(lsFile);
+                try {
+                  const srcDoc = await PDFDocument.load(content);
+                  const copiedPages = await finalPdf.copyPages(srcDoc, srcDoc.getPageIndices());
+                  copiedPages.forEach((cp) => finalPdf.addPage(cp));
+                } catch (e) {
+                  // ignore
+                }
+              } else if (['.jpg', '.jpeg', '.png'].includes(ext)) {
+                const content = fs.readFileSync(lsFile);
+                let image;
+                if (ext === '.png') image = await finalPdf.embedPng(content);
+                else image = await finalPdf.embedJpg(content);
+
+                const imgDims = image.scale(1);
+                const maxWidth = lsPage.getSize().width - 100;
+                const maxHeight = h2 - 200;
+                let scale = 1;
+                if (imgDims.width > maxWidth) scale = maxWidth / imgDims.width;
+                if (imgDims.height * scale > maxHeight) scale = maxHeight / imgDims.height;
+
+                lsPage.drawImage(image, {
+                  x: 50,
+                  y: h2 - 120 - (imgDims.height * scale),
+                  width: imgDims.width * scale,
+                  height: imgDims.height * scale,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      const pdfBytes = await finalPdf.save();
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="Belege_${startDate}_bis_${endDate}.pdf"`);
+      res.send(Buffer.from(pdfBytes));
+
+    } catch (error) {
+      console.error('Fehler beim Beleg-Export:', error);
+      res.status(500).json({ error: 'Beleg-Export fehlgeschlagen' });
+    }
+  }
+
   // Export Transaktionen als CSV
   async exportTransactions(req, res) {
     try {

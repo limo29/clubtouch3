@@ -6,6 +6,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { de } from 'date-fns/locale';
 
 import { AuthProvider } from './context/AuthContext';
+import { SalesProvider } from './context/SalesContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import Layout from './components/layout/Layout';
 
@@ -45,50 +46,52 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={de}>
         <AuthProvider>
-          {/* KEIN <Router> HIER! Router ist bereits in index.js */}
-          <Routes>
-            <Route path="/login" element={<Login />} />
+          <SalesProvider>
+            {/* KEIN <Router> HIER! Router ist bereits in index.js */}
+            <Routes>
+              <Route path="/login" element={<Login />} />
 
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Layout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="sales" element={<Sales />} />
-              <Route path="articles" element={<Articles />} />
-              <Route path="customers" element={<Customers />} />
-              <Route path="transactions" element={<Transactions />} />
-              <Route path="highscore" element={<Highscore />} />
               <Route
-                path="users"
+                path="/"
                 element={
-                  <ProtectedRoute roles={['ADMIN']}>
-                    <Users />
+                  <ProtectedRoute>
+                    <Layout />
                   </ProtectedRoute>
                 }
-              />
-              <Route path="reports" element={<Reports />} />
-              <Route path="reports" element={<Reports />} />
-              <Route path="purchases" element={<PurchaseDocuments />} />
-              <Route path="purchases/create" element={<PurchaseDocumentsCreate />} />
-              <Route path="profit-loss" element={<ProfitLoss />} />
-              <Route path="invoices" element={<Invoices />} />
-              <Route path="purchases/edit/:id" element={<PurchaseDocumentEdit />} />
-              <Route path="ads" element={<AdminAds />} />
-            </Route>
+              >
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="dashboard" element={<Dashboard />} />
+                <Route path="sales" element={<Sales />} />
+                <Route path="articles" element={<Articles />} />
+                <Route path="customers" element={<Customers />} />
+                <Route path="transactions" element={<Transactions />} />
+                <Route path="highscore" element={<Highscore />} />
+                <Route
+                  path="users"
+                  element={
+                    <ProtectedRoute roles={['ADMIN']}>
+                      <Users />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="reports" element={<Reports />} />
+                <Route path="reports" element={<Reports />} />
+                <Route path="purchases" element={<PurchaseDocuments />} />
+                <Route path="purchases/create" element={<PurchaseDocumentsCreate />} />
+                <Route path="profit-loss" element={<ProfitLoss />} />
+                <Route path="invoices" element={<Invoices />} />
+                <Route path="purchases/edit/:id" element={<PurchaseDocumentEdit />} />
+                <Route path="ads" element={<AdminAds />} />
+              </Route>
 
-            {/* Public Routes */}
-            <Route path="/public/highscore" element={<PublicHighscore />} />
-            <Route path="/public/ads" element={<PublicAds />} />
-            <Route path="/check-balance" element={<CheckBalance />} />
+              {/* Public Routes */}
+              <Route path="/public/highscore" element={<PublicHighscore />} />
+              <Route path="/public/ads" element={<PublicAds />} />
+              <Route path="/check-balance" element={<CheckBalance />} />
 
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </SalesProvider>
         </AuthProvider>
       </LocalizationProvider>
     </QueryClientProvider>
