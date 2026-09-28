@@ -82,7 +82,7 @@ function ArticleTile({ article, qtyInLines, showPrice, showStock, showCrates, on
           <Button
             size="small" variant="outlined" color="primary" fullWidth
             onClick={(e) => { e.stopPropagation(); onCrate(article); }}
-            sx={{ borderColor: alpha(theme.palette.primary.main, 0.5), fontWeight: 700, py: 0.75 }}
+            sx={{ borderColor: alpha(theme.palette.primary.main, 0.5), fontWeight: 700, py: 0.75, fontSize: '0.8rem', lineHeight: 1.2 }}
           >
             +1 {article.purchaseUnit} ({article.unitsPerPurchase} {unitShort(article.unit)})
           </Button>
@@ -170,8 +170,7 @@ function LineRow({ line, showCrates, showPrice, allowFreeLines, update }) {
           )}
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
             {crate ? describeLineQty(line) : qty(total, line.unit)}
-            {showPrice && <> · {money(line.price)} / {unitLabel(line.unit, 1)}</>}
-            {(showPrice || num(line.price) > 0) && <> · Summe {money(lineAmount(line))}</>}
+            {showPrice && <> · {money(line.price)} / {unitLabel(line.unit, 1)} · Summe {money(lineAmount(line))}</>}
           </Typography>
         </Box>
         {crate && (
