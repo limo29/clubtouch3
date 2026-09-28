@@ -45,11 +45,11 @@ function SectionCard({ title, action, children, sx }) {
   );
 }
 
-function MiniStat({ label, value, sub, color = 'text.primary' }) {
+function MiniStat({ label, value, sub, color = 'text.primary', dense = false }) {
   return (
-    <Paper sx={{ p: 2, height: '100%' }}>
-      <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>{label}</Typography>
-      <Typography variant="h5" sx={{ fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
+    <Paper sx={{ p: 2, height: '100%', minWidth: 0 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, display: 'block', overflowWrap: 'anywhere' }}>{label}</Typography>
+      <Typography variant={dense ? 'h6' : 'h5'} sx={{ fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
       {sub && <Typography variant="caption" color="text.secondary">{sub}</Typography>}
     </Paper>
   );
