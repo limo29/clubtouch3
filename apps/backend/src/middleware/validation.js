@@ -186,6 +186,35 @@ const validateTopUp = [
     .trim()
 ];
 
+// Kassenzählung: Stückelung = Objekt { "200": 0, ..., "0.01": 3 } mit nichtnegativen Ganzzahlen
+const CASH_DENOMINATIONS = ['200', '100', '50', '20', '10', '5', '2', '1', '0.5', '0.2', '0.1', '0.05', '0.02', '0.01'];
+const validateCashCount = [
+  body('denominations')
+    .custom((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Stückelung (denominations) muss ein Objekt sein');
+      }
+      for (const [key, count] of Object.entries(value)) {
+        if (!CASH_DENOMINATIONS.includes(String(Number(key)))) {
+          throw new Error(`Unbekannte Stückelung: ${key}`);
+        }
+        if (count === null || count === undefined || count === '') continue;
+        const n = Number(count);
+        if (!Number.isInteger(n) || n < 0) {
+          throw new Error(`Anzahl für ${key} € muss eine nichtnegative ganze Zahl sein`);
+        }
+      }
+      return true;
+    }),
+  body('note')
+    .optional({ values: 'null' })
+    .isString()
+    .withMessage('Notiz muss Text sein')
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Notiz darf höchstens 1000 Zeichen lang sein')
+];
+
 const validateSale = [
   body('paymentMethod')
     .isIn(['CASH', 'ACCOUNT'])
@@ -233,6 +262,7 @@ module.exports = {
   validateTopUp,
   validateSale,
   validateQuickSale,
+  validateCashCount,
 
   handleValidationErrors
 };

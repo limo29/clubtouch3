@@ -17,6 +17,7 @@ const purchaseDocumentRoutes = require('./routes/purchaseDocuments');
 const accountingRoutes = require('./routes/accountingRoutes');
 const adRoutes = require('./routes/ads');
 const publicRoutes = require('./routes/public');
+const cashCountRoutes = require('./routes/cashCounts');
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/accounting', accountingRoutes);
 app.use('/api/highscore', require('./routes/highscore'));
 app.use('/api/ads', adRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/cash-counts', cashCountRoutes);
 
 // DEBUG ROUTE: List all files in uploads
 app.get('/api/public/debug/files', async (req, res) => {

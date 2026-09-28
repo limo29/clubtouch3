@@ -33,6 +33,7 @@ model User {
   // --- GEÄNDERT ---
   // Verweist jetzt auf das neue Modell
   purchaseDocuments PurchaseDocument[]
+  cashCounts        CashCount[]
 }
 
 // Kunden mit Guthaben-Konto 
@@ -406,6 +407,30 @@ model YearEndReport {
   inventoryPhysical Json     @default("[]")// [{articleId,name,physicalStock,unit}]
   inventoryDiff    Json      @default("[]")// [{articleId,name,diff,unit}]
   createdAt        DateTime  @default(now())
+}
+
+// Kassenzählung: freier, gespeicherter Vorgang (nicht täglich, aber spätestens zur Kassenprüfung).
+// Soll = countedTotal der Vorzählung + Bar-Verkäufe + Bar-Aufladungen - Bar-Erstattungen - bar bezahlte Eingangsrechnungen
+// seit der Vorzählung. Ohne Vorzählung startet das Soll bei 0.
+model CashCount {
+  id              String   @id @default(uuid())
+  countedAt       DateTime @default(now())
+  denominations   Json     // {"200":0,"100":1,...,"0.01":3} -> Anzahl je Stückelung
+  countedTotal    Decimal  @db.Decimal(10, 2)
+  expectedTotal   Decimal  @db.Decimal(10, 2)
+  difference      Decimal  @db.Decimal(10, 2) // countedTotal - expectedTotal
+  breakdownJson   Json     @default("{}") // Soll-Herleitung zum Zeitpunkt der Zählung (eingefroren)
+  note            String?
+  createdAt       DateTime @default(now())
+
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+
+  previousCountId String?
+  previousCount   CashCount?  @relation("CashCountChain", fields: [previousCountId], references: [id], onDelete: SetNull)
+  nextCounts      CashCount[] @relation("CashCountChain")
+
+  @@index([countedAt])
 }
 
 // Werbe-Slides für Digital Signage
