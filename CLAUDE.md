@@ -81,6 +81,13 @@ There is no `apps/backend/.env.example`; `docker/.env.example` and `docker/docke
 - Offline: `context/OfflineContext.js` keeps a localStorage queue of sales and top-ups; `Sales.js` enqueues when `navigator.onLine` is false and the queue drains sequentially on reconnect. 4xx failures currently stay in the queue.
 - The live highscore uses `hooks/useHighscoreLogic.js` (socket.io-client against `WS_URL` plus polling).
 
+### Artikel buchen (Verkauf, Einkauf, Rechnung)
+
+- One component for all three: `components/articles/ArticleLinePicker.js` (`mode="sale"|"purchase"|"invoice"`, search + category tabs + tile grid + line list; the page supplies `sidebar`, `linesHeader`, `linesFooter`). Below `md` it renders tabs `<sidebarLabel> | Artikel | <linesLabel> (n)`; from `md` three columns. `showCrates`/`editablePrice`/`allowFreeLines` default per mode: crates and free lines only outside sales, editable price only on invoices.
+- Articles come from `hooks/useArticles.js` (single query key `['articles']`, normalized once: `price`/`stock` numbers, `unitsPerPurchase >= 1`, `unit`/`purchaseUnit` fallbacks). Invalidate `ARTICLES_QUERY_KEY` after anything that moves stock.
+- Line model in `hooks/useArticleLines.js` keeps crates and singles separate (`crateQty`, `baseQty`); sales never set `crateQty`. `utils/units.js` converts (`toBaseUnits`, `describeLineQty` → "2 Kisten + 3 Fl. = 43 Flaschen"), `utils/format.js` formats money (`2,50 €`) and integer quantities.
+- Backend payloads are produced only by the serializers `toSalePayload` (`{articleId, quantity}`), `toPurchasePayload` (`{articleId, kisten, flaschen}`, conversion stays in the backend) and `toInvoicePayload` (`{articleId|null, description, quantity, pricePerUnit}` in base units); `linesFromPurchaseItems`/`linesFromInvoiceItems` rebuild lines when editing.
+
 ### Deployment
 
 Railway (`railway.toml`) deploys two services from the per-app Dockerfiles. The backend container runs `prisma migrate deploy` then `node src/server.js`. The frontend container builds the CRA app and serves it with nginx; `nginx.conf` is an envsubst template that proxies `/api`, `/uploads` and `/socket.io` to `$BACKEND_URL`, so the SPA only talks to same-origin paths.
