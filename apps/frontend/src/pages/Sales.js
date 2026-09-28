@@ -15,9 +15,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import { useOffline } from '../context/OfflineContext';
+import { useArticles, ARTICLES_QUERY_KEY } from '../hooks/useArticles';
+import { num } from '../utils/format';
 
 /* Helpers */
-const num = (v) => { if (v === null || v === undefined) return 0; if (typeof v === 'number') return v; const x = parseFloat(String(v).replace(',', '.')); return Number.isNaN(x) ? 0 : x; };
 const money = (v) => `€${num(v).toFixed(2)}`;
 const withinHours = (date, h) => { const d = new Date(date); if (Number.isNaN(d.getTime())) return false; return Date.now() - d.getTime() <= h * 60 * 60 * 1000; };
 const isToday = (d) => { const date = new Date(d); const today = new Date(); return date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear(); };
@@ -99,10 +100,8 @@ const Sales = () => {
     }
   });
 
-  const { data: articlesRaw } = useQuery({
-    queryKey: ['articles', 'sales'],
-    queryFn: async () => (await api.get(API_ENDPOINTS.ARTICLES)).data
-  });
+  // zentraler Artikel-Hook: ein Query-Key, einmal normalisiert, nur aktive Artikel
+  const { articles } = useArticles();
 
   // Keep target selection in sync if customer updates (e.g. balance change)
   useEffect(() => {
@@ -111,13 +110,6 @@ const Sales = () => {
       if (updated) setBookingTarget(prev => ({ ...prev, data: updated }));
     }
   }, [customersData, bookingTarget.data?.id, bookingTarget.type]);
-
-  const articles = useMemo(() => {
-    const raw = Array.isArray(articlesRaw) ? articlesRaw : (articlesRaw?.articles ?? []);
-    return (raw || [])
-      .filter(a => a?.active)
-      .map(a => ({ ...a, price: num(a.price), unit: a.unit || 'Stück', stock: num(a.stock), minStock: num(a.minStock) }));
-  }, [articlesRaw]);
 
   // History Query
   const { data: historyData, refetch: refetchHistory, isFetching: historyLoading } = useQuery({
@@ -147,7 +139,7 @@ const Sales = () => {
 
   const quickSaleMutation = useMutation({
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); queryClient.invalidateQueries({ queryKey: ['articles', 'sales'] }); setCart([]); setShowChangeCalc(false); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); queryClient.invalidateQueries({ queryKey: ARTICLES_QUERY_KEY }); setCart([]); setShowChangeCalc(false); }
   });
 
   /* Logic & Actions */

@@ -62,6 +62,7 @@ import { useForm, Controller } from 'react-hook-form';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
+import { useArticles } from '../hooks/useArticles';
 
 /* ----------------------------- Helper Components ----------------------------- */
 
@@ -343,26 +344,13 @@ const Articles = () => {
 
 
   // --- Queries ---
-  const { data: articlesData, isLoading } = useQuery({
-    queryKey: ['articles', 'all'],
-    queryFn: async () => {
-      const response = await api.get(`${API_ENDPOINTS.ARTICLES}?includeInactive=true`);
-      if (response.data && Array.isArray(response.data.articles)) {
-        const processed = response.data.articles.map(a => ({
-          ...a,
-          price: Number.parseFloat(a.price) || 0,
-        }));
-        // Ensure sorting by order first
-        return { ...response.data, articles: processed.sort((a, b) => (a.order || 0) - (b.order || 0)) };
-      }
-      return response.data;
-    },
-  });
+  // zentraler Artikel-Hook (inkl. inaktive), bereits nach `order` sortiert
+  const { allArticles: articlesData, isLoading } = useArticles({ activeOnly: false });
 
   // Sync local articles when data changes (if not reordering)
   useEffect(() => {
-    if (articlesData?.articles && !hasUnsavedChanges) {
-      setLocalArticles(articlesData.articles);
+    if (articlesData && !hasUnsavedChanges) {
+      setLocalArticles(articlesData);
     }
   }, [articlesData, hasUnsavedChanges]);
 
