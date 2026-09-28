@@ -9,14 +9,21 @@ import {
   Box, Card, CardContent, Typography, Grid, Table, TableBody, TableCell, TableHead, TableRow,
   Button, TextField, Alert, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
   IconButton, Chip, Divider, Skeleton, Tooltip, useTheme, useMediaQuery,
+  ToggleButtonGroup, ToggleButton, Autocomplete, Snackbar,
 } from '@mui/material';
-import { Save, PictureAsPdf, Refresh, PointOfSale } from '@mui/icons-material';
+import {
+  Save, PictureAsPdf, Refresh, PointOfSale,
+  AccountBalance, ArrowUpward, ArrowDownward, AddCircleOutline, RemoveCircleOutline, Undo,
+} from '@mui/icons-material';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import api from '../services/api';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
+import { useAuth } from '../context/AuthContext';
 import QuantityStepper from '../components/common/QuantityStepper';
+import CashMovementList from '../components/finance/CashMovementList';
 
 export const CASH_COUNTS_QUERY_KEY = ['cash-counts'];
 
@@ -39,6 +46,10 @@ function ExpectedTable({ preview, isLoading, error }) {
   if (error) return <Alert severity="error">Soll konnte nicht geladen werden.</Alert>;
   if (!preview) return null;
   const c = preview.counts || {};
+  const bd = preview.bankDeposits || {};
+  const bw = preview.bankWithdrawals || {};
+  const oi = preview.otherIncome || {};
+  const oe = preview.otherExpense || {};
   const rows = [
     preview.hasBaseline
       ? { label: `Vorzählung vom ${fmtDateTime(preview.previousCount?.countedAt)}`, value: preview.baseline }
@@ -47,6 +58,10 @@ function ExpectedTable({ preview, isLoading, error }) {
     { label: `+ Stornos bar (${c.refunds ?? 0})`, value: preview.cashRefunds },
     { label: `+ Bar-Aufladungen (${c.topUps ?? 0})`, value: preview.cashTopUps },
     { label: `− Bar-Ausgaben (${c.expenses ?? 0})`, value: num(preview.cashExpenses) > 0 ? -num(preview.cashExpenses) : 0 },
+    { label: `− Einzahlungen auf Bank (${bd.count ?? 0})`, value: num(bd.total) > 0 ? -num(bd.total) : 0 },
+    { label: `+ Abhebungen von Bank (${bw.count ?? 0})`, value: num(bw.total) },
+    { label: `+ Sonstige Bareinnahmen (${oi.count ?? 0})`, value: num(oi.total) },
+    { label: `− Sonstige Barausgaben (${oe.count ?? 0})`, value: num(oe.total) > 0 ? -num(oe.total) : 0 },
   ];
   return (
     <>
@@ -121,17 +136,214 @@ function TotalBox({ label, value, color = 'text.primary', big = false, small = f
   );
 }
 
+/* ------------------------------ Kassenbewegung ------------------------------ */
+
+const MOVEMENT_TYPES = [
+  { value: 'DEPOSIT_TO_BANK',      label: 'Einzahlung auf Bank', short: 'Einzahlung', icon: <AccountBalance />, subIcon: <ArrowUpward />,    bank: true,  noteReq: false },
+  { value: 'WITHDRAWAL_FROM_BANK', label: 'Abhebung von Bank',   short: 'Abhebung',   icon: <AccountBalance />, subIcon: <ArrowDownward />,  bank: true,  noteReq: false },
+  { value: 'OTHER_INCOME',         label: 'Sonstige Einnahme',   short: 'Einnahme',   icon: <AddCircleOutline />, subIcon: null,             bank: false, noteReq: true  },
+  { value: 'OTHER_EXPENSE',        label: 'Sonstige Ausgabe',    short: 'Ausgabe',    icon: <RemoveCircleOutline />, subIcon: null,           bank: false, noteReq: true  },
+];
+
+const emptyForm = () => ({ type: 'DEPOSIT_TO_BANK', amountStr: '', occurredAt: new Date(), bankAccount: '', note: '' });
+
+function CashMovementForm({ onSuccess }) {
+  const [form, setForm] = useState(emptyForm());
+  const [formError, setFormError] = useState({});
+  const [apiError, setApiError] = useState(null);
+  const [snack, setSnack] = useState(false);
+  const qc = useQueryClient();
+
+  const typeMeta = MOVEMENT_TYPES.find((t) => t.value === form.type) || MOVEMENT_TYPES[0];
+
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ['cash-movements', 'bank-accounts'],
+    queryFn: async () => (await api.get('/cash-movements/bank-accounts')).data,
+    staleTime: 60 * 1000,
+  });
+  const bankAccountOptions = bankAccountsData?.bankAccounts || [];
+
+  const validate = () => {
+    const errs = {};
+    const amt = num(form.amountStr.replace(',', '.'));
+    if (!amt || amt <= 0) errs.amountStr = 'Betrag muss größer 0 sein.';
+    if (typeMeta.noteReq && form.note.trim().length < 3) errs.note = 'Pflicht bei sonstigen Einnahmen/Ausgaben – wofür? (mind. 3 Zeichen)';
+    return errs;
+  };
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const errs = validate();
+      if (Object.keys(errs).length > 0) { setFormError(errs); throw new Error('Validierungsfehler'); }
+      setFormError({});
+      const payload = {
+        type: form.type,
+        amount: num(form.amountStr.replace(',', '.')),
+        note: form.note.trim() || undefined,
+        occurredAt: form.occurredAt ? form.occurredAt.toISOString() : undefined,
+      };
+      if (typeMeta.bank && form.bankAccount.trim()) payload.bankAccount = form.bankAccount.trim();
+      return (await api.post('/cash-movements', payload)).data;
+    },
+    onSuccess: () => {
+      setApiError(null);
+      setForm(emptyForm());
+      setFormError({});
+      setSnack(true);
+      qc.invalidateQueries({ queryKey: ['cash-counts'] });
+      qc.invalidateQueries({ queryKey: ['cash-movements'] });
+      if (onSuccess) onSuccess();
+    },
+    onError: async (err) => {
+      if (err.message !== 'Validierungsfehler') {
+        setApiError(await apiErrorMessage(err, 'Kassenbewegung konnte nicht gebucht werden.'));
+      }
+    },
+  });
+
+  return (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>Kassenbewegung buchen</Typography>
+
+        {apiError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setApiError(null)}>{apiError}</Alert>}
+
+        {/* Typ-Auswahl */}
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Typ</Typography>
+        <ToggleButtonGroup
+          exclusive
+          value={form.type}
+          onChange={(e, v) => { if (v) setForm((f) => ({ ...f, type: v, bankAccount: '', note: '' })); }}
+          sx={{ flexWrap: 'wrap', gap: 0.5, mb: 2 }}
+        >
+          {MOVEMENT_TYPES.map((t) => (
+            <ToggleButton key={t.value} value={t.value} size="small" sx={{ gap: 0.5, fontSize: '0.8rem', lineHeight: 1.2, px: 1.5, py: 1 }}>
+              {t.icon}{t.subIcon}
+              <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{t.label}</Box>
+              <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>{t.short}</Box>
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+
+        <Grid container spacing={2}>
+          {/* Betrag */}
+          <Grid size={{ xs: 12, md: 6, lg: 12 }}>
+            <TextField
+              label="Betrag"
+              value={form.amountStr}
+              onChange={(e) => setForm((f) => ({ ...f, amountStr: e.target.value }))}
+              inputProps={{ inputMode: 'decimal' }}
+              slotProps={{ input: { endAdornment: <Typography color="text.secondary">€</Typography> } }}
+              fullWidth
+              error={!!formError.amountStr}
+              helperText={formError.amountStr || ' '}
+            />
+          </Grid>
+
+          {/* Datum/Uhrzeit */}
+          <Grid size={{ xs: 12, md: 6, lg: 12 }}>
+            <DateTimePicker
+              label="Datum/Uhrzeit"
+              value={form.occurredAt}
+              onChange={(d) => setForm((f) => ({ ...f, occurredAt: d }))}
+              disableFuture
+              slotProps={{ textField: { fullWidth: true } }}
+            />
+          </Grid>
+
+          {/* Konto (nur Bank-Typen) */}
+          {typeMeta.bank && (
+            <Grid size={{ xs: 12, md: 6, lg: 12 }}>
+              <Autocomplete
+                freeSolo
+                options={bankAccountOptions}
+                value={form.bankAccount}
+                onInputChange={(e, v) => setForm((f) => ({ ...f, bankAccount: v }))}
+                renderInput={(params) => (
+                  <TextField {...params} label="Bankkonto (optional)" fullWidth />
+                )}
+              />
+            </Grid>
+          )}
+
+          {/* Notiz */}
+          <Grid size={{ xs: 12 }}>
+            <TextField
+              label={typeMeta.noteReq ? 'Notiz (Pflicht)' : 'Notiz (optional)'}
+              value={form.note}
+              onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+              fullWidth
+              required={typeMeta.noteReq}
+              error={!!formError.note}
+              helperText={formError.note || (typeMeta.noteReq ? 'Pflicht bei sonstigen Einnahmen/Ausgaben – wofür?' : ' ')}
+            />
+          </Grid>
+        </Grid>
+
+        <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>
+          <Button
+            variant="contained"
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+            startIcon={<Save />}
+          >
+            {mutation.isPending ? 'Bucht…' : 'Buchen'}
+          </Button>
+        </Stack>
+
+        <Snackbar
+          open={snack}
+          autoHideDuration={3500}
+          onClose={() => setSnack(false)}
+          message="Kassenbewegung gebucht"
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------ Storno-Dialog ------------------------------ */
+
+function CancelMovementDialog({ movement, open, onClose, onConfirm, loading }) {
+  if (!movement) return null;
+  const meta = MOVEMENT_TYPES.find((t) => t.value === movement.type) || {};
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Kassenbewegung stornieren?</DialogTitle>
+      <DialogContent>
+        <Typography>
+          {meta.label || movement.type}: <strong>{money(movement.amount)}</strong>
+          {movement.note ? ` – ${movement.note}` : ''}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          Die Buchung wird als storniert markiert und fließt nicht mehr in die Soll-Herleitung ein.
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={loading}>Abbrechen</Button>
+        <Button variant="contained" color="error" onClick={onConfirm} disabled={loading} startIcon={<Undo />}>
+          {loading ? 'Storniert…' : 'Stornieren'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /* --------------------------------- Seite --------------------------------- */
 
 export default function CashCount() {
   const qc = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const { isAdmin, isAccountant } = useAuth();
+  const canCancel = isAdmin || isAccountant;
 
   const [counts, setCounts] = useState(emptyCounts);
   const [note, setNote] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
 
   const { data: preview, isLoading: previewLoading, error: previewError, refetch: refetchPreview, isFetching } = useQuery({
     queryKey: [...CASH_COUNTS_QUERY_KEY, 'preview'],
@@ -144,6 +356,23 @@ export default function CashCount() {
     queryFn: async () => (await api.get('/cash-counts', { params: { limit: 50 } })).data,
   });
   const cashCounts = listData?.cashCounts || [];
+
+  const { data: movementsData, isLoading: movementsLoading } = useQuery({
+    queryKey: ['cash-movements', 'recent'],
+    queryFn: async () => (await api.get('/cash-movements', { params: { limit: 50 } })).data,
+    staleTime: 0,
+  });
+  const movements = movementsData?.cashMovements || [];
+
+  const cancelMovement = useMutation({
+    mutationFn: async (id) => (await api.post(`/cash-movements/${id}/cancel`)).data,
+    onSuccess: () => {
+      setCancelTarget(null);
+      qc.invalidateQueries({ queryKey: ['cash-movements'] });
+      qc.invalidateQueries({ queryKey: CASH_COUNTS_QUERY_KEY });
+    },
+    onError: async (err) => setError(await apiErrorMessage(err, 'Storno fehlgeschlagen.')),
+  });
 
   const countedTotal = useMemo(
     () => roundCents(ALL_DENOMS.reduce((s, d) => s + (counts[String(d)] || 0) * d, 0)),
@@ -194,9 +423,10 @@ export default function CashCount() {
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
 
       <Grid container spacing={{ xs: 2, md: 3 }}>
-        {/* Soll-Herleitung */}
+        {/* Soll-Herleitung + Kassenbewegung buchen (linke Spalte) */}
         <Grid size={{ xs: 12, lg: 4 }}>
-          <Card sx={{ height: '100%' }}>
+          <Stack spacing={{ xs: 2, md: 3 }}>
+          <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Soll-Herleitung</Typography>
               <ExpectedTable preview={preview} isLoading={previewLoading} error={previewError} />
@@ -217,6 +447,8 @@ export default function CashCount() {
               )}
             </CardContent>
           </Card>
+          <CashMovementForm />
+          </Stack>
         </Grid>
 
         {/* Stückelung */}
@@ -266,6 +498,20 @@ export default function CashCount() {
                   {save.isPending ? 'Speichert…' : 'Zählung speichern'}
                 </Button>
               </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Kassenbewegungen Liste */}
+        <Grid size={{ xs: 12 }}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Kassenbewegungen (letzte 50)</Typography>
+              <CashMovementList
+                movements={movements}
+                loading={movementsLoading}
+                onCancel={canCancel ? (m) => setCancelTarget(m) : undefined}
+              />
             </CardContent>
           </Card>
         </Grid>
@@ -333,6 +579,15 @@ export default function CashCount() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Storno-Dialog */}
+      <CancelMovementDialog
+        movement={cancelTarget}
+        open={!!cancelTarget}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => cancelMovement.mutate(cancelTarget.id)}
+        loading={cancelMovement.isPending}
+      />
 
       {/* Ergebnisdialog */}
       <Dialog open={!!result} onClose={resetForm} maxWidth="xs" fullWidth>

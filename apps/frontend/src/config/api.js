@@ -30,7 +30,11 @@ export const API_ENDPOINTS = {
   HIGHSCORE_GOALS_PROGRESS: '/highscore/goals-progress',
 
   // Exports
-  EXPORTS: '/exports'
+  EXPORTS: '/exports',
+
+  // Cash Movements
+  CASH_MOVEMENTS: '/cash-movements',
+  CASH_MOVEMENTS_BANK_ACCOUNTS: '/cash-movements/bank-accounts',
 };
 
 export { API_BASE_URL, WS_URL };

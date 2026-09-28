@@ -12,6 +12,7 @@ import {
 } from '@mui/material';
 import {
   Download, TrendingUp, TrendingDown, AccountBalance, Add, PointOfSale, PictureAsPdf, Lock,
+  ArrowUpward, ArrowDownward, AddCircleOutline, RemoveCircleOutline,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -21,6 +22,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import api from '../services/api';
 import KPICard from '../components/common/KPICard';
 import CloseYearStepper from '../components/finance/CloseYearStepper';
+import CashMovementList from '../components/finance/CashMovementList';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
 
@@ -261,9 +263,21 @@ function EurSection() {
 
 /* ------------------------------- Kasse & Bank ------------------------------- */
 
+const MOVEMENT_TYPE_TILES = [
+  { type: 'DEPOSIT_TO_BANK',      label: 'Einzahlungen auf Bank', icon: ArrowUpward,          color: 'info.main' },
+  { type: 'WITHDRAWAL_FROM_BANK', label: 'Abhebungen von Bank',   icon: ArrowDownward,        color: 'primary.main' },
+  { type: 'OTHER_INCOME',         label: 'Sonstige Einnahmen',    icon: AddCircleOutline,     color: 'success.main' },
+  { type: 'OTHER_EXPENSE',        label: 'Sonstige Ausgaben',     icon: RemoveCircleOutline,  color: 'error.main' },
+];
+
 function CashBankSection({ fiscalYears }) {
   const navigate = useNavigate();
   const [error, setError] = useState(null);
+  const [movRange, setMovRange] = useState({
+    from: format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd'),
+    to: format(new Date(), 'yyyy-MM-dd'),
+  });
+
   const { data, isLoading } = useQuery({
     queryKey: ['cash-counts', 'latest'],
     queryFn: async () => (await api.get('/cash-counts/latest')).data,
@@ -271,6 +285,22 @@ function CashBankSection({ fiscalYears }) {
   const cc = data?.cashCount;
   const lastClosed = (fiscalYears || []).filter((f) => f.closed && f.report).sort((a, b) => new Date(b.endDate) - new Date(a.endDate))[0];
   const banks = lastClosed?.report?.bankAccountsJson || [];
+
+  const { data: movData, isLoading: movLoading } = useQuery({
+    queryKey: ['cash-movements', 'range', movRange.from, movRange.to],
+    queryFn: async () => (await api.get('/cash-movements', { params: { from: movRange.from, to: movRange.to, limit: 500 } })).data,
+    staleTime: 0,
+  });
+  const movements = useMemo(() => movData?.cashMovements || [], [movData]);
+
+  // Summen je Typ (nur nicht stornierte)
+  const movSums = useMemo(() => {
+    const active = movements.filter((m) => !m.cancelled);
+    return MOVEMENT_TYPE_TILES.map((t) => {
+      const items = active.filter((m) => m.type === t.type);
+      return { ...t, total: items.reduce((s, m) => s + num(m.amount), 0), count: items.length };
+    });
+  }, [movements]);
 
   const pdf = async () => {
     try { await downloadFile(`/cash-counts/${cc.id}/pdf`, { filename: 'Kassenzaehlung.pdf' }); }
@@ -280,6 +310,8 @@ function CashBankSection({ fiscalYears }) {
   return (
     <Grid container spacing={3}>
       {error && <Grid size={{ xs: 12 }}><Alert severity="error" onClose={() => setError(null)}>{error}</Alert></Grid>}
+
+      {/* Letzte Kassenzählung */}
       <Grid size={{ xs: 12, md: 6 }}>
         <SectionCard
           title="Letzte Kassenzählung"
@@ -301,6 +333,8 @@ function CashBankSection({ fiscalYears }) {
           )}
         </SectionCard>
       </Grid>
+
+      {/* Bankkonten */}
       <Grid size={{ xs: 12, md: 6 }}>
         <SectionCard title="Bankkonten">
           {banks.length === 0 ? (
@@ -316,6 +350,51 @@ function CashBankSection({ fiscalYears }) {
             </>
           )}
         </SectionCard>
+      </Grid>
+
+      {/* Kassenbewegungen */}
+      <Grid size={{ xs: 12 }}>
+        <Card>
+          <CardContent>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} sx={{ mb: 2 }}>
+              <Typography variant="h6" sx={{ flex: 1 }}>Kassenbewegungen</Typography>
+              <DatePicker
+                label="Von"
+                value={movRange.from ? new Date(movRange.from) : null}
+                onChange={(d) => d && setMovRange((r) => ({ ...r, from: format(d, 'yyyy-MM-dd') }))}
+                slotProps={{ textField: { size: 'small' } }}
+              />
+              <DatePicker
+                label="Bis"
+                value={movRange.to ? new Date(movRange.to) : null}
+                onChange={(d) => d && setMovRange((r) => ({ ...r, to: format(d, 'yyyy-MM-dd') }))}
+                slotProps={{ textField: { size: 'small' } }}
+              />
+            </Stack>
+
+            {/* Summen-Kacheln */}
+            <Grid container spacing={2} sx={{ mb: 2 }}>
+              {movSums.map((t) => {
+                const Icon = t.icon;
+                return (
+                  <Grid key={t.type} size={{ xs: 12, sm: 6, md: 3 }}>
+                    <Paper sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, height: '100%' }}>
+                      <Icon sx={{ color: t.color, fontSize: 28 }} />
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, display: 'block', overflowWrap: 'anywhere' }}>{t.label}</Typography>
+                        <Typography variant="h6" sx={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{money(t.total)}</Typography>
+                        <Typography variant="caption" color="text.secondary">{t.count} Buchung{t.count !== 1 ? 'en' : ''}</Typography>
+                      </Box>
+                    </Paper>
+                  </Grid>
+                );
+              })}
+            </Grid>
+
+            {/* Liste (read-only) */}
+            <CashMovementList movements={movements} loading={movLoading} dense />
+          </CardContent>
+        </Card>
       </Grid>
     </Grid>
   );
