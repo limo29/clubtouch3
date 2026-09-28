@@ -21,7 +21,6 @@ class ExportService {
       minimumFractionDigits: 2, maximumFractionDigits: 2
     });
     this.dateFmt = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    this.dateTimeFmt = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
   /* ========= THEME & UTIL ========= */
@@ -47,14 +46,17 @@ class ExportService {
     const x = d instanceof Date ? d : parseLocalDate(d);
     return x && !Number.isNaN(x.getTime()) ? this.dateFmt.format(x) : '—';
   };
+  /** dd.MM.yyyy HH:mm (lokale Zeit, ohne Komma – so liest es auch Excel-DE) */
   _fmtDateTime = (d) => {
     if (!d) return '—';
     const x = new Date(d);
-    return Number.isNaN(x.getTime()) ? '—' : this.dateTimeFmt.format(x);
+    if (Number.isNaN(x.getTime())) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(x.getDate())}.${p(x.getMonth() + 1)}.${x.getFullYear()} ${p(x.getHours())}:${p(x.getMinutes())}`;
   };
   /** Zahl mit Komma für CSV (Excel-DE) */
   _csvNum = (n, digits = 2) => (n === null || n === undefined || n === '') ? '' : Number(n).toFixed(digits).replace('.', ',');
-  _csvDateTime = (d) => d ? this.dateTimeFmt.format(new Date(d)) : '';
+  _csvDateTime = (d) => d ? this._fmtDateTime(d) : '';
   _paymentLabel(pm) {
     return ({ CASH: 'Bar', ACCOUNT: 'Kundenkonto', INVOICE: 'Rechnung', TRANSFER: 'Überweisung' })[pm] || (pm || '—');
   }
@@ -260,7 +262,7 @@ class ExportService {
   }
 
   /** Unterschriftenzeilen nebeneinander (max. 3 pro Reihe), jeweils mit Ort/Datum-Zeile. */
-  _signatureBlock(doc, theme, labels, headerInfo) {
+  _signatureBlock(doc, theme, labels, headerInfo, { dateLine = true } = {}) {
     if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
     const left = theme.page.margin;
     const usable = doc.page.width - left * 2;
@@ -282,10 +284,12 @@ class ExportService {
         doc.moveTo(x, topY).lineTo(x + colW, topY).lineWidth(0.7).strokeColor(theme.color.text).stroke();
         doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
           .text(label, x, topY + 4, { width: colW, lineBreak: false });
-        doc.text('Ort, Datum', x, topY + 30, { width: colW, lineBreak: false });
-        doc.moveTo(x, topY + 28).lineTo(x + colW, topY + 28).lineWidth(0.4).strokeColor(theme.color.border).stroke();
+        if (dateLine) {
+          doc.text('Ort, Datum', x, topY + 30, { width: colW, lineBreak: false });
+          doc.moveTo(x, topY + 28).lineTo(x + colW, topY + 28).lineWidth(0.4).strokeColor(theme.color.border).stroke();
+        }
       });
-      doc.y = topY + 50;
+      doc.y = topY + (dateLine ? 50 : 26);
     });
     doc.x = left;
     doc.fillColor(theme.color.text).font(theme.font.regular).fontSize(10);
@@ -389,7 +393,7 @@ class ExportService {
     doc.fillColor(theme.color.text);
   }
 
-  /* ========= CSV ========= */
+  /* ========= CSV (Excel-DE: Semikolon, Komma-Dezimal, dd.MM.yyyy HH:mm) ========= */
   async exportTransactionsCSV(filters = {}) {
     const { startDate, endDate, customerId, paymentMethod } = filters;
     const where = { cancelled: false };
@@ -407,22 +411,24 @@ class ExportService {
       orderBy: { createdAt: 'asc' }
     });
 
+    const typeLabel = { SALE: 'Verkauf', REFUND: 'Erstattung', EXPIRED: 'Abgelaufen', OWNER_USE: 'Eigenverbrauch' };
     const rows = [];
     transactions.forEach(t => t.items.forEach(item => rows.push({
       Transaktions_ID: t.id,
-      Datum: t.createdAt.toLocaleString('de-DE'),
-      Kunde: t.customer?.name || 'Bar-Zahlung',
+      Datum: this._csvDateTime(t.createdAt),
+      Typ: typeLabel[t.type] || t.type,
+      Kunde: t.customer?.name || (t.paymentMethod === 'CASH' ? 'Bar-Zahlung' : '—'),
       Artikel: item.article.name,
       Kategorie: item.article.category,
-      Menge: item.quantity,
+      Menge: this._csvNum(item.quantity, 0),
       Einheit: item.article.unit,
-      Einzelpreis: item.pricePerUnit,
-      Gesamtpreis: item.totalPrice,
-      Zahlungsart: t.paymentMethod === 'CASH' ? 'Bar' : 'Kundenkonto',
+      Einzelpreis: this._csvNum(item.pricePerUnit),
+      Gesamtpreis: this._csvNum(item.totalPrice),
+      Zahlungsart: this._paymentLabel(t.paymentMethod),
       Kassierer: t.user.name
     })));
 
-    const fields = ['Transaktions_ID', 'Datum', 'Kunde', 'Artikel', 'Kategorie', 'Menge', 'Einheit', 'Einzelpreis', 'Gesamtpreis', 'Zahlungsart', 'Kassierer'];
+    const fields = ['Transaktions_ID', 'Datum', 'Typ', 'Kunde', 'Artikel', 'Kategorie', 'Menge', 'Einheit', 'Einzelpreis', 'Gesamtpreis', 'Zahlungsart', 'Kassierer'];
     const csv = parse(rows, { fields, delimiter: ';' });
     return { data: csv, filename: `transaktionen_${new Date().toISOString().split('T')[0]}.csv`, mimeType: 'text/csv' };
   }
@@ -430,8 +436,8 @@ class ExportService {
   async exportInventoryCSV() {
     const articles = await prisma.article.findMany({ orderBy: [{ category: 'asc' }, { name: 'asc' }] });
     const data = articles.map(a => ({
-      ID: a.id, Name: a.name, Kategorie: a.category, Preis: a.price, Bestand: a.stock,
-      Mindestbestand: a.minStock, Einheit: a.unit, Aktiv: a.active ? 'Ja' : 'Nein',
+      ID: a.id, Name: a.name, Kategorie: a.category, Preis: this._csvNum(a.price), Bestand: this._csvNum(a.stock, 0),
+      Mindestbestand: this._csvNum(a.minStock, 0), Einheit: a.unit, Aktiv: a.active ? 'Ja' : 'Nein',
       'Zählt für Highscore': a.countsForHighscore ? 'Ja' : 'Nein'
     }));
     const fields = ['ID', 'Name', 'Kategorie', 'Preis', 'Bestand', 'Mindestbestand', 'Einheit', 'Aktiv', 'Zählt für Highscore'];
@@ -445,32 +451,79 @@ class ExportService {
     });
 
     const data = customers.map(c => ({
-      ID: c.id, Name: c.name, Spitzname: c.nickname || '', Guthaben: c.balance,
-      'Anzahl Transaktionen': c._count.transactions, 'Erstellt am': c.createdAt.toLocaleString('de-DE')
+      ID: c.id, Name: c.name, Spitzname: c.nickname || '', Guthaben: this._csvNum(c.balance),
+      'Anzahl Transaktionen': c._count.transactions, 'Erstellt am': this._csvDateTime(c.createdAt)
     }));
     const fields = ['ID', 'Name', 'Spitzname', 'Guthaben', 'Anzahl Transaktionen', 'Erstellt am'];
     const csv = parse(data, { fields, delimiter: ';' });
     return { data: csv, filename: `kunden_${new Date().toISOString().split('T')[0]}.csv`, mimeType: 'text/csv' };
   }
 
-  /* ========= PDF: Tages-/Monats-/EÜR ========= */
-  async exportDailySummaryPDF(date = new Date(), startHour = 6) {
+  /* ========= PDF: Tagesabschluss ========= */
+  async exportDailySummaryPDF(date = new Date(), startHour = 6, { createdBy } = {}) {
     const summary = await this.getDailySummaryData(date, startHour);
+    const sm = summary.summary || {};
+    const hh = String(startHour).padStart(2, '0');
+    const timeOf = (d) => new Date(d).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+
     return new Promise((resolve, reject) => {
       try {
-        const { doc, done, theme } = this._createDocWithBuffer();
-        const headerInfo = { title: `Tagesabschluss – ${theme.brandName}`, subtitle: `Geschäftstag: ${parseLocalDate(summary.date).toLocaleDateString('de-DE')} (${String(startHour).padStart(2, '0')}:00 bis ${String(startHour).padStart(2, '0')}:00 Uhr des Folgetags)` };
+        const headerInfo = {
+          reportName: 'Tagesabschluss',
+          title: `Tagesabschluss – ${this.getTheme().brandName}`,
+          subtitle: `Geschäftstag ${this._fmtDate(summary.date)} (${hh}:00 Uhr bis ${hh}:00 Uhr des Folgetags)`,
+          createdBy
+        };
+        const { doc, done, theme } = this._createDocWithBuffer(headerInfo);
         this._decoratePage(doc, theme, headerInfo);
 
-        this._section(doc, theme, 'Zusammenfassung');
-        doc.fontSize(11)
-          .text(`Gesamtumsatz: ${this._fmtEUR(summary.summary.totalRevenue)}`)
-          .text(`Anzahl Transaktionen: ${summary.summary.totalTransactions}`)
-          .text(`Bar-Umsatz: ${this._fmtEUR(summary.summary.cashRevenue)} (${summary.summary.cashTransactions} Transaktionen)`)
-          .text(`Kundenkonto-Umsatz: ${this._fmtEUR(summary.summary.accountRevenue)} (${summary.summary.accountTransactions} Transaktionen)`)
-          .text(`Stornierte Transaktionen: ${summary.summary.cancelledTransactions}`);
+        this._section(doc, theme, 'Zusammenfassung', headerInfo);
+        this._kvList(doc, theme, [
+          { label: `Bar-Umsatz (${sm.cashTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.cashRevenue) },
+          { label: `Kundenkonto-Umsatz (${sm.accountTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.accountRevenue) },
+          { label: `Gesamtumsatz (${sm.totalTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.totalRevenue), bold: true, color: theme.color.success, rule: true },
+          { spacer: true },
+          { label: `Stornierte Verkäufe (${sm.cancelledTransactions || 0})`, value: this._fmtEUR(sm.cancelledRevenue), color: theme.color.danger },
+          { spacer: true },
+          { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(sm.topUpsCash) },
+          { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(sm.topUpsTransfer) },
+          { label: `Aufladungen gesamt (${sm.topUpsCount || 0})`, value: this._fmtEUR(sm.topUpsTotal), bold: true },
+          { spacer: true },
+          { label: 'Bargeld-Zufluss des Tages (Bar-Umsatz + Bar-Aufladungen)', value: this._fmtEUR(Number(sm.cashRevenue || 0) + Number(sm.topUpsCash || 0)), bold: true, rule: true }
+        ], { headerInfo });
 
-        this._section(doc, theme, 'Top 10 Artikel');
+        this._section(doc, theme, 'Aufladungen (Kundenkonten)', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Uhrzeit', width: 70, render: r => timeOf(r.createdAt) },
+            { header: 'Kunde', width: 220, render: r => r.customer },
+            { header: 'Art', width: 100, render: r => r.method === 'CASH' ? 'Bar' : 'Überweisung' },
+            { header: 'Referenz', width: 110, render: r => r.reference || '' },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
+          ],
+          rows: summary.topUps || [],
+          sumRow: ['Summe', '', '', '', this._fmtEUR(sm.topUpsTotal)],
+          emptyHint: 'Keine Aufladungen an diesem Geschäftstag.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Stornos', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Uhrzeit', width: 70, render: r => timeOf(r.createdAt) },
+            { header: 'Original vom', width: 120, render: r => r.originalCreatedAt ? this._fmtDateTime(r.originalCreatedAt) : '—' },
+            { header: 'Kunde', width: 150, render: r => r.customer || 'Bar-Zahlung' },
+            { header: 'Zahlungsart', width: 90, render: r => this._paymentLabel(r.paymentMethod) },
+            { header: 'Kassierer/in', width: 110, render: r => r.cashier },
+            { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.danger }
+          ],
+          rows: summary.cancellations || [],
+          sumRow: ['Summe', '', '', '', '', this._fmtEUR((summary.cancellations || []).reduce((a, r) => a + Number(r.amount || 0), 0))],
+          emptyHint: 'Keine Stornos an diesem Geschäftstag.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Top 10 Artikel', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: '#', width: 40, align: 'right', render: r => String(r.__idx + 1) },
@@ -483,11 +536,11 @@ class ExportService {
           headerInfo
         });
 
-        this._section(doc, theme, 'Umsatzverteilung nach Stunden');
+        this._section(doc, theme, 'Umsatzverteilung nach Stunden', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Stunde', width: 120, render: r => `${r.hour}:00 – ${r.hour}:59` },
-            { header: 'Transaktionen', width: 140, align: 'right', render: r => String(r.transactions) },
+            { header: 'Stunde', width: 120, render: r => `${String(r.hour).padStart(2, '0')}:00 – ${String(r.hour).padStart(2, '0')}:59` },
+            { header: 'Verkäufe', width: 140, align: 'right', render: r => String(r.transactions) },
             { header: 'Umsatz', width: 200, align: 'right', render: r => this._fmtEUR(r.revenue), color: () => theme.color.success }
           ],
           rows: summary.hourlyDistribution || [],
@@ -495,32 +548,49 @@ class ExportService {
           headerInfo
         });
 
-        // Fußzeilen jetzt schreiben, dann enden
-        doc.end();
+        this._section(doc, theme, 'Transaktionen des Tages', headerInfo);
+        const txType = (t) => t.type === 'REFUND' ? 'Storno' : (t.cancelled ? 'Verkauf (storniert)' : 'Verkauf');
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Uhrzeit', width: 60, render: r => timeOf(r.createdAt) },
+            { header: 'Vorgang', width: 110, render: r => txType(r) },
+            { header: 'Kunde', width: 150, render: r => r.customer || 'Bar-Zahlung' },
+            { header: 'Zahlung', width: 90, render: r => this._paymentLabel(r.paymentMethod) },
+            { header: 'Kassierer/in', width: 120, render: r => r.cashier },
+            { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.amount),
+              color: r => r.type === 'REFUND' || r.cancelled ? theme.color.danger : theme.color.text }
+          ],
+          rows: summary.transactions || [],
+          emptyHint: 'Keine Transaktionen an diesem Geschäftstag.',
+          headerInfo
+        });
+
+        this._signatureBlock(doc, theme, ['Kassierer/in (Unterschrift)', 'Datum'], headerInfo, { dateLine: false });
+
+        this._finishDoc(doc, theme, headerInfo);
         done.then(pdf => resolve({ data: pdf, filename: `tagesabschluss_${summary.date}.pdf`, mimeType: 'application/pdf' }));
       } catch (e) { reject(e); }
     });
   }
 
-  async exportMonthlySummaryPDF(year, month) {
+  /* ========= PDF: Monatsbericht ========= */
+  async exportMonthlySummaryPDF(year, month, { createdBy } = {}) {
     const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
+    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
     // Nur echte Verkäufe: REFUND (negativ), EXPIRED/OWNER_USE (0 €) gehören nicht in den Umsatz
-    const [transactions, topCustomers, categoryStats] = await Promise.all([
+    const [transactions, cashAgg, accountAgg, categoryStats, topArticles, topUps, expenseAgg] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', createdAt: { gte: startDate, lte: endDate }, cancelled: false },
         _sum: { totalAmount: true }, _count: true
       }),
-      prisma.$queryRaw`
-        SELECT c.name, COUNT(DISTINCT t.id) as transactions, SUM(t."totalAmount") as total_spent
-        FROM "Customer" c
-        JOIN "Transaction" t ON t."customerId" = c.id
-        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate}
-          AND t.cancelled = false AND t.type = 'SALE'
-        GROUP BY c.id, c.name
-        ORDER BY total_spent DESC
-        LIMIT 10
-      `,
+      prisma.transaction.aggregate({
+        where: { type: 'SALE', paymentMethod: 'CASH', createdAt: { gte: startDate, lte: endDate }, cancelled: false },
+        _sum: { totalAmount: true }, _count: true
+      }),
+      prisma.transaction.aggregate({
+        where: { type: 'SALE', paymentMethod: 'ACCOUNT', createdAt: { gte: startDate, lte: endDate }, cancelled: false },
+        _sum: { totalAmount: true }, _count: true
+      }),
       prisma.$queryRaw`
         SELECT a.category, SUM(ti.quantity) as items_sold, SUM(ti."totalPrice") as revenue
         FROM "TransactionItem" ti
@@ -530,49 +600,86 @@ class ExportService {
           AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY a.category
         ORDER BY revenue DESC
-      `
+      `,
+      prisma.$queryRaw`
+        SELECT a.name, a.unit, SUM(ti.quantity) as items_sold, SUM(ti."totalPrice") as revenue
+        FROM "TransactionItem" ti
+        JOIN "Transaction" t ON ti."transactionId" = t.id
+        JOIN "Article" a ON ti."articleId" = a.id
+        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate}
+          AND t.cancelled = false AND t.type = 'SALE'
+        GROUP BY a.id, a.name, a.unit
+        ORDER BY revenue DESC
+        LIMIT 10
+      `,
+      prisma.accountTopUp.groupBy({
+        by: ['method'],
+        where: { createdAt: { gte: startDate, lte: endDate } },
+        _sum: { amount: true }, _count: true
+      }),
+      prisma.purchaseDocument.aggregate({
+        where: { type: 'RECHNUNG', paid: true, documentDate: { gte: startDate, lte: endDate } },
+        _sum: { totalAmount: true }, _count: true
+      })
     ]);
+
+    const topUpCash = Number(topUps.find(t => t.method === 'CASH')?._sum.amount || 0);
+    const topUpTransfer = Number(topUps.find(t => t.method === 'TRANSFER')?._sum.amount || 0);
 
     return new Promise((resolve, reject) => {
       try {
-        const { doc, done, theme } = this._createDocWithBuffer();
-        const headerInfo = { title: `Monatsbericht – ${theme.brandName}`, subtitle: `${this.getMonthName(month)} ${year}` };
+        const headerInfo = {
+          reportName: 'Monatsbericht',
+          title: `Monatsbericht – ${this.getTheme().brandName}`,
+          subtitle: `${this.getMonthName(month)} ${year} (${this._fmtDate(startDate)} – ${this._fmtDate(endDate)})`,
+          createdBy
+        };
+        const { doc, done, theme } = this._createDocWithBuffer(headerInfo);
         this._decoratePage(doc, theme, headerInfo);
 
-        this._section(doc, theme, 'Zusammenfassung');
-        const total = transactions._sum.totalAmount || 0;
+        const total = Number(transactions._sum.totalAmount || 0);
         const count = transactions._count || 0;
-        doc.fontSize(11)
-          .text(`Gesamtumsatz: ${this._fmtEUR(total)}`)
-          .text(`Anzahl Transaktionen: ${count}`)
-          .text(`Durchschnitt pro Transaktion: ${this._fmtEUR(count ? total / count : 0)}`);
+        this._section(doc, theme, 'Zusammenfassung', headerInfo);
+        this._kvList(doc, theme, [
+          { label: `Bar-Umsatz (${cashAgg._count || 0} Verkäufe)`, value: this._fmtEUR(cashAgg._sum.totalAmount) },
+          { label: `Kundenkonto-Umsatz (${accountAgg._count || 0} Verkäufe)`, value: this._fmtEUR(accountAgg._sum.totalAmount) },
+          { label: `Gesamtumsatz (${count} Verkäufe)`, value: this._fmtEUR(total), bold: true, color: theme.color.success, rule: true },
+          { label: 'Durchschnitt pro Verkauf', value: this._fmtEUR(count ? total / count : 0) },
+          { spacer: true },
+          { label: `Bezahlte Eingangsrechnungen (${expenseAgg._count || 0} Belege)`, value: this._fmtEUR(expenseAgg._sum.totalAmount), color: theme.color.danger },
+          { spacer: true },
+          { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(topUpCash) },
+          { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(topUpTransfer) },
+          { label: 'Aufladungen gesamt (kein Umsatz, Verbindlichkeit)', value: this._fmtEUR(topUpCash + topUpTransfer), bold: true }
+        ], { headerInfo });
 
-        this._section(doc, theme, 'Top 10 Kunden');
-        this._table(doc, theme, {
-          columns: [
-            { header: '#', width: 40, align: 'right', render: r => String(r.__idx + 1) },
-            { header: 'Name', width: 260, render: r => r.name },
-            { header: 'Käufe', width: 120, align: 'right', render: r => String(r.transactions) },
-            { header: 'Umsatz', width: 150, align: 'right', render: r => this._fmtEUR(r.total_spent), color: () => theme.color.success }
-          ],
-          rows: (topCustomers || []).map((r, i) => ({ ...r, __idx: i })),
-          emptyHint: 'Keine Kundendaten vorhanden.',
-          headerInfo
-        });
-
-        this._section(doc, theme, 'Umsatz nach Kategorien');
+        this._section(doc, theme, 'Umsatz nach Kategorien', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Kategorie', width: 320, render: r => r.category },
-            { header: 'Artikel', width: 120, align: 'right', render: r => String(r.items_sold) },
+            { header: 'Artikel', width: 120, align: 'right', render: r => String(Number(r.items_sold || 0)) },
             { header: 'Umsatz', width: 160, align: 'right', render: r => this._fmtEUR(r.revenue), color: () => theme.color.success }
           ],
           rows: categoryStats || [],
-          emptyHint: 'Keine Kategorien vorhanden.',
+          sumRow: ['Summe', String((categoryStats || []).reduce((a, r) => a + Number(r.items_sold || 0), 0)), this._fmtEUR((categoryStats || []).reduce((a, r) => a + Number(r.revenue || 0), 0))],
+          emptyHint: 'Keine Verkäufe in diesem Monat.',
           headerInfo
         });
 
-        doc.end();
+        this._section(doc, theme, 'Top 10 Artikel', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: '#', width: 40, align: 'right', render: r => String(r.__idx + 1) },
+            { header: 'Artikel', width: 300, render: r => r.name },
+            { header: 'Menge', width: 100, align: 'right', render: r => this._fmtQty(r.items_sold, r.unit) },
+            { header: 'Umsatz', width: 120, align: 'right', render: r => this._fmtEUR(r.revenue), color: () => theme.color.success }
+          ],
+          rows: (topArticles || []).map((r, i) => ({ ...r, __idx: i })),
+          emptyHint: 'Keine Verkäufe in diesem Monat.',
+          headerInfo
+        });
+
+        this._finishDoc(doc, theme, headerInfo);
         done.then(pdf => resolve({
           data: pdf, filename: `monatsbericht_${year}_${String(month).padStart(2, '0')}.pdf`, mimeType: 'application/pdf'
         }));
@@ -580,11 +687,12 @@ class ExportService {
     });
   }
 
+  /* ========= PDF: Kontoauszug ========= */
   /**
    * Kontoauszug eines Kunden (Aufladungen, Einkäufe, Stornos) mit laufendem Saldo.
    * Datenbasis ist customerService.getAccountStatement, damit UI und PDF dieselben Zahlen zeigen.
    */
-  async exportCustomerStatementPDF(customerId, start, end) {
+  async exportCustomerStatementPDF(customerId, start, end, { createdBy } = {}) {
     const statement = await customerService.getAccountStatement(customerId, start, end);
     const { customer, movements = [], summary = {} } = statement;
 
@@ -598,25 +706,29 @@ class ExportService {
 
     return new Promise((resolve, reject) => {
       try {
-        const { doc, done, theme } = this._createDocWithBuffer();
         const headerInfo = {
-          title: `Kontoauszug – ${theme.brandName}`,
-          subtitle: `${displayName} · ${this._fmtDate(start)} – ${this._fmtDate(end)}`
+          reportName: 'Kontoauszug',
+          title: `Kontoauszug – ${this.getTheme().brandName}`,
+          subtitle: `${displayName} · Zeitraum ${this._fmtDate(start)} – ${this._fmtDate(end)}`,
+          createdBy
         };
+        const { doc, done, theme } = this._createDocWithBuffer(headerInfo);
         this._decoratePage(doc, theme, headerInfo);
 
-        this._section(doc, theme, 'Zusammenfassung');
-        doc.fontSize(11)
-          .text(`Aktueller Kontostand: ${this._fmtEUR(customer.currentBalance)}`)
-          .text(`Aufladungen im Zeitraum: ${this._fmtEUR(summary.totalTopUps)}`)
-          .text(`Einkäufe im Zeitraum: ${this._fmtEUR(summary.totalSpent)} (${summary.transactionCount || 0} Buchungen)`);
+        this._section(doc, theme, 'Zusammenfassung', headerInfo);
+        this._kvList(doc, theme, [
+          { label: 'Aufladungen im Zeitraum', value: this._fmtEUR(summary.totalTopUps), color: theme.color.success },
+          { label: `Einkäufe im Zeitraum (${summary.transactionCount || 0} Buchungen)`, value: this._fmtEUR(summary.totalSpent), color: theme.color.danger },
+          { label: 'Aktueller Kontostand', value: this._fmtEUR(customer.currentBalance), bold: true, rule: true,
+            color: Number(customer.currentBalance) < 0 ? theme.color.danger : theme.color.text }
+        ], { headerInfo });
 
-        this._section(doc, theme, 'Kontobewegungen');
+        this._section(doc, theme, 'Kontobewegungen', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Datum', width: 130, render: r => new Date(r.date).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) },
-            { header: 'Vorgang', width: 90, render: r => typeLabel(r) },
-            { header: 'Beschreibung', width: 200, render: r => r.description || '' },
+            { header: 'Datum', width: 110, render: r => this._fmtDateTime(r.date) },
+            { header: 'Vorgang', width: 80, render: r => typeLabel(r) },
+            { header: 'Beschreibung', width: 220, render: r => r.description || '' },
             {
               header: 'Betrag', width: 90, align: 'right',
               render: r => this._fmtEUR(r.amount),
@@ -634,7 +746,7 @@ class ExportService {
           headerInfo
         });
 
-        doc.end();
+        this._finishDoc(doc, theme, headerInfo);
         const fmtFile = (d) => {
           const x = new Date(d); const p = (n) => String(n).padStart(2, '0');
           return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
@@ -648,117 +760,264 @@ class ExportService {
     });
   }
 
-  async exportEURPDF(startDate, endDate) {
+  /* ========= PDF: EÜR (Datenbasis ausschließlich accountingService.getProfitLoss) ========= */
+  async exportEURPDF(startDate, endDate, { createdBy } = {}) {
     const eur = await accountingService.getProfitLoss(startDate, endDate);
-    const start = parseLocalDate(startDate);
-    const end = endOfLocalDay(endDate);
-
-    const [soldArticles, paidInvoices, expenseDocs] = await Promise.all([
-      prisma.$queryRaw`
-        SELECT a.name as article, a.category as category, SUM(ti.quantity) as quantity, SUM(ti."totalPrice") as amount
-        FROM "TransactionItem" ti
-        JOIN "Transaction" t ON ti."transactionId" = t.id
-        JOIN "Article" a ON ti."articleId" = a.id
-        WHERE t."createdAt" >= ${start} AND t."createdAt" <= ${end}
-          AND t.cancelled = false AND t.type = 'SALE'
-        GROUP BY a.id, a.name, a.category
-        ORDER BY amount DESC
-      `,
-      prisma.invoice.findMany({
-        where: { status: 'PAID', paidAt: { gte: start, lte: end } },
-        orderBy: { paidAt: 'asc' },
-        select: { invoiceNumber: true, customerName: true, description: true, paidAt: true, totalAmount: true }
-      }),
-      prisma.purchaseDocument.findMany({
-        where: { type: 'RECHNUNG', paid: true, documentDate: { gte: start, lte: end } },
-        orderBy: { documentDate: 'asc' },
-        select: { documentNumber: true, supplier: true, documentDate: true, totalAmount: true }
-      })
-    ]);
+    const d = eur.details;
+    const byType = d.incomeByType || {};
+    const sum = (arr, sel) => (arr || []).reduce((a, r) => a + Number(sel(r) || 0), 0);
 
     return new Promise((resolve, reject) => {
       try {
-        const { doc, done, theme } = this._createDocWithBuffer();
-        const headerInfo = { title: `Einnahmen-Überschuss-Rechnung – ${theme.brandName}`, subtitle: `Zeitraum: ${startDate} – ${endDate}` };
+        const headerInfo = {
+          reportName: 'EÜR',
+          title: `Einnahmen-Überschuss-Rechnung – ${this.getTheme().brandName}`,
+          subtitle: `Zeitraum ${eur.period.label}`,
+          createdBy
+        };
+        const { doc, done, theme } = this._createDocWithBuffer(headerInfo);
         this._decoratePage(doc, theme, headerInfo);
 
-        this._section(doc, theme, 'Zusammenfassung');
-        doc.fontSize(11)
-          .text(`Einnahmen gesamt: ${this._fmtEUR(eur.summary.totalIncome)}`, { fill: theme.color.success })
-          .text(`Ausgaben gesamt: ${this._fmtEUR(eur.summary.totalExpenses)}`)
-          .text(`Gewinn/Verlust: ${this._fmtEUR(eur.summary.profit)}`);
+        this._section(doc, theme, 'Einnahmen-Überschuss-Rechnung', headerInfo);
+        this._kvList(doc, theme, [
+          { label: `Barverkäufe (${d.transactionCounts?.cash || 0} Verkäufe)`, value: this._fmtEUR(byType.cash) },
+          { label: `Verkäufe über Kundenkonto (${d.transactionCounts?.account || 0} Verkäufe)`, value: this._fmtEUR(byType.account) },
+          { label: `Bezahlte Ausgangsrechnungen (${(d.paidInvoices || []).length})`, value: this._fmtEUR(byType.invoices) },
+          { label: 'Summe Betriebseinnahmen', value: this._fmtEUR(eur.summary.totalIncome), bold: true, color: theme.color.success },
+          { spacer: true },
+          { label: `Bezahlte Eingangsrechnungen (${(d.expenseDocs || []).length} Belege)`, value: this._fmtEUR(eur.summary.totalExpenses) },
+          { label: 'Summe Betriebsausgaben', value: this._fmtEUR(eur.summary.totalExpenses), bold: true, color: theme.color.danger },
+          { spacer: true },
+          { label: eur.summary.profit < 0 ? 'Fehlbetrag' : 'Überschuss', value: this._fmtEUR(eur.summary.profit), bold: true, rule: true,
+            color: eur.summary.profit < 0 ? theme.color.danger : theme.color.success }
+        ], { headerInfo });
 
-        this._section(doc, theme, 'Einnahmen nach Kategorie');
+        this._section(doc, theme, 'Nachrichtlich (kein Ertrag, keine Ausgabe)', headerInfo);
+        this._kvList(doc, theme, [
+          { label: `Eigenverbrauch / Sachentnahme (${eur.nonRevenue.ownerUse.quantity} Stück, Warenwert)`, value: this._fmtEUR(eur.nonRevenue.ownerUse.value) },
+          { label: `Abgelaufen / Schwund (${eur.nonRevenue.expired.quantity} Stück, Warenwert)`, value: this._fmtEUR(eur.nonRevenue.expired.value) },
+          { spacer: true },
+          { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(eur.liquidity.topUps.cash) },
+          { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(eur.liquidity.topUps.transfer) },
+          { label: 'Aufladungen gesamt (Zufluss, aber Verbindlichkeit gegenüber Gästen)', value: this._fmtEUR(eur.liquidity.topUps.total), bold: true },
+          { label: 'Gästeguthaben zum Stichtag (Summe aller Kundenkonten)', value: this._fmtEUR(eur.liquidity.guestBalanceEnd) },
+          { spacer: true },
+          { label: `Offene Eingangsrechnungen zum Stichtag (${eur.liabilities.unpaidPurchaseDocuments.count})`, value: this._fmtEUR(eur.liabilities.unpaidPurchaseDocuments.total), color: theme.color.danger },
+          { label: `Offene Ausgangsrechnungen zum Stichtag (${eur.receivables.unpaidInvoices.count})`, value: this._fmtEUR(eur.receivables.unpaidInvoices.total) }
+        ], { headerInfo });
+
+        this._section(doc, theme, 'Einnahmen nach Kategorie', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Kategorie', width: 360, render: r => r.category },
-            { header: 'Betrag', width: 160, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
+            { header: 'Kategorie', width: 300, render: r => r.category },
+            { header: 'Menge', width: 100, align: 'right', render: r => String(Number(r.quantity || 0)) },
+            { header: 'Betrag', width: 120, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
           ],
-          rows: eur.details.incomeByCategory || [],
-          emptyHint: 'Keine Kategorien vorhanden.',
+          rows: d.incomeByCategory || [],
+          sumRow: ['Summe', String(sum(d.incomeByCategory, r => r.quantity)), this._fmtEUR(sum(d.incomeByCategory, r => r.amount))],
+          emptyHint: 'Keine Verkäufe im Zeitraum.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Ausgaben nach Lieferant');
+        this._section(doc, theme, 'Ausgaben nach Lieferant', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Lieferant', width: 320, render: r => r.supplier },
             { header: 'Belege', width: 80, align: 'right', render: r => String(r.count) },
             { header: 'Betrag', width: 120, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.danger }
           ],
-          rows: eur.details.expensesBySupplier || [],
+          rows: d.expensesBySupplier || [],
+          sumRow: ['Summe', String(sum(d.expensesBySupplier, r => r.count)), this._fmtEUR(sum(d.expensesBySupplier, r => r.amount))],
           emptyHint: 'Keine Ausgaben erfasst.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Verkaufte Artikel');
-        const soldSumAmount = (soldArticles || []).reduce((a, r) => a + Number(r.amount || 0), 0);
-        const soldSumQty = (soldArticles || []).reduce((a, r) => a + Number(r.quantity || 0), 0);
+        this._section(doc, theme, 'Verkaufte Artikel', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Artikel', width: 260, render: r => r.article },
+            { header: 'Artikel', width: 240, render: r => r.article },
             { header: 'Kategorie', width: 160, render: r => r.category || '-' },
             { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
-            { header: 'Betrag', width: 120, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
+            { header: 'Betrag', width: 100, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
           ],
-          rows: soldArticles || [],
-          sumRow: ['Summe', '', Number(soldSumQty).toFixed(0), this._fmtEUR(soldSumAmount)],
+          rows: d.incomeByArticle || [],
+          sumRow: ['Summe', '', Number(sum(d.incomeByArticle, r => r.quantity)).toFixed(0), this._fmtEUR(sum(d.incomeByArticle, r => r.amount))],
           emptyHint: 'Keine Verkäufe im Zeitraum.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Bezahlte Ausgangsrechnungen');
-        const paidInvSum = (paidInvoices || []).reduce((a, r) => a + Number(r.totalAmount || 0), 0);
+        this._section(doc, theme, 'Eigenverbrauch und Schwund (nachrichtlich)', headerInfo);
+        const nonRevRows = [
+          ...(eur.nonRevenue.ownerUse.items || []).map(r => ({ ...r, kind: 'Eigenverbrauch' })),
+          ...(eur.nonRevenue.expired.items || []).map(r => ({ ...r, kind: 'Abgelaufen' }))
+        ];
         this._table(doc, theme, {
           columns: [
-            { header: 'Empfänger', width: 220, render: r => r.customerName || '-' },
-            { header: 'Beschreibung', width: 220, render: r => r.description || '-' },
-            { header: 'Bezahlt am', width: 100, render: r => this._fmtDate(r.paidAt) },
-            { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.success }
+            { header: 'Art', width: 120, render: r => r.kind },
+            { header: 'Artikel', width: 240, render: r => r.article },
+            { header: 'Menge', width: 100, align: 'right', render: r => this._fmtQty(r.quantity, r.unit) },
+            { header: 'Warenwert', width: 100, align: 'right', render: r => this._fmtEUR(r.value) }
           ],
-          rows: paidInvoices || [],
-          sumRow: ['Summe', '', '', this._fmtEUR(paidInvSum)],
+          rows: nonRevRows,
+          sumRow: ['Summe', '', String(sum(nonRevRows, r => r.quantity)), this._fmtEUR(sum(nonRevRows, r => r.value))],
+          emptyHint: 'Kein Eigenverbrauch, keine abgelaufenen Artikel.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Bezahlte Ausgangsrechnungen', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
+            { header: 'Empfänger', width: 170, render: r => r.customerName || '-' },
+            { header: 'Beschreibung', width: 150, render: r => r.description || '-' },
+            { header: 'Bezahlt am', width: 80, render: r => this._fmtDate(r.paidAt) },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.success }
+          ],
+          rows: d.paidInvoices || [],
+          sumRow: ['Summe', '', '', '', this._fmtEUR(sum(d.paidInvoices, r => r.totalAmount))],
           emptyHint: 'Keine bezahlten Ausgangsrechnungen.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Ausgabenbelege (bezahlt)');
-        const expenseSum = (expenseDocs || []).reduce((a, r) => a + Number(r.totalAmount || 0), 0);
+        this._section(doc, theme, 'Ausgabenbelege (bezahlte Eingangsrechnungen)', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Datum', width: 100, render: r => this._fmtDate(r.documentDate) },
-            { header: 'Lieferant', width: 220, render: r => r.supplier || '-' },
-            { header: 'Belegnr.', width: 140, render: r => r.documentNumber || '-' },
-            { header: 'Betrag', width: 100, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
+            { header: 'Datum', width: 75, render: r => this._fmtDate(r.documentDate) },
+            { header: 'Lieferant', width: 160, render: r => r.supplier || '-' },
+            { header: 'Belegnr.', width: 110, render: r => r.documentNumber || '-' },
+            { header: 'Zahlung', width: 75, render: r => this._paymentLabel(r.paymentMethod) },
+            { header: 'Nachweis', width: 60, align: 'center', render: r => r.nachweisUrl ? 'Ja' : 'Nein' },
+            { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
           ],
-          rows: expenseDocs || [],
-          sumRow: ['Summe', '', '', this._fmtEUR(expenseSum)],
+          rows: d.expenseDocs || [],
+          sumRow: ['Summe', '', '', '', '', this._fmtEUR(sum(d.expenseDocs, r => r.totalAmount))],
           emptyHint: 'Keine Ausgabenbelege.',
           headerInfo
         });
 
-        doc.end();
+        this._section(doc, theme, 'Offene Eingangsrechnungen zum Stichtag (Verbindlichkeiten)', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Belegdatum', width: 80, render: r => this._fmtDate(r.documentDate) },
+            { header: 'Lieferant', width: 180, render: r => r.supplier || '-' },
+            { header: 'Belegnr.', width: 120, render: r => r.documentNumber || '-' },
+            { header: 'Fällig', width: 80, render: r => this._fmtDate(r.dueDate) },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
+          ],
+          rows: eur.liabilities.unpaidPurchaseDocuments.items || [],
+          sumRow: ['Summe', '', '', '', this._fmtEUR(eur.liabilities.unpaidPurchaseDocuments.total)],
+          emptyHint: 'Keine offenen Eingangsrechnungen.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Offene Ausgangsrechnungen zum Stichtag (Forderungen)', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
+            { header: 'Empfänger', width: 160, render: r => r.customerName || '-' },
+            { header: 'Erstellt', width: 80, render: r => this._fmtDate(r.createdAt) },
+            { header: 'Fällig', width: 80, render: r => this._fmtDate(r.dueDate) },
+            { header: 'Status', width: 70, render: r => this._invoiceStatusLabel(r.status) },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.totalAmount) }
+          ],
+          rows: eur.receivables.unpaidInvoices.items || [],
+          sumRow: ['Summe', '', '', '', '', this._fmtEUR(eur.receivables.unpaidInvoices.total)],
+          emptyHint: 'Keine offenen Ausgangsrechnungen.',
+          headerInfo
+        });
+
+        this._finishDoc(doc, theme, headerInfo);
         done.then(pdf => resolve({ data: pdf, filename: `eur_${startDate}_${endDate}.pdf`, mimeType: 'application/pdf' }));
+      } catch (e) { reject(e); }
+    });
+  }
+
+  /* ========= PDF: Kassenzählung (Zählbeleg) ========= */
+  async exportCashCountPDF(cashCountId, { createdBy } = {}) {
+    const cc = await cashCountService.getById(cashCountId);
+    if (!cc) throw new Error('Kassenzählung nicht gefunden');
+    const b = (cc.breakdownJson && typeof cc.breakdownJson === 'object') ? cc.breakdownJson : {};
+    const denoms = cashCountService.denominations;
+    const denomRows = denoms.map(d => {
+      const count = Number((cc.denominations || {})[String(d)] || 0);
+      return { value: d, count, amount: Math.round(d * 100) * count / 100 };
+    });
+    const diff = Number(cc.difference || 0);
+    const diffColor = (theme) => Math.abs(diff) < 0.005 ? theme.color.success : (diff < 0 ? theme.color.danger : theme.color.warning);
+    const fmtDenom = (v) => v >= 1 ? `${v} €` : `${Math.round(v * 100)} Cent`;
+    const n = (k) => (b.counts && b.counts[k]) || 0;
+
+    return new Promise((resolve, reject) => {
+      try {
+        const headerInfo = {
+          reportName: 'Kassenzählung',
+          title: `Kassenzählung – ${this.getTheme().brandName}`,
+          subtitle: `Gezählt am ${this._fmtDateTime(cc.countedAt)}${cc.user ? ` von ${cc.user.name}` : ''}`,
+          createdBy
+        };
+        const { doc, done, theme } = this._createDocWithBuffer(headerInfo);
+        this._decoratePage(doc, theme, headerInfo);
+
+        this._section(doc, theme, 'Ergebnis', headerInfo);
+        this._kvList(doc, theme, [
+          { label: 'Soll laut System', value: this._fmtEUR(cc.expectedTotal) },
+          { label: 'Ist gezählt', value: this._fmtEUR(cc.countedTotal), bold: true },
+          { label: 'Differenz (Ist - Soll)', value: `${diff > 0 ? '+' : ''}${this._fmtEUR(diff)}`, bold: true, rule: true, color: diffColor(theme) }
+        ], { headerInfo });
+        if (cc.note) this._note(doc, theme, `Notiz: ${cc.note}`);
+
+        this._section(doc, theme, 'Stückelung', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Nennwert', width: 160, render: r => fmtDenom(r.value) },
+            { header: 'Anzahl', width: 120, align: 'right', render: r => String(r.count) },
+            { header: 'Betrag', width: 160, align: 'right', render: r => this._fmtEUR(r.amount) }
+          ],
+          rows: denomRows,
+          sumRow: ['Summe gezählt', String(denomRows.reduce((a, r) => a + r.count, 0)), this._fmtEUR(cc.countedTotal)],
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Soll-Herleitung seit der letzten Zählung', headerInfo);
+        const sinceLabel = b.hasBaseline && cc.previousCount
+          ? `Vorzählung vom ${this._fmtDateTime(cc.previousCount.countedAt)}`
+          : 'Keine Vorzählung vorhanden (Startsaldo 0,00 €, alle Barbewegungen seit Beginn)';
+        this._kvList(doc, theme, [
+          { label: sinceLabel, value: this._fmtEUR(b.baseline || 0) },
+          { label: `+ Bar-Verkäufe (${n('sales')})`, value: this._fmtEUR(b.cashSales || 0), color: theme.color.success },
+          { label: `+ Bar-Erstattungen / Stornos (${n('refunds')})`, value: this._fmtEUR(b.cashRefunds || 0), color: theme.color.danger },
+          { label: `+ Bar-Aufladungen Kundenkonten (${n('topUps')})`, value: this._fmtEUR(b.cashTopUps || 0), color: theme.color.success },
+          { label: `- Bar bezahlte Eingangsrechnungen (${n('expenses')})`, value: this._fmtEUR(b.cashExpenses || 0), color: theme.color.danger },
+          { label: '= Soll laut System', value: this._fmtEUR(cc.expectedTotal), bold: true, rule: true },
+          { label: 'Ist gezählt', value: this._fmtEUR(cc.countedTotal), bold: true },
+          { label: 'Differenz', value: `${diff > 0 ? '+' : ''}${this._fmtEUR(diff)}`, bold: true, color: diffColor(theme) }
+        ], { headerInfo });
+
+        if (Array.isArray(b.expenseDocs) && b.expenseDocs.length) {
+          this._section(doc, theme, 'Bar bezahlte Eingangsrechnungen im Zählzeitraum', headerInfo);
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Bezahlt am', width: 110, render: r => this._fmtDateTime(r.paidAt) },
+              { header: 'Lieferant', width: 200, render: r => r.supplier || '-' },
+              { header: 'Belegnr.', width: 130, render: r => r.documentNumber || '-' },
+              { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.danger }
+            ],
+            rows: b.expenseDocs,
+            sumRow: ['Summe', '', '', this._fmtEUR(b.cashExpenses || 0)],
+            headerInfo
+          });
+        }
+
+        this._signatureBlock(doc, theme, ['Gezählt von', 'Geprüft von'], headerInfo);
+
+        this._finishDoc(doc, theme, headerInfo);
+        const stamp = new Date(cc.countedAt);
+        const p = (x) => String(x).padStart(2, '0');
+        done.then(pdf => resolve({
+          data: pdf,
+          filename: `kassenzaehlung_${stamp.getFullYear()}-${p(stamp.getMonth() + 1)}-${p(stamp.getDate())}_${p(stamp.getHours())}${p(stamp.getMinutes())}.pdf`,
+          mimeType: 'application/pdf'
+        }));
       } catch (e) { reject(e); }
     });
   }
@@ -837,7 +1096,11 @@ class ExportService {
         KPI('Betriebsausgaben', this._fmtEUR(income.totalExpenses), col1x, kpiY + lineH, theme.color.danger);
         KPI(Number(income.profit) < 0 ? 'Fehlbetrag' : 'Überschuss', this._fmtEUR(income.profit), col1x, kpiY + lineH * 2,
           Number(income.profit) < 0 ? theme.color.danger : theme.color.success);
-        KPI(cash && !cash.manual ? `Kassenbestand (gezählt ${this._fmtDate(cash.countedAt)})` : 'Kassenbestand', this._fmtEUR(cashTotal), col2x, kpiY);
+        if (cash) {
+          KPI(cash.manual ? 'Kassenbestand (manuell erfasst)' : `Kassenbestand (gezählt ${this._fmtDate(cash.countedAt)})`, this._fmtEUR(cashTotal), col2x, kpiY);
+        } else {
+          KPI('Kassenbestand', 'noch nicht gezählt', col2x, kpiY, theme.color.danger);
+        }
         KPI('Bankkonten gesamt', this._fmtEUR(banksTotal), col2x, kpiY + lineH);
         KPI('Gästeguthaben (Verbindlichkeit)', this._fmtEUR(guestBalance), col2x, kpiY + lineH * 2, theme.color.danger);
 
@@ -893,8 +1156,10 @@ class ExportService {
           const d = Number(cash.difference || 0);
           cashRows.push({ label: 'Differenz (Ist - Soll)', value: `${d > 0 ? '+' : ''}${this._fmtEUR(d)}`, bold: true, color: Math.abs(d) < 0.005 ? theme.color.success : (d < 0 ? theme.color.danger : theme.color.warning) });
           if (cash.note) cashRows.push({ label: `Notiz: ${cash.note}`, value: '' });
+        } else if (cash && cash.manual) {
+          cashRows.push({ label: 'Barkasse (manuell erfasst, Abschluss vor Einführung der Kassenzählung)', value: this._fmtEUR(cashTotal), bold: true });
         } else {
-          cashRows.push({ label: 'Barkasse (manuell erfasst)', value: this._fmtEUR(cashTotal), bold: true });
+          cashRows.push({ label: 'Kassenbestand: noch keine Kassenzählung im Geschäftsjahr (Pflicht vor dem Abschluss)', value: '—', bold: true, color: theme.color.danger });
         }
         cashRows.push({ spacer: true });
         if (banks.length === 0) cashRows.push({ label: 'Bankkonten: keine erfasst', value: this._fmtEUR(0) });
@@ -1057,7 +1322,7 @@ class ExportService {
   /* ========= HELPERS ========= */
   async getDailySummaryData(date, startHour) {
     const transactionService = require('./transactionService');
-    return await transactionService.getDailySummary(date, startHour);
+    return transactionService.getDailySummary(date, startHour);
   }
 
   getMonthName(month) {

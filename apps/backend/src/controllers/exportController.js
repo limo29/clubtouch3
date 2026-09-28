@@ -90,7 +90,7 @@ class ExportController {
       // reines Datum als "dieser Geschäftstag" (ohne Vortag-Verschiebung).
       const date = req.query.date || new Date();
       const startHour = req.query.startHour ? parseInt(req.query.startHour) : BUSINESS_DAY_START_HOUR;
-      const result = await exportService.exportDailySummaryPDF(date, startHour);
+      const result = await exportService.exportDailySummaryPDF(date, startHour, { createdBy: req.user.name });
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -139,7 +139,8 @@ class ExportController {
 
       const result = await exportService.exportMonthlySummaryPDF(
         parseInt(year),
-        parseInt(month)
+        parseInt(month),
+        { createdBy: req.user.name }
       );
 
       // Audit-Log
@@ -174,7 +175,7 @@ class ExportController {
         ? parseLocalDate(startDate)
         : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      const result = await exportService.exportCustomerStatementPDF(customerId, start, end);
+      const result = await exportService.exportCustomerStatementPDF(customerId, start, end, { createdBy: req.user.name });
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -239,6 +240,13 @@ class ExportController {
           parameters: ['year', 'month']
         },
         {
+          id: 'eur',
+          name: 'Einnahmen-Überschuss-Rechnung',
+          description: 'EÜR mit Belegen, Eigenverbrauch und offenen Posten als PDF',
+          format: 'PDF',
+          parameters: ['startDate', 'endDate']
+        },
+        {
           id: 'customer-statement',
           name: 'Kontoauszug',
           description: 'Kontobewegungen eines Kunden als PDF',
@@ -257,7 +265,7 @@ class ExportController {
     try {
       const { startDate, endDate } = req.query;
       if (!startDate || !endDate) return res.status(400).json({ error: 'startDate und endDate erforderlich' });
-      const result = await exportService.exportEURPDF(startDate, endDate);
+      const result = await exportService.exportEURPDF(startDate, endDate, { createdBy: req.user.name });
       res.setHeader('Content-Type', result.mimeType);
       res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
       res.send(result.data);
