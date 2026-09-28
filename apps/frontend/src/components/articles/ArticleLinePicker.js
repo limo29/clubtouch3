@@ -4,6 +4,10 @@
  * Aufbau: [sidebar (Seite)] | Artikel (Suche, Kategorien, Kacheln) | Positionen (Liste + Slots)
  * Ab `md` drei Spalten, darunter Tabs "<sidebarLabel> | Artikel | <linesLabel> (n)".
  *
+ * Props: mode ('sale'|'purchase'|'invoice'), lines, onChange, showCrates, showPrice,
+ * editablePrice, allowFreeLines, showStock, sidebar/sidebarLabel, linesLabel,
+ * linesHeader, linesFooter, mobileTab/onMobileTabChange, columns, height.
+ *
  * `lines`/`onChange`: Zeilenmodell aus hooks/useArticleLines. `onChange` MUSS eine
  * Updater-Funktion akzeptieren (wie setState), damit Doppeltipps nichts verlieren –
  * `setLines` aus useArticleLines passt direkt.
@@ -153,7 +157,7 @@ function PriceField({ value, onChange }) {
 
 /* ------------------------------- Zeile -------------------------------- */
 
-function LineRow({ line, showCrates, showPrice, allowFreeLines, update }) {
+function LineRow({ line, showCrates, showPrice, editablePrice, allowFreeLines, update }) {
   const crate = showCrates && !line.isFree && hasCrate(line);
   const total = lineTotalQty(line);
   const deleteAtOne = !crate || line.crateQty === 0;
@@ -192,7 +196,7 @@ function LineRow({ line, showCrates, showPrice, allowFreeLines, update }) {
             onSet={(v) => update((prev) => setLineQty(prev, line.key, { crateQty: v }))}
           />
         )}
-        {showPrice && <PriceField value={line.price} onChange={(p) => update((prev) => setLinePrice(prev, line.key, p))} />}
+        {editablePrice && <PriceField value={line.price} onChange={(p) => update((prev) => setLinePrice(prev, line.key, p))} />}
       </Stack>
     </Box>
   );
@@ -245,7 +249,7 @@ export function ArticlePane({ articles, lines, showPrice, showStock, showCrates,
 
 /* --------------------------- Positionen-Pane -------------------------- */
 
-export function LinesPane({ lines, update, title, showCrates, showPrice, allowFreeLines, header, footer, emptyText, showSummary }) {
+export function LinesPane({ lines, update, title, showCrates, showPrice, editablePrice, allowFreeLines, header, footer, emptyText, showSummary }) {
   return (
     <Card sx={paneSx}>
       <CardContent sx={{ p: 2, flex: 1, overflowY: 'auto', '&:last-child': { pb: 2 } }}>
@@ -259,7 +263,7 @@ export function LinesPane({ lines, update, title, showCrates, showPrice, allowFr
             <Typography variant="h6">{emptyText}</Typography>
           </Box>
         ) : (
-          lines.map((l) => <LineRow key={l.key} line={l} showCrates={showCrates} showPrice={showPrice} allowFreeLines={allowFreeLines} update={update} />)
+          lines.map((l) => <LineRow key={l.key} line={l} showCrates={showCrates} showPrice={showPrice} editablePrice={editablePrice} allowFreeLines={allowFreeLines} update={update} />)
         )}
         {allowFreeLines && (
           <Button variant="outlined" startIcon={<Add />} onClick={() => update((prev) => addFreeLine(prev))} sx={{ mt: 2 }}>
@@ -290,6 +294,7 @@ export default function ArticleLinePicker({
   articles: articlesProp,
   showCrates = mode !== 'sale',
   showPrice = mode !== 'purchase',
+  editablePrice = mode === 'invoice',
   allowFreeLines = mode === 'invoice',
   showStock = mode !== 'purchase',
   sidebar,
@@ -343,7 +348,7 @@ export default function ArticleLinePicker({
         <Box sx={{ display: show(2) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
           <LinesPane
             lines={lines} update={update} title={linesLabel}
-            showCrates={showCrates} showPrice={showPrice} allowFreeLines={allowFreeLines}
+            showCrates={showCrates} showPrice={showPrice} editablePrice={editablePrice} allowFreeLines={allowFreeLines}
             header={linesHeader} footer={linesFooter} emptyText={emptyText}
             showSummary={mode !== 'sale'}
           />
