@@ -5,6 +5,8 @@ const prisma = require('../utils/prisma');
 const fs = require('fs').promises;
 const path = require('path');
 const accountingService = require('./accountingService');
+const customerService = require('./customerService');
+const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 
 class ExportService {
   constructor() {
@@ -230,8 +232,8 @@ class ExportService {
     const where = { cancelled: false };
     if (startDate || endDate) {
       where.createdAt = {};
-      if (startDate) where.createdAt.gte = new Date(startDate);
-      if (endDate) where.createdAt.lte = new Date(endDate);
+      if (startDate) where.createdAt.gte = parseLocalDate(startDate);
+      if (endDate) where.createdAt.lte = endOfLocalDay(endDate); // Endtag inklusive
     }
     if (customerId) where.customerId = customerId;
     if (paymentMethod) where.paymentMethod = paymentMethod;
@@ -294,7 +296,7 @@ class ExportService {
     return new Promise((resolve, reject) => {
       try {
         const { doc, done, theme } = this._createDocWithBuffer();
-        const headerInfo = { title: `Tagesabschluss – ${theme.brandName}`, subtitle: `Datum: ${new Date(summary.date).toLocaleDateString('de-DE')} (Ab ${startHour}:00 Uhr)` };
+        const headerInfo = { title: `Tagesabschluss – ${theme.brandName}`, subtitle: `Geschäftstag: ${parseLocalDate(summary.date).toLocaleDateString('de-DE')} (${String(startHour).padStart(2, '0')}:00 bis ${String(startHour).padStart(2, '0')}:00 Uhr des Folgetags)` };
         this._decoratePage(doc, theme, headerInfo);
 
         this._section(doc, theme, 'Zusammenfassung');
@@ -340,16 +342,18 @@ class ExportService {
   async exportMonthlySummaryPDF(year, month) {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);
+    // Nur echte Verkäufe: REFUND (negativ), EXPIRED/OWNER_USE (0 €) gehören nicht in den Umsatz
     const [transactions, topCustomers, categoryStats] = await Promise.all([
       prisma.transaction.aggregate({
-        where: { createdAt: { gte: startDate, lte: endDate }, cancelled: false },
+        where: { type: 'SALE', createdAt: { gte: startDate, lte: endDate }, cancelled: false },
         _sum: { totalAmount: true }, _count: true
       }),
       prisma.$queryRaw`
         SELECT c.name, COUNT(DISTINCT t.id) as transactions, SUM(t."totalAmount") as total_spent
         FROM "Customer" c
         JOIN "Transaction" t ON t."customerId" = c.id
-        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate} AND t.cancelled = false
+        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate}
+          AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY c.id, c.name
         ORDER BY total_spent DESC
         LIMIT 10
@@ -359,7 +363,8 @@ class ExportService {
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
-        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate} AND t.cancelled = false
+        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate}
+          AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY a.category
         ORDER BY revenue DESC
       `
@@ -412,10 +417,78 @@ class ExportService {
     });
   }
 
+  /**
+   * Kontoauszug eines Kunden (Aufladungen, Einkäufe, Stornos) mit laufendem Saldo.
+   * Datenbasis ist customerService.getAccountStatement, damit UI und PDF dieselben Zahlen zeigen.
+   */
+  async exportCustomerStatementPDF(customerId, start, end) {
+    const statement = await customerService.getAccountStatement(customerId, start, end);
+    const { customer, movements = [], summary = {} } = statement;
+
+    const typeLabel = (m) => {
+      if (m.type === 'TOPUP') return 'Aufladung';
+      if (m.type === 'CANCELLED') return 'Storno';
+      return 'Einkauf';
+    };
+    const displayName = customer.nickname ? `${customer.name} (${customer.nickname})` : customer.name;
+    const slug = String(customer.name || 'kunde').toLowerCase().replace(/[^a-z0-9äöüß]+/gi, '-').replace(/^-+|-+$/g, '');
+
+    return new Promise((resolve, reject) => {
+      try {
+        const { doc, done, theme } = this._createDocWithBuffer();
+        const headerInfo = {
+          title: `Kontoauszug – ${theme.brandName}`,
+          subtitle: `${displayName} · ${this._fmtDate(start)} – ${this._fmtDate(end)}`
+        };
+        this._decoratePage(doc, theme, headerInfo);
+
+        this._section(doc, theme, 'Zusammenfassung');
+        doc.fontSize(11)
+          .text(`Aktueller Kontostand: ${this._fmtEUR(customer.currentBalance)}`)
+          .text(`Aufladungen im Zeitraum: ${this._fmtEUR(summary.totalTopUps)}`)
+          .text(`Einkäufe im Zeitraum: ${this._fmtEUR(summary.totalSpent)} (${summary.transactionCount || 0} Buchungen)`);
+
+        this._section(doc, theme, 'Kontobewegungen');
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Datum', width: 130, render: r => new Date(r.date).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) },
+            { header: 'Vorgang', width: 90, render: r => typeLabel(r) },
+            { header: 'Beschreibung', width: 200, render: r => r.description || '' },
+            {
+              header: 'Betrag', width: 90, align: 'right',
+              render: r => this._fmtEUR(r.amount),
+              color: r => (Number(r.amount) < 0 ? theme.color.danger : (Number(r.amount) > 0 ? theme.color.success : theme.color.subtext))
+            },
+            {
+              header: 'Saldo', width: 90, align: 'right',
+              render: r => this._fmtEUR(r.balance),
+              color: r => (Number(r.balance) < 0 ? theme.color.danger : theme.color.text)
+            }
+          ],
+          rows: movements,
+          sumRow: ['', '', 'Summe Zeitraum', this._fmtEUR(Number(summary.totalTopUps || 0) - Number(summary.totalSpent || 0)), this._fmtEUR(customer.currentBalance)],
+          emptyHint: 'Keine Kontobewegungen im gewählten Zeitraum.',
+          headerInfo
+        });
+
+        doc.end();
+        const fmtFile = (d) => {
+          const x = new Date(d); const p = (n) => String(n).padStart(2, '0');
+          return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
+        };
+        done.then(pdf => resolve({
+          data: pdf,
+          filename: `kontoauszug_${slug}_${fmtFile(start)}_${fmtFile(end)}.pdf`,
+          mimeType: 'application/pdf'
+        }));
+      } catch (e) { reject(e); }
+    });
+  }
+
   async exportEURPDF(startDate, endDate) {
     const eur = await accountingService.getProfitLoss(startDate, endDate);
-    const start = new Date(startDate);
-    const end = new Date(endDate); end.setHours(23, 59, 59, 999);
+    const start = parseLocalDate(startDate);
+    const end = endOfLocalDay(endDate);
 
     const [soldArticles, paidInvoices, expenseDocs] = await Promise.all([
       prisma.$queryRaw`

@@ -1,38 +1,29 @@
 const prisma = require('../utils/prisma');
 const { Prisma } = require('@prisma/client');
 const { emitHighscoreUpdate } = require('../utils/websocket');
+const { BUSINESS_DAY_START_HOUR, businessDayWindow, businessDayLabel } = require('../utils/businessDay');
 
 class HighscoreService {
   async getSettings() {
     // Kannst du später aus DB/ENV laden
     return {
-      dailyResetHour: 12,          // 12:00 -> Tag läuft 12:00 bis 12:00
+      dailyResetHour: BUSINESS_DAY_START_HOUR, // derselbe Geschäftstag wie Tagesabschluss/Dashboard
       displayCount: 20,            // Top 20
       countInactiveArticles: false,
       scoreMode: 'AMOUNT'
     };
   }
 
-  _getPeriodStart(type, resetHour = 12) {
-    const now = new Date();
-
-    if (type === 'DAILY') {
-      const start = new Date();
-      start.setHours(resetHour, 0, 0, 0);
-      if (now < start) start.setDate(start.getDate() - 1);
-      return start;
-    }
+  _getPeriodStart(type, resetHour = BUSINESS_DAY_START_HOUR) {
     if (type === 'YEARLY') {
-      return new Date(now.getFullYear(), 0, 1);
+      return new Date(new Date().getFullYear(), 0, 1);
     }
-    const start = new Date();
-    start.setHours(resetHour, 0, 0, 0);
-    return start;
+    return businessDayWindow(new Date(), resetHour).start;
   }
 
-  _getDailyWindow(resetHour = 12) {
-    // liefert [start, end) für “heute” von 12:00 bis 12:00
-    const start = this._getPeriodStart('DAILY', resetHour);
+  _getDailyWindow(resetHour = BUSINESS_DAY_START_HOUR) {
+    // liefert [start, end) für "heute" im Geschäftstag-Fenster
+    const { start } = businessDayWindow(new Date(), resetHour);
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
     return { start, end };
@@ -195,7 +186,7 @@ class HighscoreService {
       return {
         goals: [],
         meta: {
-          dayLabel: `Tag: ${String(settings.dailyResetHour).padStart(2, '0')}:00 → ${String(settings.dailyResetHour).padStart(2, '0')}:00`,
+          dayLabel: `Tag: ${businessDayLabel(settings.dailyResetHour)}`,
           goalsConfig: [],
           movingTargets
         }
@@ -240,7 +231,7 @@ class HighscoreService {
     return {
       goals,
       meta: {
-        dayLabel: `Tag: ${String(settings.dailyResetHour).padStart(2, '0')}:00 → ${String(settings.dailyResetHour).padStart(2, '0')}:00`,
+        dayLabel: `Tag: ${businessDayLabel(settings.dailyResetHour)}`,
         goalsConfig: cfg,
         movingTargets
       }

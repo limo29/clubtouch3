@@ -1,4 +1,5 @@
 const prisma = require('../utils/prisma');
+const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 
 function dec(n) { return Number(n || 0); }
 
@@ -10,9 +11,9 @@ class AccountingService {
    * Ausgaben: Eingangsrechnungen (PurchaseDocument type='RECHNUNG', paid=true, documentDate im Zeitraum)
    */
   async getProfitLoss(startDate, endDate) {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+    // 'YYYY-MM-DD' lokal (00:00), nicht UTC; Endtag inklusive
+    const start = parseLocalDate(startDate);
+    const end = endOfLocalDay(endDate);
 
     // Verkäufe (POS)
     const [
@@ -282,9 +283,8 @@ class AccountingService {
     const fy = await prisma.fiscalYear.findUnique({ where: { id: fiscalYearId } });
     if (!fy) throw new Error('Geschäftsjahr nicht gefunden');
 
-    const start = new Date(fy.startDate);
-    const end = new Date(fy.endDate);
-    end.setHours(23, 59, 59, 999);
+    const start = parseLocalDate(fy.startDate);
+    const end = endOfLocalDay(fy.endDate);
 
     // Einnahmen nach Artikel
     const soldArticles = await prisma.$queryRaw`

@@ -157,9 +157,10 @@ class CustomerController {
       const { id } = req.params;
       const { startDate, endDate } = req.query;
 
-      // Default: Letzter Monat
-      const end = endDate ? new Date(endDate) : new Date();
-      const start = startDate ? new Date(startDate) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+      // Default: letzte 30 Tage bis jetzt. "Bis"-Tag inklusive, 'YYYY-MM-DD' lokal.
+      const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
+      const end = endDate ? endOfLocalDay(endDate) : new Date();
+      const start = startDate ? parseLocalDate(startDate) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       const statement = await customerService.getAccountStatement(id, start, end);
 

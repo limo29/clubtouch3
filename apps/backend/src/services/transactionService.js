@@ -1,4 +1,11 @@
 const prisma = require('../utils/prisma');
+const {
+  BUSINESS_DAY_START_HOUR,
+  businessDayWindow,
+  parseLocalDate,
+  endOfLocalDay,
+  formatLocalDate,
+} = require('../utils/businessDay');
 
 class TransactionService {
   async createSale(data, userId) {
@@ -267,8 +274,8 @@ class TransactionService {
 
     if (startDate || endDate) {
       where.createdAt = {};
-      if (startDate) where.createdAt.gte = new Date(startDate);
-      if (endDate) where.createdAt.lte = new Date(endDate);
+      if (startDate) where.createdAt.gte = parseLocalDate(startDate);
+      if (endDate) where.createdAt.lte = endOfLocalDay(endDate); // "Bis"-Tag inklusive
     }
 
     if (customerId) where.customerId = customerId;
@@ -331,20 +338,10 @@ class TransactionService {
   }
 
   // Tagesabschluss
-  async getDailySummary(date = new Date(), startHour = 6) {
-    const requestDate = new Date(date);
-    // Wenn die angefragte Zeit vor dem Tagesbeginn liegt (z.B. 1 Uhr nachts, Start 6 Uhr),
-    // dann gehört das noch zum "Geschäftstag" von gestern.
-    if (requestDate.getHours() < startHour) {
-      requestDate.setDate(requestDate.getDate() - 1);
-    }
-
-    const startOfDay = new Date(requestDate);
-    startOfDay.setHours(startHour, 0, 0, 0);
-
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
-    endOfDay.setTime(endOfDay.getTime() - 1); // 1ms vor dem nächsten Start
+  // Geschäftstag-Fenster (Standard 06:00 -> 06:00) kommt zentral aus utils/businessDay.
+  // `date` darf ein Date oder 'YYYY-MM-DD' (lokal interpretiert) sein.
+  async getDailySummary(date = new Date(), startHour = BUSINESS_DAY_START_HOUR) {
+    const { start: startOfDay, end: endOfDay, businessDate } = businessDayWindow(date, startHour);
 
     const [
       totalSales,
@@ -467,7 +464,7 @@ class TransactionService {
     }
 
     return {
-      date: date.toISOString().split('T')[0],
+      date: formatLocalDate(businessDate),
       startHour,
       summary: {
         totalRevenue: safeNumber(totalSales._sum.totalAmount),
