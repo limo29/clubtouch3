@@ -255,19 +255,21 @@ const Layout = () => {
               <MenuIcon />
             </IconButton>
 
-            <Typography variant="h6" noWrap sx={{ flexGrow: 1, minWidth: 0, maxWidth: { xs: 'calc(50% - 44px)', sm: 'none' } }}>
+            <Typography variant="h6" noWrap sx={{ flexGrow: 1, minWidth: 0, mr: 1 }}>
               {currentTitle}
             </Typography>
 
             {showCenterSalesBtn && (
               <Box
                 sx={{
-                  position: 'absolute',
+                  // Handy: im Fluss rechts neben dem Titel (sonst überdeckt der zentrierte Button den Titel)
+                  position: { xs: 'static', sm: 'absolute' },
                   left: '50%',
-                  transform: 'translateX(-50%)',
+                  transform: { xs: 'none', sm: 'translateX(-50%)' },
                   display: 'flex',
                   alignItems: 'center',
                   pointerEvents: 'none',
+                  mr: { xs: 1, sm: 0 },
                 }}
               >
                 <Button
