@@ -89,19 +89,19 @@ export default function Invoices() {
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (payload) => (await api.post('/invoices', payload)).data,
-    onSuccess: () => { queryClient.invalidateQueries(['invoices']); setShowCreate(false); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['invoices'] }); setShowCreate(false); }
   });
   const updateInvoiceMutation = useMutation({
     mutationFn: async ({ id, payload }) => (await api.put(`/invoices/${id}`, payload)).data,
-    onSuccess: () => { queryClient.invalidateQueries(['invoices']); setShowCreate(false); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['invoices'] }); setShowCreate(false); }
   });
   // NEU: Status ändern
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }) => (await api.patch(`/invoices/${id}/status`, { status })).data,
-    onSuccess: () => queryClient.invalidateQueries(['invoices'])
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] })
   });
   const setStatus = (inv, status) => {
-    if (updateStatusMutation.isLoading) return;
+    if (updateStatusMutation.isPending) return;
     updateStatusMutation.mutate({ id: inv.id, status });
   };
 
@@ -152,14 +152,16 @@ export default function Invoices() {
   const addToCart = (a) => {
     const isCrate = a.__crate && a.unitsPerPurchase > 1;
     const addQty = isCrate ? a.unitsPerPurchase : 1;
-    const exists = cart.find(i => i.id === a.id && !i.isFree);
-    if (exists) {
-      setCart(cart.map(i => i.id === a.id && !i.isFree
-        ? { ...i, quantity: num(i.quantity) + addQty }
-        : i));
-    } else {
-      setCart([...cart, { ...a, quantity: addQty }]);
-    }
+    // funktionales Update: schnelle Doppeltipps dürfen keinen Klick verlieren (B11)
+    setCart(prev => {
+      const exists = prev.find(i => i.id === a.id && !i.isFree);
+      if (exists) {
+        return prev.map(i => i.id === a.id && !i.isFree
+          ? { ...i, quantity: num(i.quantity) + addQty }
+          : i);
+      }
+      return [...prev, { ...a, quantity: addQty }];
+    });
   };
 
   const updateQty = (id, q) => {
@@ -525,6 +527,8 @@ export default function Invoices() {
           open={showCreate}
           onClose={() => setShowCreate(false)}
           ModalProps={{ keepMounted: true }}
+          // Layout-AppBar liegt auf drawer+1 und würde den Titel überdecken (B15)
+          sx={{ zIndex: (t) => t.zIndex.modal }}
           PaperProps={{ sx: { width: { xs: '100vw', md: '980px', lg: '1200px' }, maxWidth: '100vw', overflow: 'hidden' } }}
         >
           <Box sx={{ height: '100%', display: 'grid', gridTemplateRows: 'auto 1fr' }}>
@@ -657,7 +661,7 @@ export default function Invoices() {
             )}
             <Button fullWidth onClick={closeStatusSheet}>Abbrechen</Button>
           </Stack>
-          {updateStatusMutation.isLoading && (
+          {updateStatusMutation.isPending && (
             <Typography role="status" aria-live="polite" variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
               Status wird aktualisiert…
             </Typography>
@@ -866,7 +870,9 @@ function ThreeColumnPOS(props) {
                         inputMode="numeric"
                         label="Menge"
                         value={i.quantity}
-                        onChange={(e) => updateQty(i.id, num(e.target.value))}
+                        // nur ganze Stück: sonst landen 0,5 Flaschen im Bestand (B12)
+                        onChange={(e) => updateQty(i.id, Math.max(0, Math.trunc(num(e.target.value))))}
+                        inputProps={{ step: 1, min: 0 }}
                         sx={{ width: 100 }}
                       />
                       <IconButton size="small" onClick={() => incQty(i.id)} aria-label="Menge erhöhen"><AddIcon /></IconButton>
@@ -950,7 +956,7 @@ function InvoiceSettingsDialog({ open, onClose }) {
   const mutation = useMutation({
     mutationFn: async (vals) => (await api.put('/invoices/settings', vals)).data,
     onSuccess: () => {
-      queryClient.invalidateQueries(['invoiceSettings']);
+      queryClient.invalidateQueries({ queryKey: ['invoiceSettings'] });
       onClose();
     }
   });
@@ -984,7 +990,7 @@ function InvoiceSettingsDialog({ open, onClose }) {
       </DialogContent>
       <Box sx={{ p: 2, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
         <Button onClick={onClose}>Abbrechen</Button>
-        <Button variant="contained" onClick={save} disabled={mutation.isLoading}>Speichern</Button>
+        <Button variant="contained" onClick={save} disabled={mutation.isPending}>Speichern</Button>
       </Box>
     </Dialog>
   );

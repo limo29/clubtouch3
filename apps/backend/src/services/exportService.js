@@ -631,12 +631,6 @@ class ExportService {
       };
     }) : [];
 
-    // DEBUG LOG
-    try {
-      console.log(`[PDF DEBUG] System inventory items: ${system.length}`);
-      if (system.length > 0) console.log('[PDF DEBUG] First item:', system[0]);
-    } catch (e) { }
-
     const physical = Array.isArray(report.inventoryPhysical) ? report.inventoryPhysical.map(x => ({
       name: x.name, unit: x.unit, physicalQty: Number(x.physicalStock || 0)
     })) : [];
@@ -682,6 +676,21 @@ class ExportService {
 
     const banksTotal = sum((report.bankAccountsJson || []), b => b.balance);
 
+    // Kennzahlen auf dem Deckblatt stammen aus dem eingefrorenen Abschluss (YearEndReport),
+    // die Detailtabellen aus der Live-Vorschau. Wurden nach dem Abschluss noch Buchungen
+    // erfasst, weichen beide ab. Das wird im PDF ausgewiesen statt versteckt.
+    const liveIncome = soldSumAmount + paidInvSum;
+    const liveExpenses = expenseSum;
+    const snapshotIncome = Number(report.incomeTotal || 0);
+    const snapshotExpenses = Number(report.expensesTotal || 0);
+    const driftIncome = Math.abs(liveIncome - snapshotIncome) > 0.005;
+    const driftExpenses = Math.abs(liveExpenses - snapshotExpenses) > 0.005;
+    const periodLabel = `${this._fmtDate(fiscalYear.startDate)} – ${this._fmtDate(fiscalYear.endDate)}`;
+    const closedAt = report.createdAt ? new Date(report.createdAt) : null;
+    const statusLabel = fiscalYear.closed
+      ? `Abgeschlossen am ${closedAt ? closedAt.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : '–'}`
+      : 'Entwurf – Geschäftsjahr noch nicht abgeschlossen';
+
     return new Promise((resolve, reject) => {
       try {
         const { doc, done, theme } = this._createDocWithBuffer();
@@ -692,12 +701,13 @@ class ExportService {
             width: doc.page.width - theme.page.margin * 2, align: 'left'
           });
 
-        const sub = `Geschäftsjahr: ${fiscalYear.name} (${new Date(fiscalYear.startDate).toISOString().slice(0, 10)} – ${new Date(fiscalYear.endDate).toISOString().slice(0, 10)})`;
+        const sub = `Geschäftsjahr: ${fiscalYear.name} (${periodLabel})`;
         doc.moveDown(0.5);
         doc.font(theme.font.regular).fontSize(12).fillColor(theme.color.subtext)
-          .text(sub, { width: doc.page.width - theme.page.margin * 2 });
+          .text(sub, { width: doc.page.width - theme.page.margin * 2 })
+          .text(statusLabel, { width: doc.page.width - theme.page.margin * 2 });
 
-        // Executive Summary Panel (roundedRect-Fallback)
+        // Zusammenfassungs-Panel (roundedRect-Fallback)
         const panelX = theme.page.margin;
         const panelY = 210;
         const panelW = doc.page.width - theme.page.margin * 2;
@@ -721,13 +731,15 @@ class ExportService {
         doc.restore();
 
         doc.font(theme.font.bold).fontSize(14).fillColor(theme.color.text)
-          .text('Executive Summary', panelX + 16, panelY + 12);
+          .text('Zusammenfassung zum Abschluss', panelX + 16, panelY + 12);
 
+        // Label (10pt) + Wert (12pt) brauchen zusammen ~28pt; lineH 34 lässt Luft dazwischen.
+        const colW = panelW / 2 - 24;
         const KPI = (label, value, x, y, color) => {
-          doc.font(theme.font.regular).fontSize(10).fillColor(theme.color.subtext).text(label, x, y);
-          doc.font(theme.font.bold).fontSize(12).fillColor(color || theme.color.text).text(value, x, y + 12);
+          doc.font(theme.font.regular).fontSize(10).fillColor(theme.color.subtext).text(label, x, y, { width: colW, lineBreak: false });
+          doc.font(theme.font.bold).fontSize(12).fillColor(color || theme.color.text).text(value, x, y + 13, { width: colW, lineBreak: false });
         };
-        const col1x = panelX + 16, col2x = panelX + panelW / 2 + 8, lineH = 20, kpiY = panelY + 40;
+        const col1x = panelX + 16, col2x = panelX + panelW / 2 + 8, lineH = 34, kpiY = panelY + 40;
 
         KPI('Einnahmen gesamt', this._fmtEUR(report.incomeTotal), col1x, kpiY, theme.color.success);
         KPI('Ausgaben gesamt', this._fmtEUR(report.expensesTotal), col1x, kpiY + lineH, theme.color.danger);
@@ -740,15 +752,25 @@ class ExportService {
         // INHALT ab Seite 2
         const headerInfo = {
           title: `Jahresabschluss – ${theme.brandName}`,
-          subtitle: `Geschäftsjahr: ${fiscalYear.name} (${new Date(fiscalYear.startDate).toISOString().slice(0, 10)} – ${new Date(fiscalYear.endDate).toISOString().slice(0, 10)})`
+          subtitle: `Geschäftsjahr: ${fiscalYear.name} (${periodLabel}) · ${statusLabel}`
         };
         this._addPageDecorated(doc, theme, headerInfo);
 
-        this._section(doc, theme, 'Übersicht & Kennzahlen');
+        this._section(doc, theme, 'Übersicht & Kennzahlen (Stand Abschluss)');
         doc.fontSize(11)
           .fillColor(theme.color.success).text(`Einnahmen gesamt: ${this._fmtEUR(report.incomeTotal)}`)
           .fillColor(theme.color.danger).text(`Ausgaben gesamt: ${this._fmtEUR(report.expensesTotal)}`)
           .fillColor(theme.color.text).text(`Gewinn/Verlust: ${this._fmtEUR(report.profit)}`);
+
+        if (fiscalYear.closed && (driftIncome || driftExpenses)) {
+          doc.moveDown(0.5);
+          doc.fontSize(10).fillColor(theme.color.danger)
+            .text('Hinweis: Seit dem Abschluss wurden weitere Buchungen im Zeitraum erfasst. '
+              + 'Die folgenden Detailtabellen zeigen den heutigen Stand und weichen von den Kennzahlen oben ab:')
+            .text(`  Verkäufe + bezahlte Ausgangsrechnungen heute: ${this._fmtEUR(liveIncome)} (Abschluss: ${this._fmtEUR(snapshotIncome)})`)
+            .text(`  Bezahlte Eingangsrechnungen heute: ${this._fmtEUR(liveExpenses)} (Abschluss: ${this._fmtEUR(snapshotExpenses)})`)
+            .fillColor(theme.color.text).fontSize(11);
+        }
 
         doc.moveDown(0.5);
         doc.text(`Barkasse: ${this._fmtEUR(report.cashOnHand)}`)

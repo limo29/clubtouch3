@@ -380,7 +380,7 @@ const Articles = () => {
       return (await api.post(API_ENDPOINTS.ARTICLES, data)).data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['articles']);
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
       handleCloseDialog();
     },
   });
@@ -388,7 +388,7 @@ const Articles = () => {
   const toggleStatusMutation = useMutation({
     mutationFn: async (articleId) =>
       (await api.patch(`${API_ENDPOINTS.ARTICLES}/${articleId}/toggle-status`)).data,
-    onSuccess: () => queryClient.invalidateQueries(['articles']),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['articles'] }),
   });
 
   const expiredMutation = useMutation({
@@ -401,7 +401,7 @@ const Articles = () => {
       })).data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['articles']);
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
       handleCloseExpiredDialog();
     },
   });
@@ -411,7 +411,7 @@ const Articles = () => {
       return (await api.put(`${API_ENDPOINTS.ARTICLES}/reorder`, { items })).data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['articles']);
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
       setHasUnsavedChanges(false);
       setIsReordering(false); // Optionally exit mode
     },
@@ -564,7 +564,7 @@ const Articles = () => {
       } else {
         await api.post(API_ENDPOINTS.ARTICLES, formData, cfg);
       }
-      queryClient.invalidateQueries(['articles']);
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
       handleCloseDialog();
     } catch (err) {
       console.error('Upload failed', err);
@@ -1002,7 +1002,7 @@ const Articles = () => {
           </DialogContent>
           <DialogActions sx={{ p: 2, bgcolor: 'background.paper', borderTop: `1px solid ${theme.palette.divider}` }}>
             <Button onClick={handleCloseDialog} color="inherit" sx={{ borderRadius: 2 }}>Abbrechen</Button>
-            <Button type="submit" variant="contained" disabled={articleMutation.isLoading} size="large" sx={{ borderRadius: 2, px: 4 }} startIcon={<Save />}>
+            <Button type="submit" variant="contained" disabled={articleMutation.isPending} size="large" sx={{ borderRadius: 2, px: 4 }} startIcon={<Save />}>
               {editingArticle ? 'Speichern' : 'Anlegen'}
             </Button>
           </DialogActions>
@@ -1040,7 +1040,7 @@ const Articles = () => {
             onClick={handleExpiredSubmit}
             variant="contained"
             color="error" // Use error color for destructive/negative action
-            disabled={expiredMutation.isLoading || !expiredQuantity || expiredQuantity < 1}
+            disabled={expiredMutation.isPending || !expiredQuantity || expiredQuantity < 1}
           >
             Buchen
           </Button>

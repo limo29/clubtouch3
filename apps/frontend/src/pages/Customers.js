@@ -118,7 +118,7 @@ const Customers = () => {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['customers']);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
       handleCloseDialog();
     },
   });
@@ -130,7 +130,7 @@ const Customers = () => {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['customers']);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     }
   });
 
@@ -141,8 +141,8 @@ const Customers = () => {
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['customers']);
-      queryClient.invalidateQueries(['customer']);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customer'] });
       handleCloseTopUpDialog();
     },
   });
@@ -468,9 +468,9 @@ const Customers = () => {
             <Button
               type="submit"
               variant="contained"
-              disabled={customerMutation.isLoading}
+              disabled={customerMutation.isPending}
             >
-              {customerMutation.isLoading ? 'Speichere...' : 'Speichern'}
+              {customerMutation.isPending ? 'Speichere...' : 'Speichern'}
             </Button>
           </DialogActions>
         </form>
@@ -550,9 +550,9 @@ const Customers = () => {
             <Button
               type="submit"
               variant="contained"
-              disabled={topUpMutation.isLoading}
+              disabled={topUpMutation.isPending}
             >
-              {topUpMutation.isLoading ? 'Verarbeite...' : 'Aufladen'}
+              {topUpMutation.isPending ? 'Verarbeite...' : 'Aufladen'}
             </Button>
           </DialogActions>
         </form>

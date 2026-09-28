@@ -95,8 +95,8 @@ const Transactions = () => {
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['transactions']);
-      queryClient.invalidateQueries(['daily-summary']);
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['daily-summary'] });
       setCancelDialog(false);
       setSelectedTransaction(null);
     },
@@ -469,9 +469,9 @@ const Transactions = () => {
             onClick={handleCancelTransaction}
             color="error"
             variant="contained"
-            disabled={cancelMutation.isLoading}
+            disabled={cancelMutation.isPending}
           >
-            {cancelMutation.isLoading ? 'Storniere...' : 'Stornieren'}
+            {cancelMutation.isPending ? 'Storniere...' : 'Stornieren'}
           </Button>
         </DialogActions>
       </Dialog>

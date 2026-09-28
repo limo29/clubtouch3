@@ -70,7 +70,7 @@ const Users = () => {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['users']);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
       handleCloseDialog();
     },
   });
@@ -82,7 +82,7 @@ const Users = () => {
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['users']);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     },
   });
 
@@ -399,9 +399,9 @@ const Users = () => {
             <Button
               type="submit"
               variant="contained"
-              disabled={userMutation.isLoading}
+              disabled={userMutation.isPending}
             >
-              {userMutation.isLoading ? 'Speichere...' : 'Speichern'}
+              {userMutation.isPending ? 'Speichere...' : 'Speichern'}
             </Button>
           </DialogActions>
         </form>

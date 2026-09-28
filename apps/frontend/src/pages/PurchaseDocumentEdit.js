@@ -350,7 +350,8 @@ export default function PurchaseDocumentEdit() {
       ...a,
       unit: a.unit || "Flasche",
       purchaseUnit: a.purchaseUnit || "Kiste",
-      unitsPerPurchase: Number(a.unitsPerPurchase) || 0,
+      // Kistenfaktor nie 0: sonst bucht "1 Kiste" still 0 Flaschen (B8)
+      unitsPerPurchase: Math.max(1, Number(a.unitsPerPurchase) || 1),
     }));
   }, [articlesRaw]);
 
@@ -443,11 +444,15 @@ export default function PurchaseDocumentEdit() {
 
     if (file) formData.append("nachweis", file);
 
-    const submittedItems = (data.items || []).map((i) => ({
-      articleId: i.articleId,
-      kisten: i.kisten || 0,
-      flaschen: i.flaschen || 0,
-    }));
+    // Nur Zeilen mit Menge schicken (wie in Create). Sonst legt das Backend bei jedem
+    // Speichern alle Artikel als Null-Positionen neu an (B13).
+    const submittedItems = (data.items || [])
+      .filter((i) => (i.kisten || 0) > 0 || (i.flaschen || 0) > 0)
+      .map((i) => ({
+        articleId: i.articleId,
+        kisten: i.kisten || 0,
+        flaschen: i.flaschen || 0,
+      }));
     formData.append("items", JSON.stringify(submittedItems));
 
     mutation.mutate(formData);
@@ -465,8 +470,8 @@ export default function PurchaseDocumentEdit() {
     if (toUnlink.length) promises.push(unlinkMutation.mutateAsync(toUnlink));
 
     Promise.all(promises).finally(() => {
-      queryClient.invalidateQueries(["purchaseDocuments"]);
-      queryClient.invalidateQueries(["purchaseDocument", id]);
+      queryClient.invalidateQueries({ queryKey: ["purchaseDocuments"] });
+      queryClient.invalidateQueries({ queryKey: ["purchaseDocument", id] });
       navigate("/purchases");
     });
   };
@@ -477,7 +482,7 @@ export default function PurchaseDocumentEdit() {
     setLinkedLieferscheinIds(next);
   };
 
-  const isSaving = mutation.isLoading || linkMutation.isLoading || unlinkMutation.isLoading;
+  const isSaving = mutation.isPending || linkMutation.isPending || unlinkMutation.isPending;
 
   if (isLoadingDocument || isLoadingArticles)
     return <CircularProgress sx={{ display: "block", mx: "auto", my: 10 }} />;

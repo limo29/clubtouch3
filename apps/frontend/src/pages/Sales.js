@@ -132,22 +132,22 @@ const Sales = () => {
   /* Mutations */
   const cancelTransactionMutation = useMutation({
     mutationFn: async (id) => api.post(`/transactions/${id}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); refetchHistory(); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
   });
 
   const cancelTopUpMutation = useMutation({
     mutationFn: async (topUpId) => api.post(`/customers/${historyCustomer.id}/topup/${topUpId}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); refetchHistory(); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
   });
 
   const topUpMutation = useMutation({
     mutationFn: async (data) => api.post(`/customers/${data.customerId}/topup`, { amount: num(data.amount), method: data.method, reference: data.reference }),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); setShowTopUp(false); setTopUpAmount(''); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); setShowTopUp(false); setTopUpAmount(''); }
   });
 
   const quickSaleMutation = useMutation({
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); queryClient.invalidateQueries(['articles', 'sales']); setCart([]); setShowChangeCalc(false); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); queryClient.invalidateQueries({ queryKey: ['articles', 'sales'] }); setCart([]); setShowChangeCalc(false); }
   });
 
   /* Logic & Actions */
@@ -232,8 +232,13 @@ const Sales = () => {
   };
 
   const addToCart = (a) => {
-    const exists = cart.find(i => i.id === a.id);
-    exists ? setCart(cart.map(i => i.id === a.id ? { ...i, quantity: num(i.quantity) + 1 } : i)) : setCart([...cart, { ...a, quantity: 1 }]);
+    // funktionales Update: schnelle Doppeltipps dürfen keinen Klick verlieren (B11)
+    setCart(prev => {
+      const exists = prev.find(i => i.id === a.id);
+      return exists
+        ? prev.map(i => i.id === a.id ? { ...i, quantity: num(i.quantity) + 1 } : i)
+        : [...prev, { ...a, quantity: 1 }];
+    });
   };
 
   const updateQty = (id, delta) => {
@@ -533,7 +538,7 @@ const Sales = () => {
                     <ListItem key={i.id} sx={{ py: 1.5, px: 0, borderBottom: '1px solid', borderColor: 'divider' }}>
                       <Box sx={{ flex: 1 }}>
                         <Typography variant="body1" fontWeight={700}>{i.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">{money(i.price)} | Sum: {money(i.price * i.quantity)}</Typography>
+                        <Typography variant="caption" color="text.secondary">{money(i.price)} | Summe: {money(i.price * i.quantity)}</Typography>
                       </Box>
                       <Stack direction="row" alignItems="center" spacing={0}>
                         <IconButton onClick={() => updateQty(i.id, -1)} color={i.quantity === 1 ? 'error' : 'default'} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '8px 0 0 8px' }}>
@@ -581,7 +586,7 @@ const Sales = () => {
                   if (!bookingTarget.data) return 'Kunde?';
                   const newBal = bookingTarget.data.balance - total;
                   const name = bookingTarget.data.nickname || bookingTarget.data.name.split(' ')[0];
-                  if (newBal < -10) return `Limit Exceeded! (${money(newBal)})`;
+                  if (newBal < -10) return `Limit überschritten (${money(newBal)})`;
                   if (newBal < 0) return `Überziehen: ${name}`;
                   return `Buchen: ${name}`;
                 })()}

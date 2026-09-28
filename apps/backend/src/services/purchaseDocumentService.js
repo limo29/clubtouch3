@@ -103,6 +103,11 @@ class PurchaseDocumentService {
           const flaschenQty = new Prisma.Decimal(item.flaschen || 0);
           const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
 
+          // Ohne Kistenfaktor darf keine Kiste gebucht werden, sonst landen still 0 Flaschen im Bestand (B8)
+          if (kistenQty.gt(0) && unitsPerKiste.lte(0)) {
+            throw new Error(`Artikel "${article.name}" hat keinen Kistenfaktor (Einheiten pro ${article.purchaseUnit || 'Kiste'}). Bitte im Artikel pflegen.`);
+          }
+
           // Gesamtmenge in "Basiseinheit" (z.B. Flasche)
           const totalQuantityToBook = (kistenQty.times(unitsPerKiste)).plus(flaschenQty);
 

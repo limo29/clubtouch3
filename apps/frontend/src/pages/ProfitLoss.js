@@ -28,7 +28,6 @@ const fmt = (amount) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(asNum(amount));
 
 const PROFIT_LOSS_PATH = '/accounting/profit-loss';
-const PROFIT_LOSS_FALLBACK = '/purchases/profit-loss';
 
 /* ====== INVENTUR-KARTE ====== */
 function QtyButton({ onClick, children }) {
@@ -518,25 +517,13 @@ export default function ProfitLoss() {
   const { data: plData, error: plError } = useQuery({
     queryKey: ['profit-loss', dateRange.startDate?.toISOString(), dateRange.endDate?.toISOString()],
     queryFn: async () => {
-      try {
-        const res = await api.get(PROFIT_LOSS_PATH, {
-          params: {
-            startDate: format(dateRange.startDate, 'yyyy-MM-dd'),
-            endDate: format(dateRange.endDate, 'yyyy-MM-dd'),
-            includeInvoices: true,
-          },
-        });
-        return res.data;
-      } catch {
-        const res = await api.get(PROFIT_LOSS_FALLBACK, {
-          params: {
-            startDate: format(dateRange.startDate, 'yyyy-MM-dd'),
-            endDate: format(dateRange.endDate, 'yyyy-MM-dd'),
-            includeInvoices: true,
-          },
-        });
-        return res.data;
-      }
+      const res = await api.get(PROFIT_LOSS_PATH, {
+        params: {
+          startDate: format(dateRange.startDate, 'yyyy-MM-dd'),
+          endDate: format(dateRange.endDate, 'yyyy-MM-dd'),
+        },
+      });
+      return res.data;
     },
     enabled: !!dateRange.startDate && !!dateRange.endDate,
   });
@@ -609,7 +596,7 @@ export default function ProfitLoss() {
       const fy = res?.data?.fiscalYear;
       setOpenNew(false);
       setNewFy({ name: '', startDate: null, endDate: null });
-      qc.invalidateQueries(['fiscal-years']);
+      qc.invalidateQueries({ queryKey: ['fiscal-years'] });
       if (fy) setCloseTarget(fy); // << direkt in den Abschluss
     },
   });
@@ -621,7 +608,7 @@ export default function ProfitLoss() {
     mutationFn: async ({ id, payload }) => api.post(`/accounting/fiscal-years/${id}/close`, payload),
     onSuccess: () => {
       setCloseTarget(null);
-      qc.invalidateQueries(['fiscal-years']);
+      qc.invalidateQueries({ queryKey: ['fiscal-years'] });
     },
   });
 
@@ -648,7 +635,11 @@ export default function ProfitLoss() {
         </Grid>
       </Paper>
 
-      {plError && <Alert severity="error" sx={{ mb: 2 }}>Fehler beim Laden der EÜR.</Alert>}
+      {plError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Fehler beim Laden der EÜR{plError?.response?.data?.error ? `: ${plError.response.data.error}` : '.'}
+        </Alert>
+      )}
 
       {/* Summary */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -675,7 +666,7 @@ export default function ProfitLoss() {
             title="Gewinn/Verlust"
             value={(summary.profit > 0 ? '+' : '') + fmt(summary.profit)}
             icon={AccountBalance}
-            color={summary.profit >= 0 ? "info" : "warning"}
+            color={summary.profit >= 0 ? "success" : "error"}
             loading={!plData}
           />
         </Grid>
@@ -939,10 +930,10 @@ export default function ProfitLoss() {
           <Button onClick={() => setOpenNew(false)}>Abbrechen</Button>
           <Button
             onClick={() => createFY.mutate()}
-            disabled={!newFy.name || !newFy.startDate || !newFy.endDate || createFY.isLoading}
+            disabled={!newFy.name || !newFy.startDate || !newFy.endDate || createFY.isPending}
             variant="contained"
           >
-            {createFY.isLoading ? 'Speichert…' : 'Speichern'}
+            {createFY.isPending ? 'Speichert…' : 'Speichern'}
           </Button>
         </DialogActions>
       </Dialog>

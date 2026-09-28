@@ -351,7 +351,8 @@ export default function PurchaseDocumentCreate() {
       // Fallbacks, damit UI stabil bleibt
       unit: a.unit || "Flasche",
       purchaseUnit: a.purchaseUnit || "Kiste",
-      unitsPerPurchase: Number(a.unitsPerPurchase) || 0,
+      // Kistenfaktor nie 0: sonst bucht "1 Kiste" still 0 Flaschen (B8)
+      unitsPerPurchase: Math.max(1, Number(a.unitsPerPurchase) || 1),
     }));
   }, [articlesRaw]);
 
@@ -382,7 +383,7 @@ export default function PurchaseDocumentCreate() {
         headers: { "Content-Type": "multipart/form-data" },
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries(["purchaseDocuments"]);
+      queryClient.invalidateQueries({ queryKey: ["purchaseDocuments"] });
       navigate("/purchases");
     },
     onError: (err) => console.error("Fehler beim Erstellen:", err),
@@ -498,9 +499,9 @@ export default function PurchaseDocumentCreate() {
               startIcon={<SaveIcon />}
               color="primary"
               variant="contained"
-              disabled={mutation.isLoading || isLoadingArticles || !initializedRef.current}
+              disabled={mutation.isPending || isLoadingArticles || !initializedRef.current}
             >
-              {mutation.isLoading ? "Speichert..." : "Speichern"}
+              {mutation.isPending ? "Speichert..." : "Speichern"}
             </Button>
           </Stack>
         </Stack>
@@ -782,10 +783,10 @@ export default function PurchaseDocumentCreate() {
             startIcon={<SaveIcon />}
             color="primary"
             variant="contained"
-            disabled={mutation.isLoading || isLoadingArticles || !initializedRef.current}
+            disabled={mutation.isPending || isLoadingArticles || !initializedRef.current}
             fullWidth
           >
-            {mutation.isLoading ? "Speichert..." : "Speichern"}
+            {mutation.isPending ? "Speichert..." : "Speichern"}
           </Button>
         </Paper>
       )}

@@ -190,24 +190,24 @@ export default function PurchaseDocuments() {
   const markPaid = useMutation({
     mutationFn: ({ id, paymentMethod }) =>
       api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod }),
-    onSuccess: () => queryClient.invalidateQueries(["purchase-documents"]),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
   });
 
   const markUnpaid = useMutation({
     mutationFn: (id) => api.post(`/purchase-documents/${id}/mark-unpaid`),
-    onSuccess: () => queryClient.invalidateQueries(["purchase-documents"]),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
   });
 
   const del = useMutation({
     mutationFn: (id) => api.delete(`/purchase-documents/${id}`),
     onSuccess: () => {
       setDeletingId(null);
-      queryClient.invalidateQueries(["purchase-documents"]);
+      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
     },
     onError: () => setDeletingId(null),
   });
 
-  const isAnyMutating = markPaid.isLoading || markUnpaid.isLoading || del.isLoading;
+  const isAnyMutating = markPaid.isPending || markUnpaid.isPending || del.isPending;
 
   /* -------- Handlers -------- */
   const togglePaidStatus = (doc) => {
@@ -246,7 +246,7 @@ export default function PurchaseDocuments() {
   const handleFilterChange = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
   const resetFilters = () => {
     setFilters({ startDate: null, endDate: null });
-    queryClient.invalidateQueries(["purchase-documents"]);
+    queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
   };
 
   const fmtDate = (d) => {
@@ -279,7 +279,7 @@ export default function PurchaseDocuments() {
       await api.patch(`/purchase-documents/${uploadDocId}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      queryClient.invalidateQueries(["purchase-documents"]);
+      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
     } catch (err) {
       console.error("Upload error:", err);
       window.alert("Fehler beim Hochladen des Nachweises.");
