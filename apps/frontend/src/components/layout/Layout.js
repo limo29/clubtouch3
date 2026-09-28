@@ -388,6 +388,7 @@ const Layout = () => {
       {/* Main Content Area: Added display flex column to allow full height children */}
       <Box component="main" sx={{
         flexGrow: 1,
+        minWidth: 0, // sonst treiben Tabs/Tabellen die Min-Content-Breite über den Viewport (Handy)
         display: 'flex',
         flexDirection: 'column',
         mt: hideChrome ? 0 : 8,
