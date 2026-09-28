@@ -709,7 +709,7 @@ class ExportService {
 
         // Zusammenfassungs-Panel (roundedRect-Fallback)
         const panelX = theme.page.margin;
-        const panelY = 210;
+        const panelY = Math.max(220, doc.y + 24); // unter Titel + Statuszeile, nie überlappend
         const panelW = doc.page.width - theme.page.margin * 2;
         const panelH = 170;
         const radius = 8;
