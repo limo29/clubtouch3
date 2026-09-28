@@ -1,0 +1,93 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+ClubTouch3 is a German-language web POS ("Kassensystem") for a club bar: touch sales screen, member accounts with balances, stock, purchase documents, invoices, PDF/CSV reports, a live "Clubscore" highscore, and a digital-signage slide editor. UI strings, comments, commit messages and error messages are in German; keep new user-facing text in German.
+
+Monorepo with two independent npm projects (no root package.json, no workspaces):
+
+- `apps/backend` – Express 5 + Prisma 6 + PostgreSQL 15 + Socket.io, plain CommonJS JS (no build step; the TypeScript devDependencies are unused).
+- `apps/frontend` – Create React App (react-scripts 5), React 19, MUI 7, TanStack Query 5, React Router 7.
+
+## Commands
+
+Run from the respective app directory. Install with `npm install` in each.
+
+Backend (`apps/backend`):
+
+```bash
+npm run dev                    # nodemon src/server.js
+npm start                      # node src/server.js
+npm run prisma:generate        # regenerate client after schema changes
+npm run prisma:migrate         # prisma migrate dev (creates a migration)
+npm run prisma:migrate:deploy  # apply migrations (used in Docker CMD)
+npm run prisma:seed            # creates admin@clubtouch3.local / Admin123! + sample articles
+npm run prisma:studio
+```
+
+Frontend (`apps/frontend`):
+
+```bash
+npm start                      # CRA dev server on :3000
+npm run build                  # static build into build/
+npm test                       # react-scripts test (jest, watch mode)
+npm test -- --watchAll=false src/components/layout/Layout.test.js   # single file
+```
+
+Backend has no test runner or linter. The `test-*.ps1` files in `apps/backend` are ad-hoc PowerShell smoke scripts that hit `http://localhost:3001/api` with the seeded admin. CI (`.github/workflows/ci.yml`) only runs `npm install` in both apps and `npm run build` in the frontend, so a broken frontend build is the only thing CI catches.
+
+Docker (from `docker/`): `./manage.sh start|start-dev|stop|rebuild|logs-f|backup|restore|clean`, or `manage.ps1` on Windows. `docker-compose.yml` brings up db + backend + frontend (+ adminer under `--profile dev`). Note its build contexts are `./apps/...` (repo root as project dir) while `docker-compose.simple.yml` uses `../apps/...`.
+
+### Local dev port gotcha
+
+The CRA dev server proxies `/api` to `http://localhost:3001` (`proxy` field in `apps/frontend/package.json`), but the backend defaults to `PORT=8080` when unset. Set `PORT=3001` in `apps/backend/.env` for local development. The frontend needs no `.env`: `REACT_APP_API_URL` defaults to `/api` and `REACT_APP_WS_URL` to `/`.
+
+### Backend environment
+
+There is no `apps/backend/.env.example`; `docker/.env.example` and `docker/docker-compose.yml` are the reference for variable names. Required: `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `JWT_EXPIRE_TIME`, `JWT_REFRESH_EXPIRE_TIME`. Optional: `PORT`, `NODE_ENV`, `BCRYPT_ROUNDS`, `FRONTEND_URL` (socket CORS in production), `PUBLIC_BASE_URL` (upload URLs), `EXPORT_DIR` (defaults to `/tmp/exports`), `INVOICE_IBAN` / `INVOICE_BIC` / `INVOICE_PAYEE_NAME` / `INVOICE_REF_PREFIX`.
+
+## Architecture
+
+### Backend request flow
+
+`src/server.js` → `src/app.js` (Express app, mounts all routers under `/api/*`, serves `./uploads` statically) → `src/routes/*.js` → `src/controllers/*.js` → `src/services/*.js` → `src/utils/prisma.js` (singleton PrismaClient).
+
+- Routers apply `authenticate` (Bearer JWT, loads the user and checks `active`, sets `req.user`) and `authorize('ADMIN', 'CASHIER', ...)` from `src/middleware/auth.js`. Roles are `ADMIN | CASHIER | ACCOUNTANT`. `routes/public.js` (`/api/public/*`) is deliberately unauthenticated for kiosk screens: highscore, ads, and balance lookup by name.
+- Input validation is `express-validator` chains in `src/middleware/validation.js` followed by `handleValidationErrors`.
+- Controllers are classes exported as singleton instances; they catch errors and send German messages. Business logic that mutates money or stock lives in services and runs inside `prisma.$transaction`. Controllers write `AuditLog` rows after mutating calls.
+- `app.js` installs a JSON replacer that converts BigInt and Prisma `Decimal` to JS numbers for every response. Raw SQL results (`$queryRaw`) still need `Number()` on the server side when used in arithmetic.
+- Realtime: `src/utils/websocket.js` wraps Socket.io. Every socket joins the `highscore` room; the auth token is optional (anonymous connections allowed). `transactionService.createSale` emits `sale:new` and triggers `highscoreService.updateAfterSale`, which emits `highscore:update`.
+
+### Domain rules encoded in services
+
+- Sales (`transactionService`): `Transaction.type` is `SALE | REFUND | EXPIRED | OWNER_USE`. Only `SALE` has a non-zero `totalAmount`; `EXPIRED` and `OWNER_USE` ("Auf den Wirt") book stock movements with amount 0. Stock may go negative (warning + `NEGATIVE_STOCK_WARNING` audit, never a block). Paying by `ACCOUNT` enforces a hardcoded 10 EUR overdraft limit. Cancelling creates a linked `REFUND` transaction rather than deleting.
+- The "business day" does not start at midnight: the daily summary uses a 6:00 start and the highscore a 12:00 reset (`highscoreService.getSettings`, hardcoded). Both compute the day window manually.
+- Highscore goals configuration is persisted as `AuditLog` rows (`entityType: 'HighscoreGoals'`), not in a dedicated table. Invoice settings live in the `SystemSetting` key-value table.
+- Purchasing: `PurchaseDocument` is either `RECHNUNG` (invoice, money) or `LIEFERSCHEIN` (delivery note, goods); delivery notes can be attached to one invoice via `rechnungId`. Items store the final base unit plus how they were entered (purchase unit × quantity), driven by `Article.purchaseUnit` / `unitsPerPurchase`.
+- Accounting (`accountingService`): profit/loss (EÜR) counts `SALE` transactions as income and paid `RECHNUNG` documents as expenses; customer top-ups are not income. A `FiscalYear` can be closed into a `YearEndReport` snapshot.
+- All money and quantities are `Decimal(10,2)` in Prisma; services generally cast to `Number` for arithmetic.
+
+### Uploads and exports
+
+`fileUploadService` writes under `<cwd>/uploads/` (`articles/{original,thumbnail,small,medium,large}` as WebP via sharp, `nachweise/` for receipt scans); `middleware/upload.js` stores ad slide media in `uploads/ads` with a 500 MB limit. Stored URLs are relative (`/uploads/...`) so they work behind the nginx proxy. PDFs are built with PDFKit in `exportService` (theme in `getTheme()`, brand name "Clubraum").
+
+### Frontend structure
+
+- `src/index.js` wraps the app in `ColorModeProvider` (dark default, persisted in localStorage) → `OfflineProvider` → `BrowserRouter`; `src/App.js` adds React Query, MUI date pickers (de locale), `AuthProvider`, and the route tree. Authenticated pages render inside `components/layout/Layout.js` (drawer nav, kiosk mode via `?kiosk=1` or a `data-kiosk` attribute on body). `/public/highscore`, `/public/ads` and `/check-balance` sit outside the auth shell.
+- `src/services/api.js` is the single axios instance: it attaches the Bearer token from localStorage and transparently refreshes on 401 via `/auth/refresh`, redirecting to `/login` on failure. Endpoint paths are constants in `src/config/api.js`.
+- Data fetching is TanStack Query directly in page components (`src/pages/*.js`); pages are large single files that own their dialogs and mutations. There is no per-resource API layer.
+- Offline: `context/OfflineContext.js` keeps a localStorage queue of sales and top-ups; `Sales.js` enqueues when `navigator.onLine` is false and the queue drains sequentially on reconnect. 4xx failures currently stay in the queue.
+- The live highscore uses `hooks/useHighscoreLogic.js` (socket.io-client against `WS_URL` plus polling).
+
+### Deployment
+
+Railway (`railway.toml`) deploys two services from the per-app Dockerfiles. The backend container runs `prisma migrate deploy` then `node src/server.js`. The frontend container builds the CRA app and serves it with nginx; `nginx.conf` is an envsubst template that proxies `/api`, `/uploads` and `/socket.io` to `$BACKEND_URL`, so the SPA only talks to same-origin paths.
+
+## Repo notes
+
+- `apps/backend/index.js` is a leftover hello-world server; the real entry is `src/server.js`.
+- `README.md` is UTF-16 encoded; read it with `Get-Content -Encoding Unicode` or an editor, not `cat`.
+- Migrations live in `apps/backend/prisma/migrations`; add a migration with `npm run prisma:migrate` rather than editing the schema alone.
+- Work happens on branches `dev` / `public-dev` and is merged to `main` via PRs.
