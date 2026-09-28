@@ -7,12 +7,12 @@
 import React, { useMemo, useState } from 'react';
 import {
   Box, Card, CardContent, Typography, Grid, Paper, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Button, TextField, Alert, Chip, Dialog,
+  TableContainer, TableHead, TableRow, Button, IconButton, TextField, Alert, Chip, Dialog,
   DialogTitle, DialogContent, DialogActions, Stack, Tabs, Tab, Skeleton, useTheme, useMediaQuery,
 } from '@mui/material';
 import {
-  Download, TrendingUp, TrendingDown, AccountBalance, Add, PointOfSale, PictureAsPdf, Lock,
-  ArrowUpward, ArrowDownward, AddCircleOutline, RemoveCircleOutline,
+  Close, Download, TrendingUp, TrendingDown, AccountBalance, Add, PointOfSale, PictureAsPdf, Lock,
+  ArrowUpward, ArrowDownward, AddCircleOutline, RemoveCircleOutline, ReceiptLong,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -22,6 +22,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import api from '../services/api';
 import KPICard from '../components/common/KPICard';
 import CloseYearStepper from '../components/finance/CloseYearStepper';
+import ReceiptReview from '../components/finance/ReceiptReview';
 import CashMovementList from '../components/finance/CashMovementList';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
@@ -87,8 +88,10 @@ function SimpleTable({ head, rows, empty = 'Keine Einträge', footer, maxHeight 
 
 function EurSection() {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [dateRange, setDateRange] = useState({ startDate: new Date(new Date().getFullYear(), 0, 1), endDate: new Date() });
   const [downloadError, setDownloadError] = useState(null);
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
   const params = {
     startDate: format(dateRange.startDate, 'yyyy-MM-dd'),
     endDate: format(dateRange.endDate, 'yyyy-MM-dd'),
@@ -130,9 +133,35 @@ function EurSection() {
           <DatePicker label="Von" value={dateRange.startDate} onChange={(d) => d && setDateRange((r) => ({ ...r, startDate: d }))} slotProps={{ textField: { size: 'small' } }} />
           <DatePicker label="Bis" value={dateRange.endDate} onChange={(d) => d && setDateRange((r) => ({ ...r, endDate: d }))} slotProps={{ textField: { size: 'small' } }} />
           <Box sx={{ flex: 1 }} />
+          <Button variant="outlined" startIcon={<ReceiptLong />} onClick={() => setReceiptsOpen(true)}>
+            Belege prüfen
+          </Button>
           <Button variant="contained" startIcon={<Download />} onClick={downloadEUR}>PDF Export</Button>
         </Stack>
       </Paper>
+
+      <Dialog
+        open={receiptsOpen}
+        onClose={() => setReceiptsOpen(false)}
+        maxWidth="xl"
+        fullWidth
+        fullScreen={isMobile}
+      >
+        <Box sx={{ p: { xs: 2, sm: 3 }, display: 'flex', flexDirection: 'column', minHeight: isMobile ? '100vh' : '80vh' }}>
+          <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
+            <Typography variant="h6" sx={{ flex: 1 }}>Belege prüfen (Zeitraum)</Typography>
+            <IconButton onClick={() => setReceiptsOpen(false)} aria-label="Schließen"><Close /></IconButton>
+          </Stack>
+          <Box sx={{ flex: 1, overflow: 'auto' }}>
+            <ReceiptReview
+              fetchUrl="/purchase-documents/receipts"
+              zipUrl="/purchase-documents/receipts.zip"
+              params={{ startDate: params.startDate, endDate: params.endDate }}
+              title="Belege im Zeitraum"
+            />
+          </Box>
+        </Box>
+      </Dialog>
 
       {error && <Alert severity="error">Fehler beim Laden der EÜR{error?.response?.data?.error ? `: ${error.response.data.error}` : '.'}</Alert>}
       {downloadError && <Alert severity="error" onClose={() => setDownloadError(null)}>{downloadError}</Alert>}

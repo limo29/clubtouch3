@@ -6,7 +6,7 @@
  * Inventur in Kisten UND Stück, Payload bleibt `physicalInventory: [{articleId, physicalStock}]`
  * in Basiseinheit.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Dialog, DialogContent, DialogActions, Box, Typography, IconButton, Button, Stepper, Step, StepLabel,
   LinearProgress, Alert, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, InputAdornment,
@@ -21,8 +21,9 @@ import { money, num, qty, qtyShort, unitLabel } from '../../utils/format';
 import { crateFactor, hasCrate, fromBaseUnits, toBaseUnits } from '../../utils/units';
 import { downloadFile, apiErrorMessage } from '../../utils/download';
 import QuantityStepper from '../common/QuantityStepper';
+import ReceiptReview from './ReceiptReview';
 
-const STEPS = ['Zeitraum & Kennzahlen', 'Kasse', 'Bank', 'Inventur', 'Prüfen & abschließen'];
+const STEPS = ['Zeitraum & Kennzahlen', 'Kasse', 'Bank', 'Belege', 'Inventur', 'Prüfen & abschließen'];
 
 const fmtDate = (d) => (d ? format(new Date(d), 'dd.MM.yyyy') : '—');
 const fmtDateTime = (d) => (d ? format(new Date(d), 'dd.MM.yyyy HH:mm') : '—');
@@ -308,7 +309,7 @@ function StepInventory({ articles, systemStockById, counts, setCounts }) {
 
 /* --------------------------------- Prüfen --------------------------------- */
 
-function StepReview({ fy, preview, chosenCount, banks, articles, systemStockById, counts, error }) {
+function StepReview({ fy, preview, chosenCount, banks, articles, systemStockById, counts, error, missingReceiptNumbers }) {
   const s = preview?.summary || {};
   const profit = num(s.profit);
   const validBanks = banks.filter((b) => b.name || b.iban || b.balance);
@@ -328,6 +329,12 @@ function StepReview({ fy, preview, chosenCount, banks, articles, systemStockById
     <Stack spacing={2}>
       {error && <Alert severity="error">{error}</Alert>}
       {!chosenCount && <Alert severity="error">Ohne Kassenzählung im Abschlussfenster kann das Geschäftsjahr nicht abgeschlossen werden.</Alert>}
+      {missingReceiptNumbers && missingReceiptNumbers.length > 0 && (
+        <Alert severity="warning">
+          <strong>{missingReceiptNumbers.length} Beleg{missingReceiptNumbers.length === 1 ? '' : 'e'} ohne Nachweis:</strong>{' '}
+          {missingReceiptNumbers.join(', ')}
+        </Alert>
+      )}
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 6 }}>
           <Typography variant="subtitle2" gutterBottom>Geschäftsjahr</Typography>
@@ -403,12 +410,18 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
   const [selectedCountId, setSelectedCountId] = useState(null);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [missingReceiptNumbers, setMissingReceiptNumbers] = useState(null);
 
   useEffect(() => {
     if (!open) {
-      setActiveStep(0); setBanks([emptyBank()]); setCounts({}); setSelectedCountId(null); setError(null); setResult(null);
+      setActiveStep(0); setBanks([emptyBank()]); setCounts({}); setSelectedCountId(null);
+      setError(null); setResult(null); setMissingReceiptNumbers(null);
     }
   }, [open]);
+
+  const handleReceiptSummary = useCallback((_summary, missing) => {
+    setMissingReceiptNumbers(missing);
+  }, []);
 
   const { data: preview, isLoading: previewLoading, error: previewError, refetch } = useQuery({
     queryKey: ['fy-preview', fy?.id],
@@ -422,6 +435,19 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
     queryFn: async () => (await api.get('/cash-counts', { params: { limit: 50 } })).data,
     enabled: open,
   });
+
+  // Fallback: Belegliste laden falls der Belege-Schritt übersprungen/noch nicht geladen wurde
+  const receiptsFetchUrl = fy ? `/accounting/fiscal-years/${fy.id}/receipts` : null;
+  const { data: receiptsDataFallback } = useQuery({
+    queryKey: ['receipts', receiptsFetchUrl, undefined],
+    queryFn: async () => (await api.get(receiptsFetchUrl)).data,
+    enabled: open && !!fy?.id && activeStep === STEPS.length - 1 && missingReceiptNumbers === null,
+    staleTime: 30000,
+  });
+
+  const effectiveMissingNumbers = missingReceiptNumbers !== null
+    ? missingReceiptNumbers
+    : ((receiptsDataFallback?.documents || []).filter((d) => !d.hasNachweis).map((d) => d.documentNumber).filter(Boolean));
 
   const { articles } = useArticles();
   const systemStockById = useMemo(
@@ -515,9 +541,17 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
             {activeStep === 0 && <StepOverview fy={fy} preview={preview} isLoading={previewLoading} error={previewError} onRefetch={() => refetch()} />}
             {activeStep === 1 && <StepCash preview={preview} candidates={candidates} selectedId={selectedCountId} onSelect={setSelectedCountId} />}
             {activeStep === 2 && <StepBank banks={banks} setBanks={setBanks} />}
-            {activeStep === 3 && <StepInventory articles={articles} systemStockById={systemStockById} counts={counts} setCounts={setCounts} />}
-            {activeStep === 4 && (
-              <StepReview fy={fy} preview={preview} chosenCount={chosenCount} banks={banks} articles={articles} systemStockById={systemStockById} counts={counts} error={error} />
+            {activeStep === 3 && (
+              <ReceiptReview
+                fetchUrl={`/accounting/fiscal-years/${fy.id}/receipts`}
+                zipUrl={`/accounting/fiscal-years/${fy.id}/receipts.zip`}
+                title="Belege im Geschäftsjahr"
+                onSummary={handleReceiptSummary}
+              />
+            )}
+            {activeStep === 4 && <StepInventory articles={articles} systemStockById={systemStockById} counts={counts} setCounts={setCounts} />}
+            {activeStep === 5 && (
+              <StepReview fy={fy} preview={preview} chosenCount={chosenCount} banks={banks} articles={articles} systemStockById={systemStockById} counts={counts} error={error} missingReceiptNumbers={effectiveMissingNumbers} />
             )}
           </>
         )}
