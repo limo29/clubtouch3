@@ -31,18 +31,21 @@ class AccountingController {
       res.status(201).json({ fiscalYear: fy });
     } catch (e) {
       console.error(e);
-      res.status(500).json({ error: 'Fehler beim Anlegen des Geschäftsjahres' });
+      const known = /erforderlich|Ungültiges Datum|liegt vor/.test(e.message || '');
+      res.status(known ? 400 : 500).json({ error: known ? e.message : 'Fehler beim Anlegen des Geschäftsjahres' });
     }
   }
 
   async closeFiscalYear(req, res) {
     try {
       const { id } = req.params;
-      const { cashOnHand, bankAccounts, physicalInventory } = req.body;
+      // cashOnHand wird nicht mehr manuell übernommen: Der Kassenbestand kommt aus der
+      // letzten Kassenzählung im Geschäftsjahr (optional explizit per cashCountId).
+      const { bankAccounts, physicalInventory, cashCountId } = req.body;
       const payload = await accountingService.closeFiscalYear(id, {
-        cashOnHand,
         bankAccounts,
-        physicalInventory
+        physicalInventory,
+        cashCountId
       });
       res.json(payload);
     } catch (e) {
@@ -55,7 +58,7 @@ class AccountingController {
   async yearEndReportPDF(req, res) {
     try {
       const { id } = req.params;
-      const result = await exportService.exportYearEndReportPDF(id);
+      const result = await exportService.exportYearEndReportPDF(id, { createdBy: req.user.name });
       res.setHeader('Content-Type', result.mimeType);
       res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
       res.send(result.data);

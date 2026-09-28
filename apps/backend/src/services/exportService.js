@@ -1,51 +1,66 @@
 // services/exportService.js
 const { parse } = require('json2csv');
 const PDFDocument = require('pdfkit');
-const prisma = require('../utils/prisma');
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
+const prisma = require('../utils/prisma');
 const accountingService = require('./accountingService');
 const customerService = require('./customerService');
+const cashCountService = require('./cashCountService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
+
+// Logo einmal beim Laden lesen; fehlt die Datei, wird ohne Logo gerendert.
+const LOGO_PATH = path.join(__dirname, '..', 'assets', 'logo.png');
+let LOGO_BUFFER = null;
+try { LOGO_BUFFER = fs.readFileSync(LOGO_PATH); } catch (_) { LOGO_BUFFER = null; }
 
 class ExportService {
   constructor() {
-    // Nutze /tmp statt /app
-    this.exportDir = process.env.EXPORT_DIR || path.join('/tmp', 'exports');
-    this.ensureExportDir();
     this.currencyFmt = new Intl.NumberFormat('de-DE', {
       style: 'currency', currency: 'EUR',
       minimumFractionDigits: 2, maximumFractionDigits: 2
     });
+    this.dateFmt = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    this.dateTimeFmt = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
-
-  async ensureExportDir() {
-    try {
-      await fs.mkdir(this.exportDir, { recursive: true });
-    } catch (e) {
-      console.error('Error creating export directory:', e);
-    }
-  }
-
-
 
   /* ========= THEME & UTIL ========= */
   getTheme() {
     return {
       brandName: 'Clubraum',
-      page: { margin: 50, size: 'A4' },
+      // top/bottom lassen Platz für Kopf (Titel, Untertitel, Logo) und Fußzeile
+      page: { margin: 50, top: 92, bottom: 62, size: 'A4' },
       font: { regular: 'Helvetica', bold: 'Helvetica-Bold' },
+      logo: { height: 28 },
       color: {
         text: '#0f172a', subtext: '#475569',
         primary: '#2563eb', border: '#e2e8f0',
         tableHeaderBg: '#f1f5f9', tableHeaderText: '#334155',
         zebra: '#f8fafc', panelBg: '#f8fafc',
-        success: '#16a34a', danger: '#dc2626'
+        success: '#16a34a', danger: '#dc2626', warning: '#d97706'
       }
     };
   }
   _fmtEUR = (n) => this.currencyFmt.format(Number(n || 0));
-  _fmtDate = (d) => d ? new Date(d).toLocaleDateString('de-DE') : '—';
+  _fmtDate = (d) => {
+    if (!d) return '—';
+    const x = d instanceof Date ? d : parseLocalDate(d);
+    return x && !Number.isNaN(x.getTime()) ? this.dateFmt.format(x) : '—';
+  };
+  _fmtDateTime = (d) => {
+    if (!d) return '—';
+    const x = new Date(d);
+    return Number.isNaN(x.getTime()) ? '—' : this.dateTimeFmt.format(x);
+  };
+  /** Zahl mit Komma für CSV (Excel-DE) */
+  _csvNum = (n, digits = 2) => (n === null || n === undefined || n === '') ? '' : Number(n).toFixed(digits).replace('.', ',');
+  _csvDateTime = (d) => d ? this.dateTimeFmt.format(new Date(d)) : '';
+  _paymentLabel(pm) {
+    return ({ CASH: 'Bar', ACCOUNT: 'Kundenkonto', INVOICE: 'Rechnung', TRANSFER: 'Überweisung' })[pm] || (pm || '—');
+  }
+  _invoiceStatusLabel(st) {
+    return ({ DRAFT: 'Entwurf', SENT: 'Versendet', PAID: 'Bezahlt', CANCELLED: 'Storniert' })[st] || (st || '—');
+  }
   _fmtQty(n, unit, pUnit, pQty) {
     const val = Number(n || 0);
     const absVal = Math.abs(val);
@@ -72,62 +87,212 @@ class ExportService {
     return `${sign}${human} (${val.toFixed(0)})`;
   }
 
-  _createDocWithBuffer() {
+  /* ========= PDF-GRUNDGERÜST =========
+   * Kein Instanzzustand: Alles, was eine Seite zum Dekorieren braucht, hängt am
+   * Dokument selbst (doc._ct). headerInfo:
+   *   { reportName, title, subtitle, watermark, createdBy }
+   * Jede per addPage() neu angelegte Seite (auch automatische Umbrüche) bekommt
+   * über das 'pageAdded'-Event den Kopf; die erste Seite dekoriert der Aufrufer
+   * explizit (Deckblätter bleiben so frei). _finishDoc schreibt die Fußzeilen
+   * "Clubraum · Bericht | erstellt am … von … | Seite x von y" auf alle Seiten.
+   */
+  _createDocWithBuffer(headerInfo = {}) {
     const theme = this.getTheme();
     const doc = new PDFDocument({
-      margin: theme.page.margin, size: theme.page.size, bufferPages: true
+      margins: { top: theme.page.top, bottom: theme.page.bottom, left: theme.page.margin, right: theme.page.margin },
+      size: theme.page.size,
+      bufferPages: true,
+      info: {
+        Title: headerInfo.title || headerInfo.reportName || theme.brandName,
+        Author: headerInfo.createdBy || theme.brandName,
+        Creator: 'ClubTouch3'
+      }
     });
+    doc._ct = { headerInfo: { ...headerInfo }, createdAt: new Date(), theme };
+    doc.on('pageAdded', () => this._decoratePage(doc, theme, doc._ct.headerInfo));
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     const done = new Promise(resolve => doc.on('end', () => resolve(Buffer.concat(chunks))));
     return { doc, done, theme };
   }
 
-  _decoratePage(doc, theme, { title, subtitle }) {
-    this._lastHeaderInfo = { title, subtitle };
+  _drawLogo(doc, theme, { x, y, height }) {
+    if (!LOGO_BUFFER) return 0;
+    try {
+      doc.image(LOGO_BUFFER, x, y, { height });
+      return height; // Logo ist annähernd quadratisch
+    } catch (_) { return 0; }
+  }
+
+  _decoratePage(doc, theme, headerInfo = {}) {
+    if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
+    const info = doc._ct.headerInfo || {};
     const { margin } = theme.page;
     const pageWidth = doc.page.width;
+    const usable = pageWidth - margin * 2;
 
-    doc.save().lineWidth(1).strokeColor(theme.color.border)
-      .moveTo(margin, margin - 15).lineTo(pageWidth - margin, margin - 15).stroke().restore();
+    // Font-Zustand sichern: Der Kopf darf einen laufenden Textfluss nicht verändern
+    const prev = { font: doc._font && doc._font.name, size: doc._fontSize, fill: doc._fillColor, x: doc.x };
+    const prevBottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
 
-    doc.fillColor(theme.color.primary).font(theme.font.bold).fontSize(18)
-      .text(title || '', margin, margin - 40, { width: pageWidth - margin * 2, align: 'left' });
+    const logoH = theme.logo.height;
+    const logoW = this._drawLogo(doc, theme, { x: pageWidth - margin - logoH, y: 20, height: logoH });
+    const textW = usable - (logoW ? logoW + 12 : 0);
 
-    if (subtitle) {
-      doc.fillColor(theme.color.subtext).font(theme.font.regular).fontSize(10)
-        .text(subtitle, { width: pageWidth - margin * 2, align: 'left' });
+    doc.fillColor(theme.color.primary).font(theme.font.bold).fontSize(16)
+      .text(info.title || '', margin, 22, { width: textW, align: 'left', lineBreak: false });
+
+    if (info.subtitle) {
+      doc.fillColor(theme.color.subtext).font(theme.font.regular).fontSize(9)
+        .text(info.subtitle, margin, 44, { width: textW, align: 'left', height: 24, ellipsis: true });
     }
 
-    doc.y = theme.page.margin + 10;
-    doc.x = theme.page.margin;
-    doc.fillColor(theme.color.text).font(theme.font.regular);
+    if (info.watermark) {
+      doc.fillColor(theme.color.danger).font(theme.font.bold).fontSize(11)
+        .text(String(info.watermark), margin, 60, { width: textW, align: 'right', lineBreak: false });
+    }
+
+    doc.save().lineWidth(1).strokeColor(theme.color.border)
+      .moveTo(margin, theme.page.top - 16).lineTo(pageWidth - margin, theme.page.top - 16).stroke().restore();
+
+    doc.page.margins.bottom = prevBottom;
+    doc.y = theme.page.top;
+    doc.x = margin;
+    if (prev.font) doc.font(prev.font); else doc.font(theme.font.regular);
+    doc.fontSize(prev.size || 10);
+    if (prev.fill) doc.fillColor(prev.fill[0], prev.fill[1]); else doc.fillColor(theme.color.text);
   }
 
+  /** Neue Seite; optional mit geändertem Kopf (z.B. nach einem Deckblatt). */
   _addPageDecorated(doc, theme, headerInfo) {
-    doc.addPage();
-    this._decoratePage(doc, theme, headerInfo);
+    if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
+    doc.addPage(); // 'pageAdded' dekoriert
   }
 
+  /** Fußzeilen auf alle Seiten schreiben und Dokument beenden. */
+  _finishDoc(doc, theme, headerInfo) {
+    const info = { ...(doc._ct.headerInfo || {}), ...(headerInfo || {}) };
+    const { margin } = theme.page;
+    const range = doc.bufferedPageRange();
+    const total = range.count;
+    const createdLabel = `erstellt am ${this._fmtDateTime(doc._ct.createdAt)}${info.createdBy ? ` von ${info.createdBy}` : ''}`;
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      const prevBottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+      const y = doc.page.height - theme.page.bottom + 22;
+      const w = doc.page.width - margin * 2;
+      doc.save().lineWidth(0.5).strokeColor(theme.color.border)
+        .moveTo(margin, y - 8).lineTo(doc.page.width - margin, y - 8).stroke().restore();
+      doc.font(theme.font.regular).fontSize(8).fillColor(theme.color.subtext);
+      // Spalten 25 % / 50 % / 25 %, jeweils einzeilig
+      doc.text(`${theme.brandName} · ${info.reportName || info.title || ''}`, margin, y, { width: w * 0.25, align: 'left', lineBreak: false, height: 10, ellipsis: true });
+      doc.text(createdLabel, margin + w * 0.25, y, { width: w * 0.5, align: 'center', lineBreak: false, height: 10, ellipsis: true });
+      doc.text(`Seite ${i - range.start + 1} von ${total}`, margin + w * 0.75, y, { width: w * 0.25, align: 'right', lineBreak: false });
+      doc.page.margins.bottom = prevBottom;
+    }
+    doc.end();
+  }
 
+  _bottom(doc, theme) { return doc.page.height - theme.page.bottom; }
 
-  _section(doc, theme, text) {
+  _ensureRoom(doc, theme, need) {
+    if (doc.y + need > this._bottom(doc, theme)) {
+      doc.addPage();
+      return true;
+    }
+    return false;
+  }
+
+  _section(doc, theme, text, headerInfo) {
+    if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
     doc.x = theme.page.margin;
-    const bottom = doc.page.height - theme.page.margin;
-    // Increased buffer to 100 to prevent headers at very bottom
-    if (doc.y + 100 > bottom) this._addPageDecorated(doc, theme, this._lastHeaderInfo || {});
+    // Überschrift nie allein am Seitenende
+    this._ensureRoom(doc, theme, 100);
     doc.moveDown(0.6);
     doc.font(theme.font.bold).fontSize(14).fillColor(theme.color.text)
-      .text(text, { width: doc.page.width - theme.page.margin * 2 });
+      .text(text, theme.page.margin, doc.y, { width: doc.page.width - theme.page.margin * 2 });
 
     const x = theme.page.margin, y = doc.y + 2;
     const w = doc.page.width - theme.page.margin * 2;
-    doc.moveTo(x, y).lineTo(x + w, y).lineWidth(0.5).strokeColor(this.getTheme().color.border).stroke();
+    doc.moveTo(x, y).lineTo(x + w, y).lineWidth(0.5).strokeColor(theme.color.border).stroke();
     doc.moveDown(0.5);
-    doc.font(theme.font.regular);
+    doc.font(theme.font.regular).fillColor(theme.color.text);
+  }
+
+  /** Kleiner Hinweistext unter einer Tabelle/Sektion. */
+  _note(doc, theme, text) {
+    this._ensureRoom(doc, theme, 30);
+    doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
+      .text(text, theme.page.margin, doc.y, { width: doc.page.width - theme.page.margin * 2 });
+    doc.fillColor(theme.color.text).fontSize(10);
+    doc.moveDown(0.8);
+  }
+
+  /**
+   * Label/Wert-Liste mit rechtsbündigen Beträgen.
+   * rows: [{ label, value, bold, color, rule, spacer }]
+   */
+  _kvList(doc, theme, rows, { headerInfo, labelWidth } = {}) {
+    if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
+    const left = theme.page.margin;
+    const usable = doc.page.width - left * 2;
+    const valueW = 120;
+    const labelW = labelWidth || usable - valueW;
+    const lineH = 16;
+    (rows || []).forEach(r => {
+      if (r.spacer) { doc.y += 6; return; }
+      this._ensureRoom(doc, theme, lineH + 4);
+      const y = doc.y;
+      if (r.rule) {
+        doc.moveTo(left, y - 3).lineTo(left + usable, y - 3).lineWidth(0.6).strokeColor(theme.color.border).stroke();
+      }
+      doc.font(r.bold ? theme.font.bold : theme.font.regular).fontSize(10).fillColor(theme.color.text)
+        .text(String(r.label ?? ''), left, y, { width: labelW, lineBreak: false, ellipsis: true });
+      doc.font(r.bold ? theme.font.bold : theme.font.regular).fontSize(10).fillColor(r.color || theme.color.text)
+        .text(String(r.value ?? ''), left + labelW, y, { width: valueW, align: 'right', lineBreak: false });
+      doc.y = y + lineH;
+    });
+    doc.font(theme.font.regular).fillColor(theme.color.text);
+    doc.x = left;
+    doc.moveDown(0.6);
+  }
+
+  /** Unterschriftenzeilen nebeneinander (max. 3 pro Reihe), jeweils mit Ort/Datum-Zeile. */
+  _signatureBlock(doc, theme, labels, headerInfo) {
+    if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
+    const left = theme.page.margin;
+    const usable = doc.page.width - left * 2;
+    const perRow = Math.min(3, Math.max(1, labels.length));
+    const gap = 24;
+    const colW = (usable - gap * (perRow - 1)) / perRow;
+    const rows = [];
+    for (let i = 0; i < labels.length; i += perRow) rows.push(labels.slice(i, i + perRow));
+
+    this._ensureRoom(doc, theme, 40 + rows.length * 90);
+    doc.moveDown(1.5);
+    doc.font(theme.font.bold).fontSize(11).fillColor(theme.color.text).text('Unterschriften', left, doc.y);
+    doc.moveDown(0.5);
+
+    rows.forEach(row => {
+      const topY = doc.y + 40;
+      row.forEach((label, idx) => {
+        const x = left + idx * (colW + gap);
+        doc.moveTo(x, topY).lineTo(x + colW, topY).lineWidth(0.7).strokeColor(theme.color.text).stroke();
+        doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
+          .text(label, x, topY + 4, { width: colW, lineBreak: false });
+        doc.text('Ort, Datum', x, topY + 30, { width: colW, lineBreak: false });
+        doc.moveTo(x, topY + 28).lineTo(x + colW, topY + 28).lineWidth(0.4).strokeColor(theme.color.border).stroke();
+      });
+      doc.y = topY + 50;
+    });
+    doc.x = left;
+    doc.fillColor(theme.color.text).font(theme.font.regular).fontSize(10);
   }
 
   _table(doc, theme, { columns, rows, sumRow = null, emptyHint = 'Keine Daten vorhanden', headerInfo }) {
+    if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
     const left = theme.page.margin;
     const right = doc.page.width - theme.page.margin;
     const usableWidth = right - left;
@@ -143,7 +308,7 @@ class ExportService {
       let x = left; const y = doc.y;
       doc.save().rect(left, y - rowPad, usableWidth, headerH + rowPad * 2).fill(theme.color.tableHeaderBg).restore();
       columns.forEach((col, idx) => {
-        doc.fillColor(theme.color.tableHeaderText).font(this.getTheme().font.bold).fontSize(10)
+        doc.fillColor(theme.color.tableHeaderText).font(theme.font.bold).fontSize(10)
           .text(col.header, x + 2, y, { width: widths[idx] - 4, align: col.align || 'left' });
         x += widths[idx];
       });
@@ -154,28 +319,29 @@ class ExportService {
     };
 
     const ensureRoom = (need) => {
-      const bottom = doc.page.height - theme.page.margin;
+      const bottom = this._bottom(doc, theme);
       if (doc.y + need > bottom) {
-        if (doc.y < theme.page.margin + 50) {
+        if (doc.y < theme.page.top + 50) {
           console.log(`[PDF WARN] Row too tall (${need}) for page. Printing anyway.`);
           return;
         }
-        this._addPageDecorated(doc, theme, headerInfo || this._lastHeaderInfo || {});
+        doc.addPage();
         renderHeader();
       }
     };
 
-    renderHeader();
-
+    // Leere Tabellen: nur Hinweis, keine Kopfzeile
     if (!rows || rows.length === 0) {
-      ensureRoom(22);
-      doc.fontSize(10).fillColor(theme.color.subtext).text(emptyHint, left, doc.y + 6);
+      this._ensureRoom(doc, theme, 24);
+      doc.fontSize(10).fillColor(theme.color.subtext).text(emptyHint, left, doc.y + 2);
+      doc.fillColor(theme.color.text);
       doc.moveDown(1); doc.x = theme.page.margin; return;
     }
 
+    this._ensureRoom(doc, theme, headerH + rowPad * 2 + 40);
+    renderHeader();
+
     rows.forEach((row, i) => {
-      // Zeilenhöhe bestimmen
-      // FIX: Font explizit setzen, damit heightOfString korrekt misst
       doc.font(theme.font.regular).fontSize(10);
       const heights = columns.map((col, idx) => {
         const txt = col.render ? col.render(row) : (row[col.key] ?? '');
@@ -183,13 +349,10 @@ class ExportService {
       });
       const rowH = Math.max(...heights) + rowPad * 2;
 
-      // FIX: Mehr Puffer für Seitenumbruch
       ensureRoom(rowH + 30);
 
-      // Zebra
       if (i % 2 === 0) doc.save().rect(left, doc.y - 2, usableWidth, rowH + 4).fill(theme.color.zebra).restore();
 
-      // Zellen
       let x = left; const baseY = doc.y + rowPad;
       columns.forEach((col, idx) => {
         const txt = col.render ? col.render(row) : (row[col.key] ?? '');
@@ -205,7 +368,6 @@ class ExportService {
       doc.y = baseY + (rowH - rowPad) + 2;
     });
 
-    // Summenzeile
     if (sumRow) {
       ensureRoom(28);
       doc.moveDown(0.2);
@@ -224,6 +386,7 @@ class ExportService {
 
     doc.moveDown(1);
     doc.x = theme.page.margin;
+    doc.fillColor(theme.color.text);
   }
 
   /* ========= CSV ========= */
@@ -600,304 +763,292 @@ class ExportService {
     });
   }
 
-  /* ========= PDF: Jahresabschluss (Deckblatt + Summary) ========= */
-  async exportYearEndReportPDF(fiscalYearId) {
-    const report = await accountingService.getYearEndReport(fiscalYearId);
-    if (!report) throw new Error('Abschlussbericht nicht gefunden');
-    const { fiscalYear } = report;
+  /* ========= PDF: Jahresabschluss (ausschließlich aus dem Snapshot) ========= */
+  /**
+   * Geschlossenes Geschäftsjahr: alle Zahlen kommen aus YearEndReport.detailsJson.
+   * Offenes Geschäftsjahr: Live-Entwurf in derselben Form, mit "ENTWURF" im Kopf.
+   */
+  async exportYearEndReportPDF(fiscalYearId, { createdBy } = {}) {
+    const { fiscalYear, snapshot: s } = await accountingService.getYearEndSnapshot(fiscalYearId);
+    const draft = !!s.draft;
 
-    const preview = await accountingService.getFiscalYearPreview(fiscalYearId);
-    const {
-      soldArticles = [], paidInvoices = [], expenseDocs = [], unpaidInvoices = [],
-      expiredArticles = [], ownerUseArticles = []
-    } = preview;
-
-    // Live-Daten für Einheiten holen (falls Snapshot alt ist)
-    const allArticles = await prisma.article.findMany();
-    const articleMap = new Map(allArticles.map(a => [a.name, a]));
-
-    // Mapping System-Bestand
-    // Merge Snapshot mit Live-Daten für purchaseUnit falls im Snapshot fehlend
-    const system = Array.isArray(report.inventorySystem) ? report.inventorySystem.map(x => {
-      const live = articleMap.get(x.name);
-      return {
-        name: x.name,
-        unit: x.unit || live?.unit,
-        systemQty: Number(x.systemStock || 0),
-        price: Number(x.price || 0),
-        value: Number(x.value || (Number(x.systemStock || 0) * Number(x.price || 0))),
-        purchaseUnit: x.purchaseUnit || live?.purchaseUnit,
-        unitsPerPurchase: Number(x.unitsPerPurchase || live?.unitsPerPurchase || 0)
-      };
-    }) : [];
-
-    const physical = Array.isArray(report.inventoryPhysical) ? report.inventoryPhysical.map(x => ({
-      name: x.name, unit: x.unit, physicalQty: Number(x.physicalStock || 0)
-    })) : [];
-
-    const physMap = new Map(physical.map(x => [x.name, x]));
-    // Map Diff Rows with Value Calculation
-    const diffRows = system.map(s => {
-      const p = physMap.get(s.name);
-      const physicalQty = p ? p.physicalQty : s.systemQty;
-      const diff = physicalQty - s.systemQty;
-      return {
-        name: s.name,
-        unit: s.unit,
-        systemQty: s.systemQty,
-        physicalQty,
-        diff,
-        price: s.price,
-        purchaseUnit: s.purchaseUnit,
-        unitsPerPurchase: s.unitsPerPurchase,
-        // Werte berechnen
-        systemValue: s.value,
-        physicalValue: physicalQty * s.price,
-        diffValue: diff * s.price
-      };
-    });
-
-    const sum = (arr, sel) => arr.reduce((acc, r) => acc + Number(sel(r) || 0), 0);
-    const soldSumAmount = sum(soldArticles, r => r.amount);
-    const soldSumQty = sum(soldArticles, r => r.quantity);
-    const paidInvSum = sum(paidInvoices, r => r.totalAmount);
-    const expenseSum = sum(expenseDocs, r => r.totalAmount);
-    const unpaidSum = sum(unpaidInvoices, r => r.totalAmount);
-    // Inventory Sums
-    const systemQtySum = sum(system, r => r.systemQty);
-    const systemValueSum = sum(system, r => r.value);
-
-    // Diff Table Sums
-    const physQtySum = sum(diffRows, r => r.physicalQty);
-    const diffQtySum = sum(diffRows, r => r.diff);
-    // Values
-    const physValueSum = sum(diffRows, r => r.physicalValue);
-    const diffValueSum = sum(diffRows, r => r.diffValue);
-
-    const banksTotal = sum((report.bankAccountsJson || []), b => b.balance);
-
-    // Kennzahlen auf dem Deckblatt stammen aus dem eingefrorenen Abschluss (YearEndReport),
-    // die Detailtabellen aus der Live-Vorschau. Wurden nach dem Abschluss noch Buchungen
-    // erfasst, weichen beide ab. Das wird im PDF ausgewiesen statt versteckt.
-    const liveIncome = soldSumAmount + paidInvSum;
-    const liveExpenses = expenseSum;
-    const snapshotIncome = Number(report.incomeTotal || 0);
-    const snapshotExpenses = Number(report.expensesTotal || 0);
-    const driftIncome = Math.abs(liveIncome - snapshotIncome) > 0.005;
-    const driftExpenses = Math.abs(liveExpenses - snapshotExpenses) > 0.005;
+    const sum = (arr, sel) => (arr || []).reduce((acc, r) => acc + Number(sel(r) || 0), 0);
     const periodLabel = `${this._fmtDate(fiscalYear.startDate)} – ${this._fmtDate(fiscalYear.endDate)}`;
-    const closedAt = report.createdAt ? new Date(report.createdAt) : null;
-    const statusLabel = fiscalYear.closed
-      ? `Abgeschlossen am ${closedAt ? closedAt.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : '–'}`
-      : 'Entwurf – Geschäftsjahr noch nicht abgeschlossen';
+    const dataStateLabel = draft
+      ? `Datenstand: Live-Vorschau vom ${this._fmtDateTime(s.generatedAt || new Date())} (Geschäftsjahr noch nicht abgeschlossen)`
+      : `Datenstand: Abschluss vom ${this._fmtDateTime(s.closedAt)}`;
+
+    const income = s.summary || {};
+    const byType = s.incomeByType || {};
+    const banks = Array.isArray(s.bankAccounts) ? s.bankAccounts : [];
+    const banksTotal = sum(banks, b => b.balance);
+    const cash = s.cashCount || null;
+    const cashTotal = cash ? Number(cash.countedTotal || 0) : 0;
+    const guestBalance = Number(s.liquidity?.guestBalanceEnd || 0);
+    const unpaidInvSum = sum(s.unpaidInvoices, r => r.totalAmount);
+    const unpaidPurchSum = sum(s.unpaidPurchaseDocs, r => r.totalAmount);
+    const diffRows = (s.inventory && Array.isArray(s.inventory.diff)) ? s.inventory.diff : [];
+    const expenseCount = (s.expenseDocs || []).length;
 
     return new Promise((resolve, reject) => {
       try {
-        const { doc, done, theme } = this._createDocWithBuffer();
+        const headerInfo = {
+          reportName: 'Jahresabschluss',
+          title: `Jahresabschluss – ${this.getTheme().brandName}`,
+          subtitle: `Geschäftsjahr ${fiscalYear.name} (${periodLabel}) · ${dataStateLabel}`,
+          watermark: draft ? 'ENTWURF' : null,
+          createdBy
+        };
+        const { doc, done, theme } = this._createDocWithBuffer(headerInfo);
+        const pageW = doc.page.width - theme.page.margin * 2;
 
-        // DECKBLATT
+        // ---------- DECKBLATT ----------
+        this._drawLogo(doc, theme, { x: doc.page.width - theme.page.margin - 70, y: 60, height: 70 });
         doc.fillColor(theme.color.primary).font(theme.font.bold).fontSize(26)
-          .text(`Jahresabschluss – ${theme.brandName}`, theme.page.margin, 140, {
-            width: doc.page.width - theme.page.margin * 2, align: 'left'
-          });
-
-        const sub = `Geschäftsjahr: ${fiscalYear.name} (${periodLabel})`;
-        doc.moveDown(0.5);
+          .text(`Jahresabschluss – ${theme.brandName}`, theme.page.margin, 150, { width: pageW, align: 'left' });
+        doc.moveDown(0.4);
         doc.font(theme.font.regular).fontSize(12).fillColor(theme.color.subtext)
-          .text(sub, { width: doc.page.width - theme.page.margin * 2 })
-          .text(statusLabel, { width: doc.page.width - theme.page.margin * 2 });
+          .text(`Geschäftsjahr: ${fiscalYear.name} (${periodLabel})`, { width: pageW })
+          .text(draft ? 'Status: ENTWURF – Geschäftsjahr noch nicht abgeschlossen' : `Status: Abgeschlossen am ${this._fmtDateTime(s.closedAt)}`, { width: pageW })
+          .text(dataStateLabel, { width: pageW });
+        if (draft) {
+          doc.moveDown(0.3);
+          doc.font(theme.font.bold).fontSize(28).fillColor(theme.color.danger).opacity(0.25)
+            .text('ENTWURF', theme.page.margin, doc.y, { width: pageW, align: 'right' }).opacity(1);
+        }
 
-        // Zusammenfassungs-Panel (roundedRect-Fallback)
         const panelX = theme.page.margin;
-        const panelY = Math.max(220, doc.y + 24); // unter Titel + Statuszeile, nie überlappend
-        const panelW = doc.page.width - theme.page.margin * 2;
-        const panelH = 170;
-        const radius = 8;
-
+        const panelY = Math.max(280, doc.y + 24);
+        const panelH = 190;
         doc.save();
-        if (typeof doc.roundedRect === 'function') {
-          doc.roundedRect(panelX, panelY, panelW, panelH, radius).fill(theme.color.panelBg);
-        } else {
-          doc.rect(panelX, panelY, panelW, panelH).fill(theme.color.panelBg);
-        }
+        doc.roundedRect(panelX, panelY, pageW, panelH, 8).fill(theme.color.panelBg);
         doc.restore();
-
-        doc.save().lineWidth(1).strokeColor(theme.color.border);
-        if (typeof doc.roundedRect === 'function') {
-          doc.roundedRect(panelX, panelY, panelW, panelH, radius).stroke();
-        } else {
-          doc.rect(panelX, panelY, panelW, panelH).stroke();
-        }
-        doc.restore();
-
+        doc.save().lineWidth(1).strokeColor(theme.color.border).roundedRect(panelX, panelY, pageW, panelH, 8).stroke().restore();
         doc.font(theme.font.bold).fontSize(14).fillColor(theme.color.text)
-          .text('Zusammenfassung zum Abschluss', panelX + 16, panelY + 12);
+          .text('Zusammenfassung zum Stichtag', panelX + 16, panelY + 12);
 
-        // Label (10pt) + Wert (12pt) brauchen zusammen ~28pt; lineH 34 lässt Luft dazwischen.
-        const colW = panelW / 2 - 24;
+        const colW = pageW / 2 - 24;
         const KPI = (label, value, x, y, color) => {
           doc.font(theme.font.regular).fontSize(10).fillColor(theme.color.subtext).text(label, x, y, { width: colW, lineBreak: false });
           doc.font(theme.font.bold).fontSize(12).fillColor(color || theme.color.text).text(value, x, y + 13, { width: colW, lineBreak: false });
         };
-        const col1x = panelX + 16, col2x = panelX + panelW / 2 + 8, lineH = 34, kpiY = panelY + 40;
+        const col1x = panelX + 16, col2x = panelX + pageW / 2 + 8, lineH = 40, kpiY = panelY + 42;
+        KPI('Betriebseinnahmen', this._fmtEUR(income.totalIncome), col1x, kpiY, theme.color.success);
+        KPI('Betriebsausgaben', this._fmtEUR(income.totalExpenses), col1x, kpiY + lineH, theme.color.danger);
+        KPI(Number(income.profit) < 0 ? 'Fehlbetrag' : 'Überschuss', this._fmtEUR(income.profit), col1x, kpiY + lineH * 2,
+          Number(income.profit) < 0 ? theme.color.danger : theme.color.success);
+        KPI(cash && !cash.manual ? `Kassenbestand (gezählt ${this._fmtDate(cash.countedAt)})` : 'Kassenbestand', this._fmtEUR(cashTotal), col2x, kpiY);
+        KPI('Bankkonten gesamt', this._fmtEUR(banksTotal), col2x, kpiY + lineH);
+        KPI('Gästeguthaben (Verbindlichkeit)', this._fmtEUR(guestBalance), col2x, kpiY + lineH * 2, theme.color.danger);
 
-        KPI('Einnahmen gesamt', this._fmtEUR(report.incomeTotal), col1x, kpiY, theme.color.success);
-        KPI('Ausgaben gesamt', this._fmtEUR(report.expensesTotal), col1x, kpiY + lineH, theme.color.danger);
-        KPI('Gewinn/Verlust', this._fmtEUR(report.profit), col1x, kpiY + lineH * 2);
-
-        KPI('Barkasse', this._fmtEUR(report.cashOnHand), col2x, kpiY);
-        KPI('Banken gesamt', this._fmtEUR(banksTotal), col2x, kpiY + lineH);
-        KPI('Offene Ausgangsrechnungen', this._fmtEUR(unpaidSum), col2x, kpiY + lineH * 2, theme.color.danger);
-
-        // INHALT ab Seite 2
-        const headerInfo = {
-          title: `Jahresabschluss – ${theme.brandName}`,
-          subtitle: `Geschäftsjahr: ${fiscalYear.name} (${periodLabel}) · ${statusLabel}`
-        };
-        this._addPageDecorated(doc, theme, headerInfo);
-
-        this._section(doc, theme, 'Übersicht & Kennzahlen (Stand Abschluss)');
-        doc.fontSize(11)
-          .fillColor(theme.color.success).text(`Einnahmen gesamt: ${this._fmtEUR(report.incomeTotal)}`)
-          .fillColor(theme.color.danger).text(`Ausgaben gesamt: ${this._fmtEUR(report.expensesTotal)}`)
-          .fillColor(theme.color.text).text(`Gewinn/Verlust: ${this._fmtEUR(report.profit)}`);
-
-        if (fiscalYear.closed && (driftIncome || driftExpenses)) {
-          doc.moveDown(0.5);
-          doc.fontSize(10).fillColor(theme.color.danger)
-            .text('Hinweis: Seit dem Abschluss wurden weitere Buchungen im Zeitraum erfasst. '
-              + 'Die folgenden Detailtabellen zeigen den heutigen Stand und weichen von den Kennzahlen oben ab:')
-            .text(`  Verkäufe + bezahlte Ausgangsrechnungen heute: ${this._fmtEUR(liveIncome)} (Abschluss: ${this._fmtEUR(snapshotIncome)})`)
-            .text(`  Bezahlte Eingangsrechnungen heute: ${this._fmtEUR(liveExpenses)} (Abschluss: ${this._fmtEUR(snapshotExpenses)})`)
-            .fillColor(theme.color.text).fontSize(11);
+        if (s.legacy) {
+          doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
+            .text('Hinweis: Dieser Abschluss wurde vor Einführung des vollständigen Abschluss-Snapshots erstellt. '
+              + 'Detail-Listen (Belege, Artikel, Gästeguthaben) liegen dafür nicht vor.',
+              panelX, panelY + panelH + 16, { width: pageW });
         }
 
-        doc.moveDown(0.5);
-        doc.text(`Barkasse: ${this._fmtEUR(report.cashOnHand)}`)
-          .text(`Gästeguthaben (Summe): ${this._fmtEUR(report.guestBalance)}`);
-        (report.bankAccountsJson || []).forEach(b =>
-          doc.text(`Bankkonto ${b.name || ''}${b.iban ? ` (${b.iban})` : ''}: ${this._fmtEUR(b.balance)}`)
-        );
+        // ---------- SEITE 2: EÜR ----------
+        this._addPageDecorated(doc, theme, headerInfo);
+        this._section(doc, theme, 'Einnahmen-Überschuss-Rechnung', headerInfo);
+        const eurRows = [];
+        if (s.incomeByType) {
+          eurRows.push({ label: 'Barverkäufe', value: this._fmtEUR(byType.cash) });
+          eurRows.push({ label: 'Verkäufe über Kundenkonto', value: this._fmtEUR(byType.account) });
+          eurRows.push({ label: 'Bezahlte Ausgangsrechnungen', value: this._fmtEUR(byType.invoices) });
+        }
+        eurRows.push({ label: 'Summe Betriebseinnahmen', value: this._fmtEUR(income.totalIncome), bold: true, color: theme.color.success });
+        eurRows.push({ spacer: true });
+        eurRows.push({ label: `Bezahlte Eingangsrechnungen${expenseCount ? ` (${expenseCount} Belege)` : ''}`, value: this._fmtEUR(income.totalExpenses) });
+        eurRows.push({ label: 'Summe Betriebsausgaben', value: this._fmtEUR(income.totalExpenses), bold: true, color: theme.color.danger });
+        eurRows.push({ spacer: true });
+        eurRows.push({
+          label: Number(income.profit) < 0 ? 'Fehlbetrag' : 'Überschuss', value: this._fmtEUR(income.profit),
+          bold: true, color: Number(income.profit) < 0 ? theme.color.danger : theme.color.success, rule: true
+        });
+        this._kvList(doc, theme, eurRows, { headerInfo });
 
-        // --- BESTAND & WAREN ---
-        this._section(doc, theme, 'Bestand laut System');
+        if (s.nonRevenue || (s.liquidity && s.liquidity.topUps)) {
+          this._section(doc, theme, 'Nachrichtlich (kein Ertrag, keine Ausgabe)', headerInfo);
+          const nr = s.nonRevenue || {};
+          const tu = (s.liquidity && s.liquidity.topUps) || null;
+          const infoRows = [];
+          if (nr.ownerUse) infoRows.push({ label: `Eigenverbrauch / Sachentnahme (${Number(nr.ownerUse.quantity || 0)} Stück, Warenwert)`, value: this._fmtEUR(nr.ownerUse.value) });
+          if (nr.expired) infoRows.push({ label: `Abgelaufen / Schwund (${Number(nr.expired.quantity || 0)} Stück, Warenwert)`, value: this._fmtEUR(nr.expired.value) });
+          if (tu) {
+            infoRows.push({ label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(tu.cash) });
+            infoRows.push({ label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(tu.transfer) });
+            infoRows.push({ label: 'Aufladungen gesamt (Zufluss, aber Verbindlichkeit gegenüber Gästen)', value: this._fmtEUR(tu.total), bold: true });
+          }
+          this._kvList(doc, theme, infoRows, { headerInfo });
+        }
+
+        // ---------- KASSE & BANK ----------
+        this._section(doc, theme, 'Kasse und Bank', headerInfo);
+        const cashRows = [];
+        if (cash && !cash.manual) {
+          cashRows.push({ label: `Kassenzählung vom ${this._fmtDateTime(cash.countedAt)}${cash.countedBy ? ` (gezählt von ${cash.countedBy})` : ''}`, value: '' });
+          cashRows.push({ label: 'Soll laut System', value: this._fmtEUR(cash.expectedTotal) });
+          cashRows.push({ label: 'Ist gezählt', value: this._fmtEUR(cash.countedTotal), bold: true });
+          const d = Number(cash.difference || 0);
+          cashRows.push({ label: 'Differenz (Ist - Soll)', value: `${d > 0 ? '+' : ''}${this._fmtEUR(d)}`, bold: true, color: Math.abs(d) < 0.005 ? theme.color.success : (d < 0 ? theme.color.danger : theme.color.warning) });
+          if (cash.note) cashRows.push({ label: `Notiz: ${cash.note}`, value: '' });
+        } else {
+          cashRows.push({ label: 'Barkasse (manuell erfasst)', value: this._fmtEUR(cashTotal), bold: true });
+        }
+        cashRows.push({ spacer: true });
+        if (banks.length === 0) cashRows.push({ label: 'Bankkonten: keine erfasst', value: this._fmtEUR(0) });
+        banks.forEach(b => cashRows.push({ label: `Bankkonto ${b.name || ''}${b.iban ? ` (${b.iban})` : ''}`, value: this._fmtEUR(b.balance) }));
+        cashRows.push({ label: 'Liquide Mittel gesamt (Kasse + Bank)', value: this._fmtEUR(cashTotal + banksTotal), bold: true, rule: true });
+        this._kvList(doc, theme, cashRows, { headerInfo });
+
+        // ---------- VERBINDLICHKEITEN & FORDERUNGEN ----------
+        this._section(doc, theme, 'Gästeguthaben (Verbindlichkeit gegenüber Mitgliedern)', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Artikel', width: 200, render: r => r.name },
-            { header: 'Menge (System)', width: 100, align: 'right', render: r => this._fmtQty(r.systemQty, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
-            { header: 'Einzelpreis', width: 70, align: 'right', render: r => this._fmtEUR(r.price) },
-            { header: 'Warenwert', width: 80, align: 'right', render: r => this._fmtEUR(r.value), color: () => theme.color.text }
+            { header: 'Name', width: 300, render: r => r.nickname ? `${r.name} (${r.nickname})` : r.name },
+            { header: 'Saldo', width: 120, align: 'right', render: r => this._fmtEUR(r.balance), color: r => Number(r.balance) < 0 ? theme.color.danger : theme.color.text }
           ],
-          rows: system || [],
-          sumRow: ['Summe', '', '', this._fmtEUR(systemValueSum)],
+          rows: s.customerBalances || [],
+          sumRow: ['Summe Gästeguthaben', this._fmtEUR(guestBalance)],
+          emptyHint: s.legacy ? 'Keine Einzelliste im Abschluss vorhanden (Altbestand).' : 'Keine Kundenkonten mit Saldo.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Offene Eingangsrechnungen (Verbindlichkeiten)', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Belegdatum', width: 80, render: r => this._fmtDate(r.documentDate) },
+            { header: 'Lieferant', width: 180, render: r => r.supplier || '-' },
+            { header: 'Belegnr.', width: 120, render: r => r.documentNumber || '-' },
+            { header: 'Fällig', width: 80, render: r => this._fmtDate(r.dueDate) },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
+          ],
+          rows: s.unpaidPurchaseDocs || [],
+          sumRow: ['Summe', '', '', '', this._fmtEUR(unpaidPurchSum)],
+          emptyHint: 'Keine offenen Eingangsrechnungen.',
+          headerInfo
+        });
+
+        this._section(doc, theme, 'Offene Ausgangsrechnungen (Forderungen)', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
+            { header: 'Empfänger', width: 160, render: r => r.customerName || '-' },
+            { header: 'Erstellt', width: 80, render: r => this._fmtDate(r.createdAt) },
+            { header: 'Fällig', width: 80, render: r => this._fmtDate(r.dueDate) },
+            { header: 'Status', width: 70, render: r => this._invoiceStatusLabel(r.status) },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.totalAmount) }
+          ],
+          rows: s.unpaidInvoices || [],
+          sumRow: ['Summe', '', '', '', '', this._fmtEUR(unpaidInvSum)],
+          emptyHint: 'Keine offenen Ausgangsrechnungen.',
+          headerInfo
+        });
+
+        // ---------- WARENBESTAND ----------
+        this._section(doc, theme, 'Warenbestand zum Stichtag (System / gezählt / Differenz)', headerInfo);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Artikel', width: 150, render: r => r.name },
+            { header: 'System', width: 110, align: 'right', render: r => this._fmtQty(r.systemStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Gezählt', width: 110, align: 'right', render: r => this._fmtQty(r.physicalStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Differenz', width: 110, align: 'right', render: r => this._fmtQty(r.diff, r.unit, r.purchaseUnit, r.unitsPerPurchase), color: r => r.diff < 0 ? theme.color.danger : (r.diff > 0 ? theme.color.success : theme.color.text) },
+            { header: 'Wert gezählt', width: 80, align: 'right', render: r => this._fmtEUR(r.physicalValue) },
+            { header: 'Diff. Wert', width: 80, align: 'right', render: r => this._fmtEUR(r.diffValue), color: r => r.diffValue < 0 ? theme.color.danger : (r.diffValue > 0 ? theme.color.success : theme.color.text) }
+          ],
+          rows: diffRows,
+          sumRow: ['Summe', '', '', '', this._fmtEUR(sum(diffRows, r => r.physicalValue)), this._fmtEUR(sum(diffRows, r => r.diffValue))],
           emptyHint: 'Keine Bestandsdaten.',
           headerInfo
         });
+        if (draft) {
+          doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
+            .text('Im Entwurf entspricht der gezählte Bestand dem Systembestand; die Inventur wird erst beim Abschluss erfasst.', theme.page.margin, doc.y, { width: pageW });
+          doc.moveDown(1);
+        }
 
-        this._section(doc, theme, 'Echter Bestand & Differenz');
+        // ---------- SCHWUND & EIGENVERBRAUCH ----------
+        this._section(doc, theme, 'Abgelaufen / Schwund', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Artikel', width: 140, render: r => r.name },
-            { header: 'System', width: 100, align: 'right', render: r => this._fmtQty(r.systemQty, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
-            { header: 'Echt', width: 100, align: 'right', render: r => this._fmtQty(r.physicalQty, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
-            { header: 'Wert (Echt)', width: 80, align: 'right', render: r => this._fmtEUR(r.physicalValue) },
-            { header: 'Diff. Menge', width: 100, align: 'right', render: r => this._fmtQty(r.diff, r.unit, r.purchaseUnit, r.unitsPerPurchase), color: (r) => r.diff < 0 ? theme.color.danger : theme.color.success },
-            { header: 'Diff. Wert', width: 80, align: 'right', render: r => this._fmtEUR(r.diffValue), color: (r) => r.diffValue < 0 ? theme.color.danger : theme.color.success }
+            { header: 'Artikel', width: 300, render: r => r.article },
+            { header: 'Menge', width: 100, align: 'right', render: r => this._fmtQty(r.quantity, r.unit) },
+            { header: 'Warenwert', width: 100, align: 'right', render: r => this._fmtEUR(r.value) }
           ],
-          rows: diffRows || [],
-          sumRow: ['Summe', '', '', this._fmtEUR(physValueSum), '', this._fmtEUR(diffValueSum)],
-          emptyHint: 'Keine Differenzdaten.',
-          headerInfo
-        });
-
-        this._section(doc, theme, 'Abgelaufene Artikel (Verlust)');
-        this._table(doc, theme, {
-          columns: [
-            { header: 'Artikel', width: 340, render: r => r.article },
-            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
-          ],
-          rows: expiredArticles || [],
+          rows: s.expiredArticles || [],
+          sumRow: ['Summe', String(sum(s.expiredArticles, r => r.quantity)), this._fmtEUR(sum(s.expiredArticles, r => r.value))],
           emptyHint: 'Keine abgelaufenen Artikel.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Eigenverbrauch (Sachentnahme)');
+        this._section(doc, theme, 'Eigenverbrauch (Sachentnahme, "Auf den Wirt")', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Artikel', width: 340, render: r => r.article },
-            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
+            { header: 'Artikel', width: 300, render: r => r.article },
+            { header: 'Menge', width: 100, align: 'right', render: r => this._fmtQty(r.quantity, r.unit) },
+            { header: 'Warenwert', width: 100, align: 'right', render: r => this._fmtEUR(r.value) }
           ],
-          rows: ownerUseArticles || [],
+          rows: s.ownerUseArticles || [],
+          sumRow: ['Summe', String(sum(s.ownerUseArticles, r => r.quantity)), this._fmtEUR(sum(s.ownerUseArticles, r => r.value))],
           emptyHint: 'Kein Eigenverbrauch.',
           headerInfo
         });
 
-        // --- FINANZEN DETAILS ---
-        this._section(doc, theme, 'Alle Einnahmen (nach Artikel)');
+        // ---------- DETAILLISTEN ----------
+        this._section(doc, theme, 'Einnahmen nach Artikel', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Artikel', width: 260, render: r => r.article },
-            { header: 'Kategorie', width: 180, render: r => r.category || '-' },
+            { header: 'Artikel', width: 240, render: r => r.article },
+            { header: 'Kategorie', width: 160, render: r => r.category || '-' },
             { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
-            { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.amount), color: () => this.getTheme().color.success }
+            { header: 'Betrag', width: 100, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
           ],
-          rows: soldArticles || [],
-          sumRow: ['Summe', '', Number(soldSumQty).toFixed(0), this._fmtEUR(soldSumAmount)],
+          rows: s.soldArticles || [],
+          sumRow: ['Summe', '', Number(sum(s.soldArticles, r => r.quantity)).toFixed(0), this._fmtEUR(sum(s.soldArticles, r => r.amount))],
           emptyHint: 'Keine Verkäufe.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Bezahlte Ausgangsrechnungen');
+        this._section(doc, theme, 'Bezahlte Ausgangsrechnungen', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Empfänger', width: 200, render: r => r.customerName || '-' },
-            { header: 'Beschreibung', width: 220, render: r => r.description || '-' },
-            { header: 'Bezahlt am', width: 120, render: r => this._fmtDate(r.paidAt) },
-            { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => this.getTheme().color.success }
+            { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
+            { header: 'Empfänger', width: 170, render: r => r.customerName || '-' },
+            { header: 'Beschreibung', width: 150, render: r => r.description || '-' },
+            { header: 'Bezahlt am', width: 80, render: r => this._fmtDate(r.paidAt) },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.success }
           ],
-          rows: paidInvoices || [],
-          sumRow: ['Summe', '', '', this._fmtEUR(paidInvSum)],
+          rows: s.paidInvoices || [],
+          sumRow: ['Summe', '', '', '', this._fmtEUR(sum(s.paidInvoices, r => r.totalAmount))],
           emptyHint: 'Keine bezahlten Ausgangsrechnungen.',
           headerInfo
         });
 
-        // Detail-Liste für Ausgaben (Neue Anforderung)
-        this._section(doc, theme, 'Detaillierte Ausgabenliste');
+        this._section(doc, theme, 'Ausgabenbelege (bezahlte Eingangsrechnungen)', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Datum', width: 80, render: r => this._fmtDate(r.documentDate) },
-            { header: 'Lieferant', width: 180, render: r => r.supplier || '-' },
-            { header: 'Beleg', width: 100, render: r => r.documentNumber || '-' },
+            { header: 'Datum', width: 75, render: r => this._fmtDate(r.documentDate) },
+            { header: 'Lieferant', width: 160, render: r => r.supplier || '-' },
+            { header: 'Belegnr.', width: 110, render: r => r.documentNumber || '-' },
+            { header: 'Zahlung', width: 75, render: r => this._paymentLabel(r.paymentMethod) },
             { header: 'Nachweis', width: 60, align: 'center', render: r => r.nachweisUrl ? 'Ja' : 'Nein' },
-            { header: 'Status', width: 60, render: r => r.paid ? 'Bezahlt' : 'Offen' },
-            { header: 'Betrag', width: 60, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
-          ],
-          rows: expenseDocs || [],
-          sumRow: ['Summe', '', '', '', '', this._fmtEUR(expenseSum)],
-          emptyHint: 'Keine Ausgaben vorhanden.',
-          headerInfo
-        });
-
-        this._section(doc, theme, 'Offene Ausgangsrechnungen');
-        this._table(doc, theme, {
-          columns: [
-            { header: 'Empfänger', width: 200, render: r => r.customerName || '-' },
-            { header: 'Beschreibung', width: 200, render: r => r.description || '-' },
-            { header: 'Erstellt am', width: 80, render: r => this._fmtDate(r.createdAt) },
-            { header: 'Fällig am', width: 80, render: r => this._fmtDate(r.dueDate) },
-            { header: 'Status', width: 60, render: r => r.status },
             { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.totalAmount), color: () => theme.color.danger }
           ],
-          rows: unpaidInvoices || [],
-          sumRow: ['Summe', '', '', '', '', this._fmtEUR(unpaidSum)],
-          emptyHint: 'Keine offenen Rechnungen.',
+          rows: s.expenseDocs || [],
+          sumRow: ['Summe', '', '', '', '', this._fmtEUR(sum(s.expenseDocs, r => r.totalAmount))],
+          emptyHint: 'Keine Ausgabenbelege.',
           headerInfo
         });
 
-        // Fußzeilen für alle Seiten
-        doc.end();
+        // ---------- UNTERSCHRIFTEN ----------
+        this._signatureBlock(doc, theme, ['Kassenwart/in', 'Kassenprüfer/in 1', 'Kassenprüfer/in 2'], headerInfo);
+
+        this._finishDoc(doc, theme, headerInfo);
         done.then(pdf => resolve({
-          data: pdf, filename: `jahresabschluss_${fiscalYear.name.replace(/\s+/g, '_')}.pdf`, mimeType: 'application/pdf'
+          data: pdf,
+          filename: `jahresabschluss_${String(fiscalYear.name).replace(/\s+/g, '_')}${draft ? '_ENTWURF' : ''}.pdf`,
+          mimeType: 'application/pdf'
         }));
       } catch (e) { reject(e); }
     });

@@ -406,6 +406,9 @@ model YearEndReport {
   inventorySystem  Json      @default("[]")// [{articleId,name,systemStock,unit}]
   inventoryPhysical Json     @default("[]")// [{articleId,name,physicalStock,unit}]
   inventoryDiff    Json      @default("[]")// [{articleId,name,diff,unit}]
+  // Vollständiger Abschluss-Snapshot (Listen, Kassenzählung, Gästeguthaben, EÜR-Blöcke).
+  // Das Jahresabschluss-PDF rendert bei geschlossenem Jahr ausschließlich hieraus.
+  detailsJson      Json      @default("{}")
   createdAt        DateTime  @default(now())
 }
 
