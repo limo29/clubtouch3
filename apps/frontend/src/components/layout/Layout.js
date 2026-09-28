@@ -269,9 +269,15 @@ const Layout = () => {
                   color="secondary"
                   startIcon={<ShoppingCart />}
                   onClick={() => navigate('/sales')}
-                  sx={{ pointerEvents: 'auto', textTransform: 'none', fontWeight: 700 }}
+                  aria-label="Verkauf öffnen"
+                  sx={{
+                    pointerEvents: 'auto', textTransform: 'none', fontWeight: 700,
+                    // Handy: nur Icon, sonst überdeckt der Button den Seitentitel
+                    minWidth: 0, px: { xs: 1, sm: 2 },
+                    '& .MuiButton-startIcon': { mr: { xs: 0, sm: 1 }, ml: { xs: 0, sm: -0.5 } },
+                  }}
                 >
-                  Verkauf öffnen
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Verkauf öffnen</Box>
                 </Button>
               </Box>
             )}
