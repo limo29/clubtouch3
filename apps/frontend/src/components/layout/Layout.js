@@ -255,7 +255,7 @@ const Layout = () => {
               <MenuIcon />
             </IconButton>
 
-            <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
+            <Typography variant="h6" noWrap sx={{ flexGrow: 1, minWidth: 0, maxWidth: { xs: 'calc(50% - 44px)', sm: 'none' } }}>
               {currentTitle}
             </Typography>
 

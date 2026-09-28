@@ -82,6 +82,8 @@ There is no `apps/backend/.env.example`; `docker/.env.example` and `docker/docke
 - Data fetching is TanStack Query directly in page components (`src/pages/*.js`); pages are large single files that own their dialogs and mutations. There is no per-resource API layer.
 - Offline: `context/OfflineContext.js` keeps a localStorage queue of sales and top-ups; `Sales.js` enqueues when `navigator.onLine` is false and the queue drains sequentially on reconnect. 4xx failures currently stay in the queue.
 - The live highscore uses `hooks/useHighscoreLogic.js` (socket.io-client against `WS_URL` plus polling).
+- Finance UI: `pages/CashCount.js` (`/cash-count`, "Kasse zählen") is the only place a till count is entered (14 denominations via `components/common/QuantityStepper.js`, expected value from `/cash-counts/preview`, list under query key `['cash-counts', …]`). `pages/ProfitLoss.js` (`/profit-loss`) is "Kassenprüfung" with tabs EÜR / Kasse & Bank / Geschäftsjahre; closing a year runs through `components/finance/CloseYearStepper.js` (5 steps, inventory in crates + singles via `utils/units.js`, payload `physicalInventory` in base units, `cashCountId` instead of `cashOnHand`). `pages/Reports.js` keeps one parameter object per report id. Authenticated file downloads go through `utils/download.js` (`downloadFile`, `apiErrorMessage` also reads Blob error bodies).
+- MUI 7 Grid: always `<Grid size={{ xs: 12, md: 6 }}>`; the old `item xs={…}` props are silently ignored and break the layout. Pages render inside a column-flex `main` with `minWidth: 0`, so wide Tabs/Tables must scroll inside their container instead of widening the page.
 
 ### Artikel buchen (Verkauf, Einkauf, Rechnung)
 
