@@ -12,6 +12,10 @@
 //   + Bar-Erstattungen    (Transaction REFUND, CASH, Betrag negativ -> wird addiert)
 //   + Bar-Aufladungen     (AccountTopUp CASH)
 //   - Bar-Ausgaben        (PurchaseDocument RECHNUNG, paid, CASH; paidAt, ersatzweise documentDate)
+//   - Einzahlungen auf Bank  (CashMovement DEPOSIT_TO_BANK)
+//   + Abhebungen von Bank    (CashMovement WITHDRAWAL_FROM_BANK)
+//   + Sonstige Bareinnahmen  (CashMovement OTHER_INCOME)
+//   - Sonstige Barausgaben   (CashMovement OTHER_EXPENSE)
 //
 // Bewusst NICHT "cancelled = false" bei den Verkäufen: Ein Storno legt eine
 // REFUND-Buchung mit negativem Betrag an und markiert das Original als
@@ -21,6 +25,7 @@
 // Buchungszeitpunkte landet beides im richtigen Zählfenster.
 
 const prisma = require('../utils/prisma');
+const cashMovementService = require('./cashMovementService');
 
 const DENOMINATIONS = [200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01];
 const DENOMINATION_KEYS = DENOMINATIONS.map(d => String(d));
@@ -123,12 +128,13 @@ class CashCountService {
   /**
    * Barbewegungen im Fenster (since exklusiv, until inklusiv).
    * since = null -> ohne untere Grenze.
+   * Enthält zusätzlich Kassenbewegungen (CashMovement) aus cashMovementService.
    */
   async getCashMovements(since, until) {
     const window = { lte: until };
     if (since) window.gt = since;
 
-    const [salesAgg, refundsAgg, topUpsAgg, cashExpenseDocs] = await Promise.all([
+    const [salesAgg, refundsAgg, topUpsAgg, cashExpenseDocs, mvSummary] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', paymentMethod: 'CASH', createdAt: window },
         _sum: { totalAmount: true }, _count: true
@@ -151,7 +157,8 @@ class CashCountService {
         },
         select: { id: true, documentNumber: true, supplier: true, totalAmount: true, paidAt: true, documentDate: true },
         orderBy: { documentDate: 'asc' }
-      })
+      }),
+      cashMovementService.summarize(window)
     ]);
 
     const cashSales = round2(dec(salesAgg._sum.totalAmount));
@@ -161,11 +168,21 @@ class CashCountService {
 
     return {
       cashSales, cashRefunds, cashTopUps, cashExpenses,
+      // Kassenbewegungen additiv
+      bankDeposits: mvSummary.bankDeposits,
+      bankWithdrawals: mvSummary.bankWithdrawals,
+      otherIncome: mvSummary.otherIncome,
+      otherExpense: mvSummary.otherExpense,
+      movements: mvSummary.items,
       counts: {
         sales: salesAgg._count || 0,
         refunds: refundsAgg._count || 0,
         topUps: topUpsAgg._count || 0,
-        expenses: cashExpenseDocs.length
+        expenses: cashExpenseDocs.length,
+        bankDeposits: mvSummary.bankDeposits.count,
+        bankWithdrawals: mvSummary.bankWithdrawals.count,
+        otherIncome: mvSummary.otherIncome.count,
+        otherExpense: mvSummary.otherExpense.count
       },
       expenseDocs: cashExpenseDocs.map(d => ({
         id: d.id, documentNumber: d.documentNumber, supplier: d.supplier,
@@ -194,7 +211,13 @@ class CashCountService {
 
     const baseline = previous ? dec(previous.countedTotal) : 0;
     const mv = await this.getCashMovements(since, until);
-    const expectedTotal = round2(baseline + mv.cashSales + mv.cashRefunds + mv.cashTopUps - mv.cashExpenses);
+    const expectedTotal = round2(
+      baseline + mv.cashSales + mv.cashRefunds + mv.cashTopUps - mv.cashExpenses
+      - (mv.bankDeposits ? mv.bankDeposits.total : 0)
+      + (mv.bankWithdrawals ? mv.bankWithdrawals.total : 0)
+      + (mv.otherIncome ? mv.otherIncome.total : 0)
+      - (mv.otherExpense ? mv.otherExpense.total : 0)
+    );
 
     return {
       hasBaseline: !!previous,
@@ -234,6 +257,11 @@ class CashCountService {
       cashRefunds: expected.cashRefunds,
       cashTopUps: expected.cashTopUps,
       cashExpenses: expected.cashExpenses,
+      bankDeposits: expected.bankDeposits,
+      bankWithdrawals: expected.bankWithdrawals,
+      otherIncome: expected.otherIncome,
+      otherExpense: expected.otherExpense,
+      movements: expected.movements,
       counts: expected.counts,
       expenseDocs: expected.expenseDocs
     };

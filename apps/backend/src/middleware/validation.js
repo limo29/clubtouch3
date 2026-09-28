@@ -215,6 +215,50 @@ const validateCashCount = [
     .withMessage('Notiz darf höchstens 1000 Zeichen lang sein')
 ];
 
+// Kassenbewegung (Ein-/Auszahlung, sonstige Bar-Ein-/Ausgaben)
+const CASH_MOVEMENT_TYPES = ['DEPOSIT_TO_BANK', 'WITHDRAWAL_FROM_BANK', 'OTHER_INCOME', 'OTHER_EXPENSE'];
+const CASH_MOVEMENT_NOTE_REQUIRED = ['OTHER_INCOME', 'OTHER_EXPENSE'];
+const validateCashMovement = [
+  body('type')
+    .isIn(CASH_MOVEMENT_TYPES)
+    .withMessage('Ungültiger Bewegungstyp. Erlaubt: DEPOSIT_TO_BANK, WITHDRAWAL_FROM_BANK, OTHER_INCOME, OTHER_EXPENSE'),
+  body('amount')
+    .custom((value) => {
+      const n = Number(value);
+      if (Number.isNaN(n) || n <= 0) throw new Error('Betrag muss eine positive Zahl größer als 0 sein');
+      const str = String(value);
+      const dot = str.indexOf('.');
+      if (dot !== -1 && str.length - dot - 1 > 2) throw new Error('Betrag darf höchstens 2 Dezimalstellen haben');
+      return true;
+    }),
+  body('occurredAt')
+    .optional({ values: 'falsy' })
+    .isISO8601().withMessage('Datum muss ein gültiges ISO 8601-Datum sein')
+    .custom((value) => {
+      const d = new Date(value);
+      if (d.getTime() > Date.now() + 60 * 1000) throw new Error('Datum darf nicht in der Zukunft liegen');
+      return true;
+    }),
+  // Pflicht (min 3 Zeichen) wenn Typ OTHER_INCOME oder OTHER_EXPENSE
+  body('note')
+    .if(body('type').isIn(CASH_MOVEMENT_NOTE_REQUIRED))
+    .trim()
+    .notEmpty().withMessage('Notiz ist bei sonstigen Bareinnahmen/-ausgaben Pflicht')
+    .isLength({ min: 3 }).withMessage('Notiz muss mindestens 3 Zeichen lang sein')
+    .isLength({ max: 500 }).withMessage('Notiz darf höchstens 500 Zeichen lang sein'),
+  // Allgemeine Längenprüfung (auch für Bank-Typen)
+  body('note')
+    .optional({ values: 'falsy' })
+    .isString().withMessage('Notiz muss Text sein')
+    .trim()
+    .isLength({ max: 500 }).withMessage('Notiz darf höchstens 500 Zeichen lang sein'),
+  body('bankAccount')
+    .optional({ values: 'falsy' })
+    .isString().withMessage('Kontoname muss Text sein')
+    .trim()
+    .isLength({ max: 100 }).withMessage('Kontoname darf höchstens 100 Zeichen lang sein'),
+];
+
 const validateSale = [
   body('paymentMethod')
     .isIn(['CASH', 'ACCOUNT'])
@@ -263,6 +307,7 @@ module.exports = {
   validateSale,
   validateQuickSale,
   validateCashCount,
+  validateCashMovement,
 
   handleValidationErrors
 };

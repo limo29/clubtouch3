@@ -34,6 +34,7 @@ model User {
   // Verweist jetzt auf das neue Modell
   purchaseDocuments PurchaseDocument[]
   cashCounts        CashCount[]
+  cashMovements     CashMovement[]
 }
 
 // Kunden mit Guthaben-Konto 
@@ -437,6 +438,36 @@ model CashCount {
 }
 
 // Werbe-Slides für Digital Signage
+// Kassenbewegung ohne Verkauf: Bargeld zur Bank bringen, Wechselgeld abheben,
+// sonstige Bareinnahmen/-ausgaben ohne Beleg (Spende, Trinkgeld, Pfand, Kleinkram).
+// amount ist immer positiv, die Richtung ergibt sich aus dem Typ.
+// Storno statt Löschen (cancelled), wie bei Transaction.
+enum CashMovementType {
+  DEPOSIT_TO_BANK      // Bargeld auf die Bank eingezahlt: Kasse -
+  WITHDRAWAL_FROM_BANK // Bargeld von der Bank abgehoben:   Kasse +
+  OTHER_INCOME         // Sonstige Bareinnahme (Betriebseinnahme): Kasse +
+  OTHER_EXPENSE        // Sonstige Barausgabe  (Betriebsausgabe):  Kasse -
+}
+
+model CashMovement {
+  id          String           @id @default(uuid())
+  type        CashMovementType
+  amount      Decimal          @db.Decimal(10, 2)
+  occurredAt  DateTime         @default(now())
+  note        String?          // Pflicht bei OTHER_*, optional bei Bank
+  bankAccount String?          // Name des Kontos (frei), nur bei Bank-Typen
+  cancelled   Boolean          @default(false)
+  cancelledAt DateTime?
+  cancelledBy String?          // User ID
+  createdAt   DateTime         @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([occurredAt])
+  @@index([type])
+}
+
 model AdSlide {
   id          String           @id @default(uuid())
   imageUrl    String

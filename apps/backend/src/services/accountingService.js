@@ -1,5 +1,6 @@
 const prisma = require('../utils/prisma');
 const cashCountService = require('./cashCountService');
+const cashMovementService = require('./cashMovementService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 
 function dec(n) { return Number(n || 0); }
@@ -13,11 +14,15 @@ class AccountingService {
    *
    * Einnahmen   = Verkäufe (Transaction SALE, cancelled=false; bar + Kundenkonto)
    *             + bezahlte Ausgangsrechnungen (Invoice PAID, paidAt im Zeitraum)
+   *             + sonstige Bareinnahmen (CashMovement OTHER_INCOME, nicht storniert)
    * Ausgaben    = bezahlte Eingangsrechnungen (PurchaseDocument RECHNUNG, paid=true, documentDate im Zeitraum)
+   *             + sonstige Barausgaben (CashMovement OTHER_EXPENSE, nicht storniert)
    * nonRevenue  = Eigenverbrauch (OWNER_USE) und Abgelaufen (EXPIRED): KEINE Einnahmen,
    *               nur Menge und Warenwert (Verkaufspreis) je Artikel
    * liquidity   = Aufladungen (Zufluss in die Kasse, aber Verbindlichkeit gegenüber den Gästen,
-   *               kein Ertrag) und Gästeguthaben zum Stichtag
+   *               kein Ertrag), Gästeguthaben zum Stichtag
+   *             + Kassenbewegungen (DEPOSIT_TO_BANK/WITHDRAWAL_FROM_BANK: ergebnisneutral, nur Liquidität)
+   *               als liquidity.cashMovements und liquidity.cashMovementItems
    * liabilities = offene Eingangsrechnungen, receivables = offene Ausgangsrechnungen
    *
    * Rückgabeform: `summary`/`details` bleiben abwärtskompatibel (ProfitLoss.js liest
@@ -47,7 +52,8 @@ class AccountingService {
       incomeByCategoryRaw, soldRaw, expiredRaw, ownerUseRaw,
       expenseAgg, expensesBySupplierRaw, expenseDocsRaw,
       paidInvoicesRaw, unpaidInvoicesRaw, unpaidPurchaseDocsRaw,
-      topUpsCashAgg, topUpsTransferAgg, guestBalanceAgg
+      topUpsCashAgg, topUpsTransferAgg, guestBalanceAgg,
+      cmSummarize
     ] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', cancelled: false, paymentMethod: 'CASH', createdAt: { gte: start, lte: end } },
@@ -115,7 +121,8 @@ class AccountingService {
         where: { method: 'TRANSFER', createdAt: { gte: start, lte: end } },
         _sum: { amount: true }, _count: true
       }),
-      prisma.customer.aggregate({ _sum: { balance: true } })
+      prisma.customer.aggregate({ _sum: { balance: true } }),
+      cashMovementService.summarize({ gte: start, lte: end })
     ]);
 
     const mapArticleRows = (rows) => (rows || []).map(r => ({
@@ -138,13 +145,26 @@ class AccountingService {
     const paidInvoices = (paidInvoicesRaw || []).map(r => ({ ...r, totalAmount: dec(r.totalAmount) }));
     const incomeInvoices = sumBy(paidInvoices, r => r.totalAmount);
 
-    const incomeTotal = round2(incomeSales + incomeInvoices);
-    const expensesTotal = round2(dec(expenseAgg._sum.totalAmount));
+    // Einnahmen und Ausgaben aus Kassenbewegungen (CashMovement)
+    const cmOtherIncome = cmSummarize.otherIncome;    // OTHER_INCOME: Betriebseinnahme
+    const cmOtherExpense = cmSummarize.otherExpense;  // OTHER_EXPENSE: Betriebsausgabe
+
+    const incomeTotal = round2(incomeSales + incomeInvoices + cmOtherIncome.total);
+    const expensesFromDocs = round2(dec(expenseAgg._sum.totalAmount)); // nur Belege (für expensesByType)
+    const expensesTotal = round2(expensesFromDocs + cmOtherExpense.total);
     const profit = round2(incomeTotal - expensesTotal);
 
     const expenseDocs = (expenseDocsRaw || []).map(r => ({ ...r, totalAmount: dec(r.totalAmount) }));
     const unpaidInvoices = (unpaidInvoicesRaw || []).map(r => ({ ...r, totalAmount: dec(r.totalAmount) }));
     const unpaidPurchaseDocs = (unpaidPurchaseDocsRaw || []).map(r => ({ ...r, totalAmount: dec(r.totalAmount) }));
+
+    // expensesBySupplier: Beleglieferanten + ggf. Zeile für sonstige Barausgaben
+    const expensesBySupplierBase = (expensesBySupplierRaw || []).map(r => ({
+      supplier: r.supplier || '—', count: Number(r.count || 0), amount: round2(Number(r.amount || 0))
+    }));
+    const expensesBySupplier = cmOtherExpense.total > 0
+      ? [...expensesBySupplierBase, { supplier: 'Sonstige Barausgaben (ohne Beleg)', count: cmOtherExpense.count, amount: cmOtherExpense.total, synthetic: true }]
+      : expensesBySupplierBase;
 
     const topUpsCash = round2(dec(topUpsCashAgg._sum.amount));
     const topUpsTransfer = round2(dec(topUpsTransferAgg._sum.amount));
@@ -165,21 +185,28 @@ class AccountingService {
           category: r.category || '—', amount: round2(Number(r.amount || 0)), quantity: Number(r.quantity || 0)
         })),
         incomeByArticle: soldArticles,
-        expensesBySupplier: (expensesBySupplierRaw || []).map(r => ({
-          supplier: r.supplier || '—', count: Number(r.count || 0), amount: round2(Number(r.amount || 0))
-        })),
+        expensesBySupplier,
         incomeByType: {
           transactions: incomeSales,
           cash: incomeCash,
           account: incomeAccount,
           invoices: incomeInvoices,
-          ownerUse: 0 // bleibt für alte Clients, siehe nonRevenue
+          ownerUse: 0, // bleibt für alte Clients, siehe nonRevenue
+          otherCash: cmOtherIncome.total  // sonstige Bareinnahmen
+        },
+        // Ausgaben aufgeteilt: Belege und sonstige Barausgaben
+        expensesByType: {
+          purchaseDocuments: expensesFromDocs,
+          otherCash: cmOtherExpense.total
         },
         transactionCounts: { cash: txCash._count || 0, account: txAccount._count || 0 },
         expiredItems,
         ownerUseItems,
         paidInvoices,
-        expenseDocs
+        expenseDocs,
+        // Kassenbewegungen mit Betragsdetails (für PDF)
+        otherIncome: cmOtherIncome,
+        otherExpense: cmOtherExpense
       },
 
       // Kein Ertrag: Sachentnahme und Schwund, bewertet zum Verkaufspreis
@@ -196,7 +223,15 @@ class AccountingService {
           transfer: topUpsTransfer,
           count: (topUpsCashAgg._count || 0) + (topUpsTransferAgg._count || 0)
         },
-        guestBalanceEnd: round2(dec(guestBalanceAgg._sum.balance))
+        guestBalanceEnd: round2(dec(guestBalanceAgg._sum.balance)),
+        // Kassenbewegungen: Kasse ↔ Bank (ergebnisneutral) und sonstige Bar-Posten (in EÜR)
+        cashMovements: {
+          bankDeposits: { total: cmSummarize.bankDeposits.total, count: cmSummarize.bankDeposits.count },
+          bankWithdrawals: { total: cmSummarize.bankWithdrawals.total, count: cmSummarize.bankWithdrawals.count },
+          otherIncome: { total: cmOtherIncome.total, count: cmOtherIncome.count },
+          otherExpense: { total: cmOtherExpense.total, count: cmOtherExpense.count }
+        },
+        cashMovementItems: cmSummarize.items
       },
 
       liabilities: {
@@ -327,7 +362,7 @@ class AccountingService {
       : [];
 
     return {
-      version: 2,
+      version: 3,
       draft,
       closedAt: draft ? null : new Date(),
       generatedAt: new Date(),
@@ -336,6 +371,7 @@ class AccountingService {
       incomeByCategory: eur.details.incomeByCategory,
       incomeByType: eur.details.incomeByType,
       expensesBySupplier: eur.details.expensesBySupplier,
+      expensesByType: eur.details.expensesByType,
       soldArticles: eur.details.incomeByArticle,
       paidInvoices: eur.details.paidInvoices,
       expenseDocs: eur.details.expenseDocs,
@@ -348,6 +384,14 @@ class AccountingService {
         expired: { quantity: eur.nonRevenue.expired.quantity, value: eur.nonRevenue.expired.value }
       },
       liquidity: { topUps: eur.liquidity.topUps, guestBalanceEnd: guestBalance },
+      // Kassenbewegungen im Snapshot (für PDF); Altabschlüsse (v2) haben dieses Feld nicht
+      cashMovements: {
+        bankDeposits: eur.liquidity.cashMovements.bankDeposits,
+        bankWithdrawals: eur.liquidity.cashMovements.bankWithdrawals,
+        otherIncome: { ...eur.liquidity.cashMovements.otherIncome, items: eur.details.otherIncome.items },
+        otherExpense: { ...eur.liquidity.cashMovements.otherExpense, items: eur.details.otherExpense.items },
+        items: eur.liquidity.cashMovementItems
+      },
       customerBalances,
       bankAccounts: banks,
       cashCount: cashCount ? {
@@ -499,6 +543,14 @@ class AccountingService {
       ownerUseArticles: eur.nonRevenue.ownerUse.items,
       nonRevenue: eur.nonRevenue,
       liquidity: eur.liquidity,
+      expensesByType: eur.details.expensesByType,
+      cashMovements: {
+        bankDeposits: eur.liquidity.cashMovements.bankDeposits,
+        bankWithdrawals: eur.liquidity.cashMovements.bankWithdrawals,
+        otherIncome: { ...eur.liquidity.cashMovements.otherIncome, items: eur.details.otherIncome.items },
+        otherExpense: { ...eur.liquidity.cashMovements.otherExpense, items: eur.details.otherExpense.items },
+        items: eur.liquidity.cashMovementItems
+      },
       inventorySystem,
       cashCount: cashCount ? {
         id: cashCount.id, countedAt: cashCount.countedAt,

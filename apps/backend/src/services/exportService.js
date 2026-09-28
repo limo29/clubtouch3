@@ -7,6 +7,7 @@ const prisma = require('../utils/prisma');
 const accountingService = require('./accountingService');
 const customerService = require('./customerService');
 const cashCountService = require('./cashCountService');
+const cashMovementService = require('./cashMovementService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 
 // Logo einmal beim Laden lesen; fehlt die Datei, wird ohne Logo gerendert.
@@ -765,6 +766,7 @@ class ExportService {
     const eur = await accountingService.getProfitLoss(startDate, endDate);
     const d = eur.details;
     const byType = d.incomeByType || {};
+    const byExpType = d.expensesByType || {};
     const sum = (arr, sel) => (arr || []).reduce((a, r) => a + Number(sel(r) || 0), 0);
 
     return new Promise((resolve, reject) => {
@@ -779,23 +781,35 @@ class ExportService {
         this._decoratePage(doc, theme, headerInfo);
 
         this._section(doc, theme, 'Einnahmen-Überschuss-Rechnung', headerInfo);
-        this._kvList(doc, theme, [
+        const eurKvRows = [
           { label: `Barverkäufe (${d.transactionCounts?.cash || 0} Verkäufe)`, value: this._fmtEUR(byType.cash) },
           { label: `Verkäufe über Kundenkonto (${d.transactionCounts?.account || 0} Verkäufe)`, value: this._fmtEUR(byType.account) },
-          { label: `Bezahlte Ausgangsrechnungen (${(d.paidInvoices || []).length})`, value: this._fmtEUR(byType.invoices) },
-          { label: 'Summe Betriebseinnahmen', value: this._fmtEUR(eur.summary.totalIncome), bold: true, color: theme.color.success },
-          { spacer: true },
-          { label: `Bezahlte Eingangsrechnungen (${(d.expenseDocs || []).length} Belege)`, value: this._fmtEUR(eur.summary.totalExpenses) },
-          { label: 'Summe Betriebsausgaben', value: this._fmtEUR(eur.summary.totalExpenses), bold: true, color: theme.color.danger },
-          { spacer: true },
-          { label: eur.summary.profit < 0 ? 'Fehlbetrag' : 'Überschuss', value: this._fmtEUR(eur.summary.profit), bold: true, rule: true,
-            color: eur.summary.profit < 0 ? theme.color.danger : theme.color.success }
-        ], { headerInfo });
+          { label: `Bezahlte Ausgangsrechnungen (${(d.paidInvoices || []).length})`, value: this._fmtEUR(byType.invoices) }
+        ];
+        if ((byType.otherCash || 0) > 0 || (d.otherIncome && d.otherIncome.count > 0)) {
+          eurKvRows.push({ label: `Sonstige Bareinnahmen (${d.otherIncome ? d.otherIncome.count : 0})`, value: this._fmtEUR(byType.otherCash || 0), color: theme.color.success });
+        }
+        eurKvRows.push({ label: 'Summe Betriebseinnahmen', value: this._fmtEUR(eur.summary.totalIncome), bold: true, color: theme.color.success });
+        eurKvRows.push({ spacer: true });
+        eurKvRows.push({ label: `Bezahlte Eingangsrechnungen (${(d.expenseDocs || []).length} Belege)`, value: this._fmtEUR(byExpType.purchaseDocuments != null ? byExpType.purchaseDocuments : eur.summary.totalExpenses) });
+        if ((byExpType.otherCash || 0) > 0 || (d.otherExpense && d.otherExpense.count > 0)) {
+          eurKvRows.push({ label: `Sonstige Barausgaben (${d.otherExpense ? d.otherExpense.count : 0})`, value: this._fmtEUR(byExpType.otherCash || 0), color: theme.color.danger });
+        }
+        eurKvRows.push({ label: 'Summe Betriebsausgaben', value: this._fmtEUR(eur.summary.totalExpenses), bold: true, color: theme.color.danger });
+        eurKvRows.push({ spacer: true });
+        eurKvRows.push({ label: eur.summary.profit < 0 ? 'Fehlbetrag' : 'Überschuss', value: this._fmtEUR(eur.summary.profit), bold: true, rule: true,
+          color: eur.summary.profit < 0 ? theme.color.danger : theme.color.success });
+        this._kvList(doc, theme, eurKvRows, { headerInfo });
 
         this._section(doc, theme, 'Nachrichtlich (kein Ertrag, keine Ausgabe)', headerInfo);
         this._kvList(doc, theme, [
           { label: `Eigenverbrauch / Sachentnahme (${eur.nonRevenue.ownerUse.quantity} Stück, Warenwert)`, value: this._fmtEUR(eur.nonRevenue.ownerUse.value) },
           { label: `Abgelaufen / Schwund (${eur.nonRevenue.expired.quantity} Stück, Warenwert)`, value: this._fmtEUR(eur.nonRevenue.expired.value) },
+          { spacer: true },
+          // Bank-Kassenbewegungen: ergebnisneutral (nur Liquidität, keine EÜR-Relevanz)
+          { label: `Kassenbewegungen (Bank-Einzahlungen/-Abhebungen):`, value: '', bold: true },
+          { label: `  Einzahlungen auf Bank (${eur.liquidity.cashMovements?.bankDeposits?.count || 0})`, value: this._fmtEUR(eur.liquidity.cashMovements?.bankDeposits?.total || 0) },
+          { label: `  Abhebungen von Bank (${eur.liquidity.cashMovements?.bankWithdrawals?.count || 0})`, value: this._fmtEUR(eur.liquidity.cashMovements?.bankWithdrawals?.total || 0) },
           { spacer: true },
           { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(eur.liquidity.topUps.cash) },
           { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(eur.liquidity.topUps.transfer) },
@@ -988,6 +1002,10 @@ class ExportService {
           { label: `+ Bar-Erstattungen / Stornos (${n('refunds')})`, value: this._fmtEUR(b.cashRefunds || 0), color: theme.color.danger },
           { label: `+ Bar-Aufladungen Kundenkonten (${n('topUps')})`, value: this._fmtEUR(b.cashTopUps || 0), color: theme.color.success },
           { label: `- Bar bezahlte Eingangsrechnungen (${n('expenses')})`, value: this._fmtEUR(b.cashExpenses || 0), color: theme.color.danger },
+          { label: `- Einzahlungen auf Bank (${n('bankDeposits')})`, value: this._fmtEUR(b.bankDeposits?.total ?? 0), color: theme.color.danger },
+          { label: `+ Abhebungen von Bank (${n('bankWithdrawals')})`, value: this._fmtEUR(b.bankWithdrawals?.total ?? 0), color: theme.color.success },
+          { label: `+ Sonstige Bareinnahmen (${n('otherIncome')})`, value: this._fmtEUR(b.otherIncome?.total ?? 0), color: theme.color.success },
+          { label: `- Sonstige Barausgaben (${n('otherExpense')})`, value: this._fmtEUR(b.otherExpense?.total ?? 0), color: theme.color.danger },
           { label: '= Soll laut System', value: this._fmtEUR(cc.expectedTotal), bold: true, rule: true },
           { label: 'Ist gezählt', value: this._fmtEUR(cc.countedTotal), bold: true },
           { label: 'Differenz', value: `${diff > 0 ? '+' : ''}${this._fmtEUR(diff)}`, bold: true, color: diffColor(theme) }
@@ -1004,6 +1022,29 @@ class ExportService {
             ],
             rows: b.expenseDocs,
             sumRow: ['Summe', '', '', this._fmtEUR(b.cashExpenses || 0)],
+            headerInfo
+          });
+        }
+
+        if (Array.isArray(b.movements) && b.movements.length) {
+          this._section(doc, theme, 'Kassenbewegungen seit der letzten Zählung', headerInfo);
+          const mvRows = b.movements;
+          const mvNet = mvRows.reduce((a, r) => a + Number(r.signedAmount || 0), 0);
+          const round2local = (x) => Math.round((x + Number.EPSILON) * 100) / 100;
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Datum/Uhrzeit', width: 100, render: r => this._fmtDateTime(r.occurredAt) },
+              { header: 'Typ', width: 130, render: r => cashMovementService.label(r.type) },
+              { header: 'Konto / Notiz', width: 160, render: r => [r.bankAccount, r.note].filter(Boolean).join(' – ') || '—' },
+              { header: 'Erfasst von', width: 90, render: r => r.user || '—' },
+              {
+                header: 'Betrag', width: 75, align: 'right',
+                render: r => `${Number(r.signedAmount) > 0 ? '+' : ''}${this._fmtEUR(r.signedAmount)}`,
+                color: (r) => Number(r.signedAmount) >= 0 ? theme.color.success : theme.color.danger
+              }
+            ],
+            rows: mvRows,
+            sumRow: ['Netto', '', '', '', `${round2local(mvNet) > 0 ? '+' : ''}${this._fmtEUR(round2local(mvNet))}`],
             headerInfo
           });
         }
@@ -1039,6 +1080,9 @@ class ExportService {
 
     const income = s.summary || {};
     const byType = s.incomeByType || {};
+    const byExpType = s.expensesByType || {};
+    // Kassenbewegungen: kann bei Altabschlüssen (v2) fehlen → robust behandeln
+    const cm = s.cashMovements || null;
     const banks = Array.isArray(s.bankAccounts) ? s.bankAccounts : [];
     const banksTotal = sum(banks, b => b.balance);
     const cash = s.cashCount || null;
@@ -1119,10 +1163,18 @@ class ExportService {
           eurRows.push({ label: 'Barverkäufe', value: this._fmtEUR(byType.cash) });
           eurRows.push({ label: 'Verkäufe über Kundenkonto', value: this._fmtEUR(byType.account) });
           eurRows.push({ label: 'Bezahlte Ausgangsrechnungen', value: this._fmtEUR(byType.invoices) });
+          if (cm && cm.otherIncome && (Number(cm.otherIncome.total || 0) > 0 || Number(cm.otherIncome.count || 0) > 0)) {
+            eurRows.push({ label: `Sonstige Bareinnahmen (${cm.otherIncome.count || 0})`, value: this._fmtEUR(cm.otherIncome.total || 0), color: theme.color.success });
+          }
         }
         eurRows.push({ label: 'Summe Betriebseinnahmen', value: this._fmtEUR(income.totalIncome), bold: true, color: theme.color.success });
         eurRows.push({ spacer: true });
-        eurRows.push({ label: `Bezahlte Eingangsrechnungen${expenseCount ? ` (${expenseCount} Belege)` : ''}`, value: this._fmtEUR(income.totalExpenses) });
+        // Eingangsrechnungen zeigt den Belegbetrag (ohne sonstige Barausgaben)
+        const expDocsAmount = byExpType.purchaseDocuments != null ? byExpType.purchaseDocuments : income.totalExpenses;
+        eurRows.push({ label: `Bezahlte Eingangsrechnungen${expenseCount ? ` (${expenseCount} Belege)` : ''}`, value: this._fmtEUR(expDocsAmount) });
+        if (cm && cm.otherExpense && (Number(cm.otherExpense.total || 0) > 0 || Number(cm.otherExpense.count || 0) > 0)) {
+          eurRows.push({ label: `Sonstige Barausgaben (${cm.otherExpense.count || 0})`, value: this._fmtEUR(cm.otherExpense.total || 0), color: theme.color.danger });
+        }
         eurRows.push({ label: 'Summe Betriebsausgaben', value: this._fmtEUR(income.totalExpenses), bold: true, color: theme.color.danger });
         eurRows.push({ spacer: true });
         eurRows.push({
@@ -1161,11 +1213,39 @@ class ExportService {
         } else {
           cashRows.push({ label: 'Kassenbestand: noch keine Kassenzählung im Geschäftsjahr (Pflicht vor dem Abschluss)', value: '—', bold: true, color: theme.color.danger });
         }
+        // Liquiditätsbewegungen Kasse ↔ Bank (ergebnisneutral; nur informativer Nachrichtlichcharakter)
+        if (cm) {
+          cashRows.push({ spacer: true });
+          cashRows.push({ label: `Einzahlungen auf Bank im Geschäftsjahr (${cm.bankDeposits?.count || 0}) [nur Liquidität, kein Ertrag]`, value: this._fmtEUR(cm.bankDeposits?.total || 0) });
+          cashRows.push({ label: `Abhebungen von Bank im Geschäftsjahr (${cm.bankWithdrawals?.count || 0}) [nur Liquidität, keine Ausgabe]`, value: this._fmtEUR(cm.bankWithdrawals?.total || 0) });
+        }
         cashRows.push({ spacer: true });
         if (banks.length === 0) cashRows.push({ label: 'Bankkonten: keine erfasst', value: this._fmtEUR(0) });
         banks.forEach(b => cashRows.push({ label: `Bankkonto ${b.name || ''}${b.iban ? ` (${b.iban})` : ''}`, value: this._fmtEUR(b.balance) }));
         cashRows.push({ label: 'Liquide Mittel gesamt (Kasse + Bank)', value: this._fmtEUR(cashTotal + banksTotal), bold: true, rule: true });
         this._kvList(doc, theme, cashRows, { headerInfo });
+
+        // ---------- KASSENBEWEGUNGEN ----------
+        this._section(doc, theme, 'Kassenbewegungen im Geschäftsjahr', headerInfo);
+        const cmItems = (cm && Array.isArray(cm.items)) ? cm.items : [];
+        const cmNetTotal = cmItems.reduce((a, r) => a + Number(r.signedAmount || 0), 0);
+        this._table(doc, theme, {
+          columns: [
+            { header: 'Datum/Uhrzeit', width: 110, render: r => this._fmtDateTime(r.occurredAt) },
+            { header: 'Typ', width: 110, render: r => cashMovementService.label(r.type) },
+            { header: 'Konto / Notiz', width: 160, render: r => (r.bankAccount ? `${r.bankAccount}${r.note ? ' – ' + r.note : ''}` : (r.note || '—')) },
+            { header: 'Erfasst von', width: 100, render: r => r.user || '—' },
+            {
+              header: 'Betrag ±', width: 90, align: 'right',
+              render: r => `${Number(r.signedAmount || 0) >= 0 ? '+' : ''}${this._fmtEUR(r.signedAmount || 0)}`,
+              color: r => Number(r.signedAmount || 0) < 0 ? theme.color.danger : theme.color.success
+            }
+          ],
+          rows: cmItems,
+          sumRow: ['', '', '', 'Netto', `${cmNetTotal >= 0 ? '+' : ''}${this._fmtEUR(cmNetTotal)}`],
+          emptyHint: 'Keine Kassenbewegungen im Geschäftsjahr.',
+          headerInfo
+        });
 
         // ---------- VERBINDLICHKEITEN & FORDERUNGEN ----------
         this._section(doc, theme, 'Gästeguthaben (Verbindlichkeit gegenüber Mitgliedern)', headerInfo);
