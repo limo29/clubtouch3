@@ -1,4 +1,6 @@
 const purchaseDocumentService = require('../services/purchaseDocumentService');
+const receiptService = require('../services/receiptService');
+const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 const prisma = require('../utils/prisma');
 
 class PurchaseDocumentController {
@@ -283,6 +285,56 @@ class PurchaseDocumentController {
     }
   }
 
+
+  // GET /receipts?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  async receipts(req, res) {
+    try {
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'startDate und endDate (YYYY-MM-DD) sind erforderlich.' });
+      }
+      const start = parseLocalDate(startDate);
+      const end   = endOfLocalDay(endDate);
+      if (!start || !end) {
+        return res.status(400).json({ error: 'Ungültiges Datumsformat – erwartet YYYY-MM-DD.' });
+      }
+      const result = await receiptService.listReceipts(start, end);
+      res.json(result);
+    } catch (e) {
+      console.error('receipts error', e);
+      res.status(500).json({ error: 'Fehler beim Laden der Belege.' });
+    }
+  }
+
+  // GET /receipts.zip?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  async receiptsZip(req, res) {
+    try {
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'startDate und endDate (YYYY-MM-DD) sind erforderlich.' });
+      }
+      const start = parseLocalDate(startDate);
+      const end   = endOfLocalDay(endDate);
+      if (!start || !end) {
+        return res.status(400).json({ error: 'Ungültiges Datumsformat – erwartet YYYY-MM-DD.' });
+      }
+      const { stream, filename } = await receiptService.buildReceiptZip(start, end, {
+        name: 'Zeitraum',
+        createdBy: req.user ? req.user.name : ''
+      });
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      stream.on('error', (err) => {
+        console.error('ZIP-Stream-Fehler', err);
+        if (!res.headersSent) res.status(500).json({ error: 'ZIP-Fehler' });
+        else res.end();
+      });
+      stream.pipe(res);
+    } catch (e) {
+      console.error('receiptsZip error', e);
+      res.status(500).json({ error: 'Fehler beim Erstellen des ZIP.' });
+    }
+  }
 
   // TODO:
   // async updateDocument(req, res) { ... }

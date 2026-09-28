@@ -1,5 +1,8 @@
 const accountingService = require('../services/accountingService');
+const receiptService = require('../services/receiptService');
+const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 const exportService = require('../services/exportService'); // für PDF
+const prisma = require('../utils/prisma');
 
 class AccountingController {
   async profitLoss(req, res) {
@@ -75,6 +78,51 @@ class AccountingController {
     } catch (e) {
       console.error('fiscalYearPreview error', e);
       res.status(400).json({ error: e.message || 'Fehler bei der Vorschau' });
+    }
+  }
+
+  // GET /fiscal-years/:id/receipts
+  async fiscalYearReceipts(req, res) {
+    try {
+      const { id } = req.params;
+      const fy = await prisma.fiscalYear.findUnique({ where: { id } });
+      if (!fy) return res.status(404).json({ error: 'Geschäftsjahr nicht gefunden.' });
+      const start = parseLocalDate(fy.startDate);
+      const end   = endOfLocalDay(fy.endDate);
+      const result = await receiptService.listReceipts(start, end);
+      res.json({
+        fiscalYear: { id: fy.id, name: fy.name, startDate: fy.startDate, endDate: fy.endDate, closed: fy.closed },
+        ...result
+      });
+    } catch (e) {
+      console.error('fiscalYearReceipts error', e);
+      res.status(500).json({ error: 'Fehler beim Laden der Belege.' });
+    }
+  }
+
+  // GET /fiscal-years/:id/receipts.zip
+  async fiscalYearReceiptsZip(req, res) {
+    try {
+      const { id } = req.params;
+      const fy = await prisma.fiscalYear.findUnique({ where: { id } });
+      if (!fy) return res.status(404).json({ error: 'Geschäftsjahr nicht gefunden.' });
+      const start = parseLocalDate(fy.startDate);
+      const end   = endOfLocalDay(fy.endDate);
+      const { stream, filename } = await receiptService.buildReceiptZip(start, end, {
+        name: fy.name,
+        createdBy: req.user ? req.user.name : ''
+      });
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      stream.on('error', (err) => {
+        console.error('ZIP-Stream-Fehler (FiscalYear)', err);
+        if (!res.headersSent) res.status(500).json({ error: 'ZIP-Fehler' });
+        else res.end();
+      });
+      stream.pipe(res);
+    } catch (e) {
+      console.error('fiscalYearReceiptsZip error', e);
+      res.status(500).json({ error: 'Fehler beim Erstellen des ZIP.' });
     }
   }
 
