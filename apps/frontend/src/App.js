@@ -22,6 +22,7 @@ import Reports from './pages/Reports';
 import PurchaseDocuments from './pages/PurchaseDocuments';
 import PurchaseDocumentsCreate from './pages/PurchaseDocumentsCreate';
 import ProfitLoss from './pages/ProfitLoss';
+import CashCount from './pages/CashCount';
 import Invoices from './pages/Invoices';
 import PurchaseDocumentEdit from './pages/PurchaseDocumentEdit';
 import PublicHighscore from './pages/PublicHighscore';
@@ -73,9 +74,9 @@ function App() {
                 }
               />
               <Route path="reports" element={<Reports />} />
-              <Route path="reports" element={<Reports />} />
               <Route path="purchases" element={<PurchaseDocuments />} />
               <Route path="purchases/create" element={<PurchaseDocumentsCreate />} />
+              <Route path="cash-count" element={<CashCount />} />
               <Route path="profit-loss" element={<ProfitLoss />} />
               <Route path="invoices" element={<Invoices />} />
               <Route path="purchases/edit/:id" element={<PurchaseDocumentEdit />} />

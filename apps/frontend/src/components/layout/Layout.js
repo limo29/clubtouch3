@@ -41,6 +41,7 @@ import {
   LightMode as LightModeIcon,
   SettingsBrightness as SystemModeIcon,
   Campaign,
+  PointOfSale,
   ExpandLess,
   ExpandMore,
   WifiOff,
@@ -99,7 +100,7 @@ const Layout = () => {
 
   // Auto-expand groups if active child
   useEffect(() => {
-    if (['/invoices', '/purchases', '/transactions', '/profit-loss', '/reports'].some(p => location.pathname.startsWith(p))) {
+    if (['/invoices', '/purchases', '/transactions', '/cash-count', '/profit-loss', '/reports'].some(p => location.pathname.startsWith(p))) {
       setOpenFinances(true);
     }
     if (['/articles', '/customers', '/users'].some(p => location.pathname.startsWith(p))) {
@@ -164,6 +165,10 @@ const Layout = () => {
               <ListItemIcon><Receipt /></ListItemIcon>
               <ListItemText primary="Transaktionen" />
             </ListItemButton>
+            <ListItemButton sx={{ pl: 4 }} selected={isActive('/cash-count')} onClick={() => { navigate('/cash-count'); setMobileOpen(false); }}>
+              <ListItemIcon><PointOfSale /></ListItemIcon>
+              <ListItemText primary="Kasse zählen" />
+            </ListItemButton>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/profit-loss')} onClick={() => { navigate('/profit-loss'); setMobileOpen(false); }}>
               <ListItemIcon><AccountBalance /></ListItemIcon>
               <ListItemText primary="Kassenprüfung" />
@@ -213,7 +218,8 @@ const Layout = () => {
     if (p.startsWith('/invoices')) return 'Rechnungen';
     if (p.startsWith('/purchases')) return 'Ausgaben';
     if (p.startsWith('/transactions')) return 'Transaktionen';
-    if (p.startsWith('/profit-loss')) return 'EÜR';
+    if (p.startsWith('/cash-count')) return 'Kasse zählen';
+    if (p.startsWith('/profit-loss')) return 'Kassenprüfung';
     if (p.startsWith('/reports')) return 'Berichte';
     if (p.startsWith('/articles')) return 'Artikel';
     if (p.startsWith('/customers')) return 'Kunden';

@@ -18,13 +18,14 @@ import {
   Stack, IconButton, Button, Chip, useMediaQuery,
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
-import { Search, LocalBar, Remove, Add, DeleteOutline, ShoppingCart, Inventory2Outlined } from '@mui/icons-material';
+import { Search, LocalBar, Add, DeleteOutline, ShoppingCart, Inventory2Outlined } from '@mui/icons-material';
+import QuantityStepper from '../common/QuantityStepper';
 import { useArticles } from '../../hooks/useArticles';
 import {
   addArticle, adjustLine, setLineQty, setLinePrice, setLineName, removeLine, addFreeLine,
   lineTotalQty, lineAmount, linesTotalQty,
 } from '../../hooks/useArticleLines';
-import { money, num, int, qty, unitShort, unitLabel } from '../../utils/format';
+import { money, num, qty, unitShort, unitLabel } from '../../utils/format';
 import { hasCrate, describeLineQty } from '../../utils/units';
 
 // Platzhalter-Verlauf der Verkaufsmaske (Referenz-Optik); auf dem Bild liegt weißes Icon + schwarzes Preis-Badge
@@ -96,46 +97,6 @@ function ArticleTile({ article, qtyInLines, showPrice, showStock, showCrates, on
   );
 }
 
-/* ------------------------------ Stepper ------------------------------- */
-
-function QtyStepper({ value, unit, onDelta, onSet, deleteAtOne = false, size = 40 }) {
-  const [draft, setDraft] = useState(null);
-  const commit = () => {
-    if (draft !== null) onSet(int(draft));
-    setDraft(null);
-  };
-  const atOne = value === 1 && deleteAtOne;
-  return (
-    <Stack direction="row" alignItems="center" spacing={0} sx={{ flexShrink: 0 }}>
-      <IconButton onClick={() => onDelta(-1)} color={atOne ? 'error' : 'default'} aria-label={`${unit} verringern`}
-        sx={{ width: size, height: size, border: '1px solid', borderColor: 'divider', borderRadius: '8px 0 0 8px' }}>
-        {atOne ? <DeleteOutline fontSize="small" /> : <Remove fontSize="small" />}
-      </IconButton>
-      <Box
-        component="input"
-        inputMode="numeric"
-        pattern="[0-9]*"
-        aria-label={`Menge ${unit}`}
-        value={draft ?? value}
-        onFocus={(e) => e.target.select()}
-        onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-        sx={{
-          width: 44, height: size, textAlign: 'center', fontWeight: 800, fontSize: '1rem', fontFamily: 'inherit',
-          border: '1px solid', borderLeft: 0, borderRight: 0, borderColor: 'divider', bgcolor: 'transparent', color: 'text.primary', outline: 'none',
-          '&:focus': { bgcolor: 'action.selected' },
-        }}
-      />
-      <IconButton onClick={() => onDelta(1)} aria-label={`${unit} erhöhen`}
-        sx={{ width: size, height: size, border: '1px solid', borderColor: 'divider', borderRadius: '0 8px 8px 0' }}>
-        <Add fontSize="small" />
-      </IconButton>
-      <Typography variant="caption" color="text.secondary" sx={{ ml: 0.75, minWidth: 24, fontWeight: 700 }}>{unitShort(unit)}</Typography>
-    </Stack>
-  );
-}
-
 /* ----------------------------- Preisfeld ------------------------------ */
 
 function PriceField({ value, onChange }) {
@@ -184,13 +145,13 @@ function LineRow({ line, showCrates, showPrice, editablePrice, allowFreeLines, u
         )}
       </Stack>
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mt: 1, flexWrap: 'wrap', rowGap: 1 }}>
-        <QtyStepper
+        <QuantityStepper
           value={line.baseQty} unit={line.unit} deleteAtOne={deleteAtOne}
           onDelta={(d) => update((prev) => adjustLine(prev, line.key, { baseDelta: d }))}
           onSet={(v) => update((prev) => setLineQty(prev, line.key, { baseQty: v }))}
         />
         {crate && (
-          <QtyStepper
+          <QuantityStepper
             value={line.crateQty} unit={line.purchaseUnit}
             onDelta={(d) => update((prev) => adjustLine(prev, line.key, { crateDelta: d }))}
             onSet={(v) => update((prev) => setLineQty(prev, line.key, { crateQty: v }))}
