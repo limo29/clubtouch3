@@ -136,7 +136,7 @@ function QtyStepper({ value, unit, onDelta, onSet, deleteAtOne = false, size = 4
 
 function PriceField({ value, onChange }) {
   const [draft, setDraft] = useState(null);
-  const shown = draft ?? String(num(value)).replace('.', ',');
+  const shown = draft ?? num(value).toFixed(2).replace('.', ',');
   return (
     <TextField
       size="small" label="Einzelpreis" inputMode="decimal"

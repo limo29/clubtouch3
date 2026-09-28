@@ -1,17 +1,16 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import {
-  Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
+  Box, Grid, Card, CardContent, TextField, InputAdornment, Typography,
   Stack, IconButton, List, ListItemText, Button, Dialog, DialogTitle,
   DialogContent, MenuItem, Chip, Drawer, useMediaQuery,
-  CardActions, Collapse, CardMedia, CardActionArea, Tooltip, Zoom, Fade,
+  CardActions, Collapse, CardActionArea, Tooltip, Zoom,
   Divider, ListItemButton, ListItemIcon
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
-  Search, Person, Add, Delete, Download, Edit, Settings,
-  Remove as RemoveIcon, Add as AddIcon, Close as CloseIcon,
-  Send as SendIcon, AttachMoney, Block, FilterList, KeyboardArrowUp,
-  Inventory
+  Search, Person, Add, Download, Edit, Settings,
+  Close as CloseIcon,
+  Send as SendIcon, AttachMoney, Block, FilterList, KeyboardArrowUp
 } from '@mui/icons-material';
 import { DatePicker, MobileDatePicker, DesktopDatePicker } from '@mui/x-date-pickers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -21,11 +20,12 @@ import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import KPICard from '../components/common/KPICard';
 import { Drafts, MarkEmailRead, Warning, CheckCircle } from '@mui/icons-material';
+import ArticleLinePicker from '../components/articles/ArticleLinePicker';
+import { useArticleLines, toInvoicePayload, linesFromInvoiceItems } from '../hooks/useArticleLines';
+import { useArticles } from '../hooks/useArticles';
+import { num, money } from '../utils/format';
 
 /* ----------------------- kleine Helfer ----------------------- */
-const num = (v) => { const x = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return Number.isNaN(x) ? 0 : x; };
-const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(num(v));
-const uniq = (arr) => Array.from(new Set(arr));
 
 /** Debounced TextField (für Suchfelder) */
 function DebouncedTextField({ value, onChange, delay = 250, ...props }) {
@@ -38,21 +38,6 @@ function DebouncedTextField({ value, onChange, delay = 250, ...props }) {
   return <TextField value={local} onChange={(e) => setLocal(e.target.value)} {...props} />;
 }
 
-/** Money- und Qty-Inputs */
-function MoneyField({ value, onChange, ...props }) {
-  const val = typeof value === 'number' ? value : num(value);
-  const set = (n) => onChange?.(Number.isFinite(n) ? Number(n.toFixed(2)) : 0);
-  return (
-    <TextField
-      size="small"
-      inputMode="decimal"
-      value={String(val).replace('.', ',')}
-      onChange={(e) => set(num(e.target.value))}
-      InputProps={{ startAdornment: <InputAdornment position="start">€</InputAdornment> }}
-      {...props}
-    />
-  );
-}
 /* ============================================================ */
 
 export default function Invoices() {
@@ -81,11 +66,8 @@ export default function Invoices() {
     queryFn: async () => (await api.get('/customers')).data,
     staleTime: 5 * 60_000
   });
-  const { data: articlesData = { articles: [] } } = useQuery({
-    queryKey: ['articles-invoice-pos'],
-    queryFn: async () => (await api.get('/articles')).data,
-    staleTime: 5 * 60_000
-  });
+  // Artikel für das Bearbeiten bestehender Rechnungen (inkl. inaktive, damit alte Positionen auflösbar bleiben)
+  const { allArticles } = useArticles({ activeOnly: false });
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (payload) => (await api.post('/invoices', payload)).data,
@@ -107,14 +89,6 @@ export default function Invoices() {
 
   const invoices = invoicesData?.invoices || [];
   const customers = useMemo(() => customersData?.customers || [], [customersData]);
-  const articles = (articlesData?.articles || [])
-    .filter(a => a.active)
-    .map(a => ({
-      ...a,
-      price: num(a.price),
-      unitsPerPurchase: num(a.unitsPerPurchase),
-      purchaseUnit: a.purchaseUnit || null,
-    }));
 
   const getStatusColor = (s) => (s === 'PAID' ? 'success' : s === 'SENT' ? 'info' : s === 'CANCELLED' ? 'error' : 'default');
   const getStatusLabel = (s) => (s === 'PAID' ? 'Bezahlt' : s === 'SENT' ? 'Versendet' : s === 'CANCELLED' ? 'Storniert' : 'Entwurf');
@@ -128,9 +102,8 @@ export default function Invoices() {
   const [recipientAddress, setRecipientAddress] = useState('');
 
   const [customerSearch, setCustomerSearch] = useState('');
-  const [articleSearch, setArticleSearch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [cart, setCart] = useState([]); // {id,name,price,quantity,isFree}
+  // Positionen im gemeinsamen Zeilenmodell (Kisten + Stück getrennt, Preis je Zeile editierbar)
+  const { lines, setLines, reset: resetLines, totalAmount: total } = useArticleLines([]);
   const [dueDate, setDueDate] = useState(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
   const [description, setDescription] = useState('');
 
@@ -140,52 +113,18 @@ export default function Invoices() {
   const closeStatusSheet = () => setStatusSheet({ open: false, inv: null });
 
   const [showFilters, setShowFilters] = useState(false); // Mobile filter toggle
-  const categories = useMemo(() => ['all', ...uniq(articles.map(a => a.category).filter(Boolean))], [articles]);
   const filteredCustomers = useMemo(() => {
     const s = customerSearch.toLowerCase();
     return [...customers]
       .filter(c => c.name.toLowerCase().includes(s) || (c.nickname || '').toLowerCase().includes(s))
       .sort((a, b) => a.name.localeCompare(b.name, 'de'));
   }, [customers, customerSearch]);
-  const filteredArticles = articles.filter(a => (selectedCategory === 'all' || a.category === selectedCategory) && a.name.toLowerCase().includes(articleSearch.toLowerCase()));
-
-  const addToCart = (a) => {
-    const isCrate = a.__crate && a.unitsPerPurchase > 1;
-    const addQty = isCrate ? a.unitsPerPurchase : 1;
-    // funktionales Update: schnelle Doppeltipps dürfen keinen Klick verlieren (B11)
-    setCart(prev => {
-      const exists = prev.find(i => i.id === a.id && !i.isFree);
-      if (exists) {
-        return prev.map(i => i.id === a.id && !i.isFree
-          ? { ...i, quantity: num(i.quantity) + addQty }
-          : i);
-      }
-      return [...prev, { ...a, quantity: addQty }];
-    });
-  };
-
-  const updateQty = (id, q) => {
-    const val = Math.max(0, q);
-    if (val <= 0) setCart(cart.filter(i => i.id !== id));
-    else setCart(cart.map(i => i.id === id ? { ...i, quantity: val } : i));
-  };
-  const incQty = (id) => {
-    const item = cart.find(i => i.id === id);
-    if (item) updateQty(id, num(item.quantity) + 1);
-  };
-  const decQty = (id) => {
-    const item = cart.find(i => i.id === id);
-    if (item) updateQty(id, num(item.quantity) - 1);
-  };
-  const updatePrice = (id, p) => setCart(cart.map(i => i.id === id ? { ...i, price: num(p) } : i));
-  const addFreeLine = () => setCart([...cart, { id: `free-${crypto.randomUUID()}`, name: '', price: 0, quantity: 1, isFree: true }]);
-  const total = cart.reduce((s, i) => s + num(i.price) * num(i.quantity), 0);
 
   const openCreate = () => {
     setEditInvoice(null);
     setRecipientName('');
     setRecipientAddress('');
-    setCart([]);
+    resetLines([]);
     setDescription('');
     setDueDate(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
     setShowCreate(true);
@@ -199,20 +138,12 @@ export default function Invoices() {
     setRecipientAddress(inv.customerAddress || '');
     setDueDate(new Date(inv.dueDate));
     setDescription(inv.description || '');
-    setCart(inv.items.map(it => ({
-      id: it.articleId || `free-${it.id}`,
-      name: it.description,
-      price: num(it.pricePerUnit),
-      quantity: num(it.quantity),
-      isFree: !it.articleId
-    })));
+    // Menge in Basiseinheiten → Anzeige als Kisten + Stück
+    resetLines(linesFromInvoiceItems(inv.items || [], allArticles));
     setShowCreate(true);
   };
 
-  const submitDisabled =
-    !cart.length ||
-    !recipientName.trim() ||
-    cart.some(i => i.quantity <= 0 || i.price < 0);
+  const submitDisabled = !lines.length || !recipientName.trim();
 
   const submitInvoice = () => {
     if (submitDisabled) return;
@@ -220,12 +151,8 @@ export default function Invoices() {
       description: description || null,
       dueDate: dueDate.toISOString(),
       taxRate: 0,
-      items: cart.map(i => ({
-        articleId: i.isFree ? null : i.id,
-        description: i.name || 'Position',
-        quantity: num(i.quantity),
-        pricePerUnit: num(i.price)
-      })),
+      // Backend-Vertrag unverändert: { articleId|null, description, quantity, pricePerUnit } in Basiseinheiten
+      items: toInvoicePayload(lines),
       totalAmount: num(total),
       customerName: recipientName.trim(),
       customerAddress: recipientAddress || null
@@ -538,7 +465,7 @@ export default function Invoices() {
                 <Button color="error" startIcon={<CloseIcon />} onClick={() => setShowCreate(false)}>Abbrechen</Button>
               </Box>
             </DialogTitle>
-            <DialogContent sx={{ p: 2 }}>
+            <DialogContent sx={{ p: 2, minHeight: 0, overflow: 'hidden' }}>
               <ThreeColumnPOS
                 isMobile={false}
                 customers={filteredCustomers}
@@ -552,26 +479,13 @@ export default function Invoices() {
                 setRecipientName={setRecipientName}
                 recipientAddress={recipientAddress}
                 setRecipientAddress={setRecipientAddress}
-                articles={filteredArticles}
-                categories={['all', ...categories.filter(c => c !== 'all')]}
-                selectedCategory={selectedCategory}
-                setSelectedCategory={setSelectedCategory}
-                articleSearch={articleSearch}
-                setArticleSearch={setArticleSearch}
-                addToCart={addToCart}
-                cart={cart}
-                setCart={setCart}
-                addFreeLine={addFreeLine}
-                updateQty={updateQty}
-                incQty={incQty}
-                decQty={decQty}
-                updatePrice={updatePrice}
+                lines={lines}
+                setLines={setLines}
                 dueDate={dueDate}
                 setDueDate={setDueDate}
                 description={description}
                 setDescription={setDescription}
                 total={total}
-                money={money}
                 submitDisabled={submitDisabled}
                 submitInvoice={submitInvoice}
                 onClose={() => setShowCreate(false)}
@@ -591,7 +505,7 @@ export default function Invoices() {
               <Button color="error" startIcon={<CloseIcon />} onClick={() => setShowCreate(false)}>Abbrechen</Button>
             </Box>
           </DialogTitle>
-          <DialogContent sx={{ p: 0 }}>
+          <DialogContent sx={{ p: 1, flex: 1, minHeight: 0, overflow: 'hidden' }}>
             <ThreeColumnPOS
               isMobile
               customers={filteredCustomers}
@@ -605,26 +519,13 @@ export default function Invoices() {
               setRecipientName={setRecipientName}
               recipientAddress={recipientAddress}
               setRecipientAddress={setRecipientAddress}
-              articles={filteredArticles}
-              categories={['all', ...categories.filter(c => c !== 'all')]}
-              selectedCategory={selectedCategory}
-              setSelectedCategory={setSelectedCategory}
-              articleSearch={articleSearch}
-              setArticleSearch={setArticleSearch}
-              addToCart={addToCart}
-              cart={cart}
-              setCart={setCart}
-              addFreeLine={addFreeLine}
-              updateQty={updateQty}
-              incQty={incQty}
-              decQty={decQty}
-              updatePrice={updatePrice}
+              lines={lines}
+              setLines={setLines}
               dueDate={dueDate}
               setDueDate={setDueDate}
               description={description}
               setDescription={setDescription}
               total={total}
-              money={money}
               submitDisabled={submitDisabled}
               submitInvoice={submitInvoice}
               onClose={() => setShowCreate(false)}
@@ -679,265 +580,108 @@ function ThreeColumnPOS(props) {
     isMobile,
     customers, onPickCustomer, customerSearch, setCustomerSearch,
     recipientName, setRecipientName, recipientAddress, setRecipientAddress,
-    articles, categories, selectedCategory, setSelectedCategory, articleSearch, setArticleSearch,
-    addToCart, cart, addFreeLine, updateQty, incQty, decQty, updatePrice,
+    lines, setLines,
     dueDate, setDueDate, description, setDescription,
-    total, money, submitDisabled, submitInvoice, onClose, editInvoice
+    total, submitDisabled, submitInvoice, onClose, editInvoice
   } = props;
 
   const DuePicker = isMobile ? MobileDatePicker : DesktopDatePicker;
+  const [mobileTab, setMobileTab] = useState(1);
+
+  const sidebar = (
+    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <CardContent sx={{ pb: 1 }}>
+        <TextField
+          label="Empfängername *"
+          value={recipientName}
+          onChange={(e) => setRecipientName(e.target.value)}
+          fullWidth size="small"
+          variant="filled"
+        />
+        <TextField
+          label="Anschrift"
+          value={recipientAddress}
+          onChange={(e) => setRecipientAddress(e.target.value)}
+          fullWidth multiline minRows={3} size="small" sx={{ mt: 1 }}
+          variant="filled"
+          placeholder={'Straße 1\n12345 Musterstadt'}
+        />
+        <DebouncedTextField
+          placeholder="Kunde suchen"
+          size="small"
+          fullWidth
+          value={customerSearch}
+          onChange={setCustomerSearch}
+          InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
+          sx={{ mt: 2 }}
+        />
+      </CardContent>
+      <Box sx={{ overflowY: 'auto', flex: 1, px: 2, pb: 2 }}>
+        <List dense>
+          {customers.map(c => (
+            <ListItemButton
+              key={c.id}
+              onClick={() => { onPickCustomer(c); setMobileTab(1); }}
+              sx={{
+                borderRadius: 2,
+                mb: 0.5,
+                '&:hover': { bgcolor: 'primary.light', color: 'primary.contrastText', '& .MuiSvgIcon-root': { color: 'inherit' } }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 40 }}><Person /></ListItemIcon>
+              <ListItemText
+                primary={<Typography noWrap fontWeight={600}>{c.nickname || c.name}</Typography>}
+                secondary={c.nickname ? c.name : null}
+                secondaryTypographyProps={{ sx: { color: 'inherit', opacity: 0.8 } }}
+              />
+            </ListItemButton>
+          ))}
+        </List>
+      </Box>
+    </Card>
+  );
+
+  const linesHeader = (
+    <Stack spacing={1} sx={{ mb: 2 }}>
+      <DuePicker
+        label="Fällig am"
+        value={dueDate}
+        onChange={setDueDate}
+        slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+      />
+      <TextField label="Beschreibung (optional)" value={description} onChange={(e) => setDescription(e.target.value)} fullWidth size="small" />
+    </Stack>
+  );
+
+  const linesFooter = (
+    <>
+      <Typography variant="h5" align="right" sx={{ fontWeight: 900, color: 'primary.main' }} aria-live="polite">Gesamt: {money(total)}</Typography>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+        <Button variant="contained" size="large" fullWidth onClick={submitInvoice} disabled={submitDisabled} sx={{ fontWeight: 800 }}>
+          {editInvoice ? 'Speichern' : 'Erstellen (Entwurf)'}
+        </Button>
+        <Button variant="outlined" color="error" onClick={onClose}>
+          Abbrechen
+        </Button>
+      </Stack>
+    </>
+  );
 
   return (
-    <Box sx={{
-      display: 'grid',
-      gap: 2,
-      gridTemplateColumns: { xs: '1fr', md: '360px 1fr 420px' },
-      height: { md: 'calc(100vh - 160px)' } // im Drawer
-    }}>
-      {/* Empfänger + Kundenliste */}
-      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: { md: 2 } }}>
-        <CardContent sx={{ pb: 1 }}>
-          <TextField
-            label="Empfängername *"
-            value={recipientName}
-            onChange={(e) => setRecipientName(e.target.value)}
-            fullWidth size="small"
-            variant="filled"
-          />
-          <TextField
-            label="Anschrift"
-            value={recipientAddress}
-            onChange={(e) => setRecipientAddress(e.target.value)}
-            fullWidth multiline minRows={3} size="small" sx={{ mt: 1 }}
-            variant="filled"
-            placeholder={'Straße 1\n12345 Musterstadt'}
-          />
-          <DebouncedTextField
-            placeholder="Kunde suchen"
-            size="small"
-            fullWidth
-            value={customerSearch}
-            onChange={setCustomerSearch}
-            InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
-            sx={{ mt: 2 }}
-          />
-        </CardContent>
-        <Box sx={{ overflowY: 'auto', flex: 1, px: 2, pb: 2 }}>
-          <List dense>
-            {customers.map(c => (
-              <ListItemButton
-                key={c.id}
-                onClick={() => onPickCustomer(c)}
-                sx={{
-                  borderRadius: 2,
-                  mb: 0.5,
-                  '&:hover': { bgcolor: 'primary.light', color: 'primary.contrastText', '& .MuiSvgIcon-root': { color: 'inherit' } }
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 40 }}><Person /></ListItemIcon>
-                <ListItemText
-                  primary={<Typography noWrap fontWeight={600}>{c.nickname || c.name}</Typography>}
-                  secondary={c.nickname ? c.name : null}
-                  secondaryTypographyProps={{ sx: { color: 'inherit', opacity: 0.8 } }}
-                />
-              </ListItemButton>
-            ))}
-          </List>
-        </Box>
-      </Card>
-
-      {/* Artikelkacheln */}
-      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-          <DebouncedTextField
-            placeholder="Artikel suchen…"
-            size="small"
-            fullWidth
-            value={articleSearch}
-            onChange={setArticleSearch}
-            InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
-          />
-          <Tabs value={selectedCategory} onChange={(e, v) => setSelectedCategory(v)} variant="scrollable" scrollButtons="auto" sx={{ mt: 1 }}>
-            {categories.map(c => <Tab key={c} value={c} label={c === 'all' ? 'Alle' : c} />)}
-          </Tabs>
-        </Box>
-        <Box sx={{ p: 2, overflowY: 'auto' }}>
-          <Grid container spacing={1.5}>
-            {articles.map(a => {
-              const inCart = cart.find(i => i.id === a.id)?.quantity || 0;
-              return (
-                <Grid item xs={6} sm={4} md={3} lg={3} key={a.id}>
-                  <Card
-                    sx={{
-                      cursor: 'pointer', height: '100%',
-                      borderRadius: 1.5,
-                      border: inCart ? '2px solid' : '1px solid',
-                      borderColor: inCart ? 'primary.main' : 'transparent',
-                      boxShadow: inCart ? 4 : 2,
-                      transition: 'all 0.2s',
-                      display: 'flex', flexDirection: 'column',
-                      '&:hover': { transform: 'translateY(-4px)', boxShadow: 6 }
-                    }}
-                    onClick={() => addToCart(a)}
-                  >
-                    <Box sx={{ position: 'relative', height: 160, bgcolor: 'action.hover' }}>
-                      {a.imageMedium ? (
-                        <CardMedia component="img" image={a.imageMedium} alt={a.name} sx={{ height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.1 }}><Inventory sx={{ fontSize: 60 }} /></Box>
-                      )}
-                      {!!inCart && (
-                        <Fade in={true}>
-                          <Box sx={{
-                            position: 'absolute', top: 8, right: 8,
-                            bgcolor: 'primary.main', color: 'primary.contrastText',
-                            borderRadius: '50%', width: 28, height: 28,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: 14, fontWeight: 700, boxShadow: 3
-                          }}>
-                            {inCart}
-                          </Box>
-                        </Fade>
-                      )}
-                    </Box>
-
-                    <CardContent sx={{ p: 2, flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                      <Box>
-                        <Typography variant="body1" fontWeight={700} title={a.name} sx={{ lineHeight: 1.2, mb: 0.5 }}>{a.name}</Typography>
-                        <Typography variant="h6" fontWeight={800} color="primary">{money(a.price)}</Typography>
-                      </Box>
-
-                      {a.purchaseUnit && a.unitsPerPurchase > 1 && (
-                        <Button
-                          size="medium"
-                          variant={inCart ? "contained" : "outlined"}
-                          color="secondary"
-                          fullWidth
-                          sx={{ mt: 2, fontSize: '0.85rem', py: 0.75, fontWeight: 600, textTransform: 'none' }}
-                          onClick={(e) => { e.stopPropagation(); addToCart({ ...a, __crate: true }); }}
-                        >
-                          + {a.purchaseUnit}
-                        </Button>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Grid>
-              );
-            })}
-          </Grid>
-        </Box>
-      </Card>
-
-      {/* Warenkorb */}
-      <Card sx={{ height: { md: '100%' }, display: 'flex', flexDirection: 'column' }}>
-        <CardContent sx={{ pb: 1 }}>
-          <DuePicker
-            label="Fällig am"
-            value={dueDate}
-            onChange={setDueDate}
-            slotProps={{ textField: { fullWidth: true, size: 'small' } }}
-          />
-          <TextField sx={{ mt: 1 }} label="Beschreibung (optional)" value={description} onChange={(e) => setDescription(e.target.value)} fullWidth size="small" />
-        </CardContent>
-
-        {/* Scrollbarer Positionsbereich */}
-        <Box sx={{ px: 2, pb: 1, overflowY: 'auto', flex: 1 }}>
-          {!cart.length && <Typography color="text.secondary" align="center" sx={{ mt: 3 }}>Noch keine Positionen</Typography>}
-          <Stack spacing={1}>
-            {cart.map(i => (
-              <Box key={i.id} sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                {i.isFree
-                  ? (
-                    <TextField
-                      size="small"
-                      value={i.name}
-                      onChange={(e) => props.setCart(cs => cs.map(x => x.id === i.id ? { ...x, name: e.target.value } : x))}
-                      placeholder="Beschreibung"
-                      fullWidth sx={{ mb: 1 }}
-                    />
-                  ) : (
-                    <Typography sx={{ fontWeight: 600, mb: .5 }} noWrap>{i.name}</Typography>
-                  )}
-
-                <Grid container spacing={1} alignItems="center">
-                  {/* Menge mit +/- */}
-                  <Grid item xs={6} sm={5} md={5}>
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <IconButton size="small" onClick={() => decQty(i.id)} aria-label="Menge verringern"><RemoveIcon /></IconButton>
-                      <TextField
-                        size="small"
-                        type="number"
-                        inputMode="numeric"
-                        label="Menge"
-                        value={i.quantity}
-                        // nur ganze Stück: sonst landen 0,5 Flaschen im Bestand (B12)
-                        onChange={(e) => updateQty(i.id, Math.max(0, Math.trunc(num(e.target.value))))}
-                        inputProps={{ step: 1, min: 0 }}
-                        sx={{ width: 100 }}
-                      />
-                      <IconButton size="small" onClick={() => incQty(i.id)} aria-label="Menge erhöhen"><AddIcon /></IconButton>
-                    </Stack>
-                  </Grid>
-
-                  {/* Preis */}
-                  <Grid item xs={6} sm={5} md={5}>
-                    <MoneyField value={i.price} onChange={(v) => updatePrice(i.id, v)} label="Einzelpreis" fullWidth />
-                  </Grid>
-
-                  {!i.isFree && (
-                    <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => updateQty(i.id, num(i.quantity) + 1)}
-                      >
-                        +1 {i.unit || 'Stück'}
-                      </Button>
-
-                      {i.purchaseUnit && i.unitsPerPurchase > 1 && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => updateQty(i.id, num(i.quantity) + num(i.unitsPerPurchase))}
-                        >
-                          +1 {i.purchaseUnit} (×{i.unitsPerPurchase})
-                        </Button>
-                      )}
-                    </Stack>
-                  )}
-
-                  {/* Löschen */}
-                  <Grid item xs={12} sm={2} md={2} sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
-                    <IconButton onClick={() => updateQty(i.id, 0)} aria-label="Position löschen"><Delete /></IconButton>
-                  </Grid>
-                </Grid>
-
-                <Typography variant="body2" sx={{ mt: .5, color: 'text.secondary', textAlign: 'right' }}>
-                  Zwischensumme: {money(num(i.quantity) * num(i.price))}
-                </Typography>
-              </Box>
-            ))}
-          </Stack>
-
-          <Button variant="outlined" startIcon={<Add />} onClick={addFreeLine} sx={{ mt: 1 }}>
-            Freie Zeile
-          </Button>
-        </Box>
-
-        {/* Fester Footer-Bereich (kein Overlap) */}
-        <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper', position: 'sticky', bottom: 0, zIndex: 1 }}>
-          <Typography variant="h6" align="right" sx={{ fontWeight: 800 }} aria-live="polite">Gesamt: {money(total)}</Typography>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
-            <Button variant="contained" onClick={submitInvoice} disabled={submitDisabled}>
-              {editInvoice ? 'Speichern' : 'Erstellen (Entwurf)'}
-            </Button>
-            <Button variant="outlined" color="error" onClick={onClose}>
-              Abbrechen
-            </Button>
-          </Stack>
-        </Box>
-      </Card >
-    </Box >
+    <ArticleLinePicker
+      mode="invoice"
+      lines={lines}
+      onChange={setLines}
+      sidebar={sidebar}
+      sidebarLabel="Empfänger"
+      linesLabel="Positionen"
+      linesHeader={linesHeader}
+      linesFooter={linesFooter}
+      mobileTab={mobileTab}
+      onMobileTabChange={setMobileTab}
+      columns={{ md: '280px 1fr 320px', lg: '320px 1fr 380px' }}
+      height="100%"
+    />
   );
 }
 
