@@ -50,6 +50,26 @@ class PublicController {
         }
     }
 
+    // Artikel für das Menü-Element der Werbe-Slides (öffentliches Display, kein Login).
+    // Bewusst minimal: keine Bestände, keine EK-Daten, nur aktive Artikel.
+    async getMenuArticles(req, res) {
+        try {
+            const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+            const articles = await prisma.article.findMany({
+                where: {
+                    active: true,
+                    ...(category ? { category: { equals: category, mode: 'insensitive' } } : {})
+                },
+                orderBy: [{ order: 'asc' }, { name: 'asc' }],
+                select: { id: true, name: true, price: true, category: true, unit: true }
+            });
+            res.json({ articles });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: 'Fehler beim Laden der Artikel' });
+        }
+    }
+
     // Check Balance by Name
     async checkBalance(req, res) {
         try {

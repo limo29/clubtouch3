@@ -1,4 +1,28 @@
 const prisma = require('../utils/prisma');
+const fs = require('fs');
+const path = require('path');
+
+const UPLOAD_PREFIX = '/uploads/ads/';
+const ADS_DIR = path.join(process.cwd(), 'uploads', 'ads');
+
+/** Dauer in Sekunden: 1..3600, sonst null (→ 400); undefined = nicht angegeben */
+function parseDuration(raw) {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1 || n > 3600) return null;
+    return Math.round(n);
+}
+
+const TRANSITIONS = ['FADE', 'SLIDE', 'ZOOM', 'NONE'];
+
+/** Hochgeladene Datei löschen, wenn kein anderer Slide sie mehr referenziert (verwaiste Uploads vermeiden) */
+async function removeUploadIfUnused(imageUrl, exceptId) {
+    if (!imageUrl || !imageUrl.startsWith(UPLOAD_PREFIX)) return;
+    const stillUsed = await prisma.adSlide.count({ where: { imageUrl, ...(exceptId ? { id: { not: exceptId } } : {}) } });
+    if (stillUsed > 0) return;
+    const file = path.join(ADS_DIR, path.basename(imageUrl));
+    fs.promises.unlink(file).catch(() => { /* Datei fehlt bereits: egal */ });
+}
 
 class AdController {
     // List all ads (for admin)
@@ -25,6 +49,12 @@ class AdController {
                 // Assuming server serves 'uploads' directory at /uploads
                 imageUrl = `/uploads/ads/${req.file.filename}`;
             }
+            if (!imageUrl) {
+                return res.status(400).json({ error: 'Bitte eine Datei hochladen oder eine URL angeben' });
+            }
+            const dur = parseDuration(duration);
+            if (dur === null) return res.status(400).json({ error: 'Dauer muss zwischen 1 und 3600 Sekunden liegen' });
+            if (transition && !TRANSITIONS.includes(transition)) return res.status(400).json({ error: 'Ungültiger Übergang' });
 
             // Get max order to append
             const lastAd = await prisma.adSlide.findFirst({
@@ -35,7 +65,7 @@ class AdController {
             const ad = await prisma.adSlide.create({
                 data: {
                     imageUrl,
-                    duration: Number(duration) || 10,
+                    duration: dur || 10,
                     transition: transition || 'FADE',
                     order: newOrder,
                     active: active !== undefined ? String(active) === 'true' : true,
@@ -61,8 +91,15 @@ class AdController {
                 imageUrl = `/uploads/ads/${req.file.filename}`;
             }
 
+            const dur = parseDuration(data.duration);
+            if (dur === null) return res.status(400).json({ error: 'Dauer muss zwischen 1 und 3600 Sekunden liegen' });
+            if (data.transition && !TRANSITIONS.includes(data.transition)) return res.status(400).json({ error: 'Ungültiger Übergang' });
+
+            const existing = await prisma.adSlide.findUnique({ where: { id } });
+            if (!existing) return res.status(404).json({ error: 'Werbung nicht gefunden' });
+
             const updateData = {
-                duration: data.duration ? Number(data.duration) : undefined,
+                duration: dur,
                 transition: data.transition,
                 order: data.order ? Number(data.order) : undefined,
                 slideData: data.slideData ? JSON.parse(data.slideData) : undefined
@@ -80,6 +117,10 @@ class AdController {
                 where: { id },
                 data: updateData
             });
+            // Ersetzte Datei aufräumen
+            if (updateData.imageUrl && updateData.imageUrl !== existing.imageUrl) {
+                await removeUploadIfUnused(existing.imageUrl, id);
+            }
             res.json(ad);
         } catch (error) {
             console.error(error);
@@ -91,7 +132,10 @@ class AdController {
     async deleteAd(req, res) {
         try {
             const { id } = req.params;
+            const existing = await prisma.adSlide.findUnique({ where: { id } });
+            if (!existing) return res.status(404).json({ error: 'Werbung nicht gefunden' });
             await prisma.adSlide.delete({ where: { id } });
+            await removeUploadIfUnused(existing.imageUrl);
             res.json({ success: true });
         } catch (error) {
             console.error(error);
@@ -103,6 +147,9 @@ class AdController {
     async reorderAds(req, res) {
         try {
             const { orderedIds } = req.body; // Array of IDs in new order
+            if (!Array.isArray(orderedIds) || orderedIds.some((x) => typeof x !== 'string')) {
+                return res.status(400).json({ error: 'orderedIds muss eine Liste von IDs sein' });
+            }
 
             const updates = orderedIds.map((id, index) =>
                 prisma.adSlide.update({

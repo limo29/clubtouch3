@@ -12,6 +12,8 @@ router.get('/highscore/archive', publicController.getArchive);
 
 // Ads
 router.get('/ads', publicController.getAds);
+// Speisekarte für Slides (Menü-Element): nur aktive Artikel, nur Name/Preis/Kategorie
+router.get('/articles', publicController.getMenuArticles);
 
 // Customer Balance
 router.get('/customer/balance', publicController.checkBalance);
