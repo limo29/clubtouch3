@@ -267,6 +267,9 @@ class TransactionService {
       };
     });
 
+
+    // Clubscore: ein Storno kann ein Ranking verändern → Boards neu berechnen und pushen
+    require('./highscoreService').refreshBoards();
     return result;
   }
 

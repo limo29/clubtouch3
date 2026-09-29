@@ -353,6 +353,16 @@ class HighscoreService {
   }
 
   /* ---------- Events nach Verkäufen ---------- */
+  /** Boards frisch rechnen und pushen (z.B. nach Storno, der ein Ranking verändern kann) */
+  async refreshBoards() {
+    try {
+      const boards = await this.getAllBoards({ fresh: true });
+      emitHighscoreUpdate(boards);
+    } catch (err) {
+      console.error('Error refreshing highscore:', err);
+    }
+  }
+
   async updateAfterSale(transactionId) {
     try {
       const transaction = await prisma.transaction.findUnique({
