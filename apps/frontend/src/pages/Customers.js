@@ -230,7 +230,7 @@ const Customers = () => {
 
       {/* Statistics Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }} alignItems="stretch">
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Kunden gesamt"
             value={customers.length}
@@ -238,7 +238,7 @@ const Customers = () => {
             color="primary"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Gesamtguthaben"
             value={formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0))}
@@ -246,7 +246,7 @@ const Customers = () => {
             color="success"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Ø Guthaben"
             value={customers.length > 0
@@ -257,7 +257,7 @@ const Customers = () => {
             color="info"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Niedriges Guthaben"
             value={lowBalanceData?.count || 0}
@@ -271,7 +271,7 @@ const Customers = () => {
       {/* Actions Bar */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item flex={1}>
+          <Grid size="grow">
             <TextField
               placeholder="Kunde suchen..."
               variant="outlined"
@@ -287,7 +287,7 @@ const Customers = () => {
               }}
             />
           </Grid>
-          <Grid item>
+          <Grid>
             <Button
               variant="contained"
               startIcon={<Add />}
@@ -400,13 +400,14 @@ const Customers = () => {
           </DialogTitle>
           <DialogContent>
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="name"
                   control={control}
                   rules={{ required: 'Name ist erforderlich' }}
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Name"
                       error={!!errors.name}
@@ -415,20 +416,21 @@ const Customers = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="nickname"
                   control={control}
                   defaultValue=""
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Spitzname (optional)"
                     />
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="gender"
                   control={control}
@@ -447,7 +449,7 @@ const Customers = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="active"
                   control={control}
@@ -484,12 +486,12 @@ const Customers = () => {
           </DialogTitle>
           <DialogContent>
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Typography variant="body2" color="text.secondary">
                   Aktuelles Guthaben: {selectedCustomer && formatCurrency(selectedCustomer.balance)}
                 </Typography>
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="amount"
                   control={topUpControl}
@@ -500,6 +502,7 @@ const Customers = () => {
                   }}
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Betrag"
                       type="number"
@@ -513,13 +516,14 @@ const Customers = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="method"
                   control={topUpControl}
                   defaultValue="CASH"
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Zahlungsart"
                       select
@@ -530,13 +534,14 @@ const Customers = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="reference"
                   control={topUpControl}
                   defaultValue=""
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Referenz/Bemerkung (optional)"
                     />
@@ -586,9 +591,9 @@ const Customers = () => {
           <Grid container spacing={3}>
             {/* Statistics */}
             {customerStats && (
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Grid container spacing={2}>
-                  <Grid item xs={12} sm={4}>
+                  <Grid size={{ xs: 12, sm: 4 }}>
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="body2">
@@ -600,7 +605,7 @@ const Customers = () => {
                       </CardContent>
                     </Card>
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid size={{ xs: 12, sm: 4 }}>
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="body2">
@@ -612,7 +617,7 @@ const Customers = () => {
                       </CardContent>
                     </Card>
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid size={{ xs: 12, sm: 4 }}>
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="body2">
@@ -633,7 +638,7 @@ const Customers = () => {
 
             {/* Favorite Articles */}
             {customerStats?.favoriteArticles?.length > 0 && (
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <Typography variant="h6" gutterBottom>
                   <EmojiEvents sx={{ verticalAlign: 'middle', mr: 1 }} />
                   Lieblingsartikel
@@ -653,7 +658,7 @@ const Customers = () => {
 
             {/* Recent Transactions */}
             {customerDetails?.transactions?.length > 0 && (
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <Typography variant="h6" gutterBottom>
                   <Receipt sx={{ verticalAlign: 'middle', mr: 1 }} />
                   Letzte Transaktionen
@@ -677,7 +682,7 @@ const Customers = () => {
 
             {/* Recent Top Ups */}
             {customerDetails?.accountTopUps?.length > 0 && (
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Typography variant="h6" gutterBottom>
                   <TrendingUp sx={{ verticalAlign: 'middle', mr: 1 }} />
                   Letzte Aufladungen

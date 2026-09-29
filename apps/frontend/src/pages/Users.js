@@ -274,13 +274,14 @@ const Users = () => {
           </DialogTitle>
           <DialogContent>
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="name"
                   control={control}
                   rules={{ required: 'Name ist erforderlich' }}
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Name"
                       error={!!errors.name}
@@ -289,7 +290,7 @@ const Users = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="email"
                   control={control}
@@ -302,6 +303,7 @@ const Users = () => {
                   }}
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="E-Mail"
                       type="email"
@@ -311,12 +313,13 @@ const Users = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="username"
                   control={control}
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Benutzername (Optional)"
                       error={!!errors.username}
@@ -325,13 +328,14 @@ const Users = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="role"
                   control={control}
                   defaultValue="CASHIER"
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label="Rolle"
                       select
@@ -358,7 +362,7 @@ const Users = () => {
                   )}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Controller
                   name="password"
                   control={control}
@@ -371,6 +375,7 @@ const Users = () => {
                   }}
                   render={({ field }) => (
                     <TextField
+                      fullWidth
                       {...field}
                       label={editingUser ? 'Neues Passwort (optional)' : 'Passwort'}
                       type={showPassword ? 'text' : 'password'}

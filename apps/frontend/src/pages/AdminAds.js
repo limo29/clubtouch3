@@ -72,7 +72,7 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
     };
 
     return (
-        <Grid item xs={12} sm={6} md={4} ref={setNodeRef} style={style}>
+        <Grid size={{ xs: 12, sm: 6, md: 4 }} ref={setNodeRef} style={style}>
             <Card variant="elevation" elevation={2} sx={{ position: 'relative', borderRadius: 3, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <Box sx={{ position: 'relative', height: 200, bgcolor: '#000' }}>
                     {isVideo(ad.imageUrl) ? (

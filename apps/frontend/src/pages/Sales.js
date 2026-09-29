@@ -481,7 +481,7 @@ const Sales = () => {
           {/* Quick Amounts - Banknotes */}
           <Grid container spacing={2} sx={{ mb: 4 }}>
             {[5, 10, 20, 50].map(v => (
-              <Grid item xs={6} md={3} key={v}>
+              <Grid size={{ xs: 6, md: 3 }} key={v}>
                 <Button
                   fullWidth
                   onClick={() => setTopUpAmount(String(v))}
