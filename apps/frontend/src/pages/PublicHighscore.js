@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react'; // Optimization: Removed unused imports
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Box, Card, CardContent, Chip, Stack, CssBaseline,
-    Typography, GlobalStyles, alpha, useTheme, Grid
+    Typography, GlobalStyles, alpha, useTheme, Grid, IconButton, Tooltip, Fade
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import FlagIcon from '@mui/icons-material/Flag';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 
 import Podium from '../components/common/Podium';
 import GoalOverlay from '../components/common/GoalOverlay';
@@ -14,6 +16,48 @@ import GoalBar from '../components/common/GoalBar';
 
 // Helper functions
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
+const CONTROLS_HIDE_MS = 3000; // Vollbild-Knopf blendet sich nach 3 s ohne Mausbewegung aus
+
+/** Dezenter Vollbild-Schalter rechts oben (Fullscreen API, Esc verlässt wie üblich). */
+function FullscreenControl() {
+    const [isFull, setIsFull] = useState(!!document.fullscreenElement);
+    const [visible, setVisible] = useState(true);
+    const timer = useRef(null);
+    useEffect(() => {
+        const onChange = () => setIsFull(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', onChange);
+        const arm = () => {
+            setVisible(true);
+            clearTimeout(timer.current);
+            timer.current = setTimeout(() => setVisible(false), CONTROLS_HIDE_MS);
+        };
+        arm();
+        window.addEventListener('mousemove', arm);
+        window.addEventListener('touchstart', arm, { passive: true });
+        return () => {
+            clearTimeout(timer.current);
+            document.removeEventListener('fullscreenchange', onChange);
+            window.removeEventListener('mousemove', arm);
+            window.removeEventListener('touchstart', arm);
+        };
+    }, []);
+    const toggle = async () => {
+        try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch { }
+    };
+    if (typeof document.documentElement.requestFullscreen !== 'function') return null;
+    return (
+        <Fade in={visible}>
+            <Box sx={{ position: 'fixed', top: 12, right: 12, zIndex: 10 }}>
+                <Tooltip title={isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
+                    <IconButton onClick={toggle} aria-label={isFull ? 'Vollbild verlassen' : 'Vollbild'}
+                        sx={{ color: 'rgba(255,255,255,0.7)', bgcolor: 'rgba(255,255,255,0.06)', '&:hover': { bgcolor: 'rgba(255,255,255,0.14)' } }}>
+                        {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                    </IconButton>
+                </Tooltip>
+            </Box>
+        </Fade>
+    );
+}
 
 
 
@@ -168,6 +212,8 @@ export default function PublicHighscore() {
                 '::-webkit-scrollbar-thumb': { background: '#333', borderRadius: 4 },
                 '::-webkit-scrollbar-thumb:hover': { background: '#555' }
             }} />
+
+            <FullscreenControl />
 
             <GoalOverlay
                 trigger={overlay.active}

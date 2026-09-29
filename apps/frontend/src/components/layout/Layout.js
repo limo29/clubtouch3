@@ -66,21 +66,6 @@ const Layout = () => {
   const [anchorEl, setAnchorEl] = useState(null);
   const [anchorThemeEl, setAnchorThemeEl] = useState(null);
 
-  const [hideChrome, setHideChrome] = useState(() => document.body.hasAttribute('data-kiosk') || location.search.includes('kiosk=1'));
-
-  useEffect(() => {
-    setHideChrome(document.body.hasAttribute('data-kiosk') || location.search.includes('kiosk=1'));
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'attributes' && mutation.attributeName === 'data-kiosk') {
-          setHideChrome(document.body.hasAttribute('data-kiosk'));
-        }
-      });
-    });
-    observer.observe(document.body, { attributes: true });
-    return () => observer.disconnect();
-  }, [location.search]);
-
   const { mode, resolvedMode, setMode, toggleMode } = useColorMode();
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
@@ -228,11 +213,10 @@ const Layout = () => {
   })();
 
   const ThemeIcon = resolvedMode === 'dark' ? DarkModeIcon : LightModeIcon;
-  const showCenterSalesBtn = !hideChrome && !location.pathname.startsWith('/sales');
+  const showCenterSalesBtn = !location.pathname.startsWith('/sales');
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      {!hideChrome && (
         <AppBar
           position="fixed"
           sx={{
@@ -353,9 +337,7 @@ const Layout = () => {
             </Menu>
           </Toolbar>
         </AppBar>
-      )}
 
-      {!hideChrome && (
         <Box component="nav" sx={{ width: { lg: location.pathname.startsWith('/sales') ? 0 : drawerWidth }, flexShrink: { lg: 0 } }}>
           <Drawer
             variant="temporary"
@@ -385,7 +367,6 @@ const Layout = () => {
             {drawer}
           </Drawer>
         </Box>
-      )}
 
       {/* Main Content Area: Added display flex column to allow full height children */}
       <Box component="main" sx={{
@@ -393,10 +374,10 @@ const Layout = () => {
         minWidth: 0, // sonst treiben Tabs/Tabellen die Min-Content-Breite über den Viewport (Handy)
         display: 'flex',
         flexDirection: 'column',
-        mt: hideChrome ? 0 : 8,
+        mt: 8,
         px: location.pathname.startsWith('/sales') ? 0 : 2,
         pb: 2,
-        width: (!hideChrome && !location.pathname.startsWith('/sales')) ? { lg: `calc(100% - ${drawerWidth}px)` } : '100%',
+        width: !location.pathname.startsWith('/sales') ? { lg: `calc(100% - ${drawerWidth}px)` } : '100%',
         ml: 0
       }}>
         <Outlet />

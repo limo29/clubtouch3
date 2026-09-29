@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Card, CardContent, Chip, IconButton, Stack,
@@ -12,7 +12,6 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import FlagIcon from '@mui/icons-material/Flag';
 import CloseIcon from '@mui/icons-material/Close';
-import MonitorIcon from '@mui/icons-material/Monitor';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useAuth } from '../context/AuthContext';
 
@@ -28,7 +27,7 @@ import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 const dateDE = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
 const RESET_WORD = 'RESET';
-const KIOSK_PARAM = new URLSearchParams(window.location.search).get('kiosk') === '1';
+const TOOLBAR_HIDE_MS = 3000; // im Vollbild: Leiste nach 3 s ohne Mausbewegung ausblenden
 
 const useLocalBool = (key, initial) => {
   const [val, setVal] = useState(() => {
@@ -57,18 +56,6 @@ function GridList({ items, renderItem }) {
   )
 }
 
-function BodyFlag({ active }) {
-  useEffect(() => {
-    if (active) {
-      document.body.setAttribute('data-kiosk', '1');
-    } else {
-      document.body.removeAttribute('data-kiosk');
-    }
-    return () => document.body.removeAttribute('data-kiosk');
-  }, [active]);
-  return null;
-}
-
 export default function Highscore() {
   // USE THE HOOK
   const {
@@ -79,7 +66,6 @@ export default function Highscore() {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
   const [autoRotate] = useLocalBool('hs_autoRotate', true);
-  const [forceKiosk, setForceKiosk] = useLocalBool('hs_forceKiosk', false);
   const [mode, setMode] = useState('AMOUNT');
   const [allArticles, setAllArticles] = useState([]);
 
@@ -124,11 +110,25 @@ export default function Highscore() {
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // Vollbild ersetzt den früheren gesperrten Anzeigemodus: Leiste blendet sich aus und kommt bei Mausbewegung/Tipp zurück.
+  const [toolbarVisible, setToolbarVisible] = useState(true);
+  const hideTimer = useRef(null);
   useEffect(() => {
-    if (KIOSK_PARAM && !document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => { });
-    }
-  }, []);
+    if (!isFull) { setToolbarVisible(true); return undefined; }
+    const arm = () => {
+      setToolbarVisible(true);
+      clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => setToolbarVisible(false), TOOLBAR_HIDE_MS);
+    };
+    arm();
+    window.addEventListener('mousemove', arm);
+    window.addEventListener('touchstart', arm, { passive: true });
+    return () => {
+      clearTimeout(hideTimer.current);
+      window.removeEventListener('mousemove', arm);
+      window.removeEventListener('touchstart', arm);
+    };
+  }, [isFull]);
 
   // Fetch Articles for Config Dialog (only once)
   useEffect(() => {
@@ -157,16 +157,6 @@ export default function Highscore() {
     await api.post(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS, { goals: payload, movingTargets: movingTargetsDraft });
     refresh(); // Use hook's refresh
     setGoalsOpen(false);
-  };
-
-  const handleKioskExit = async () => {
-    setForceKiosk(false);
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-    } catch { }
-    if (KIOSK_PARAM) {
-      navigate('/dashboard');
-    }
   };
 
   const RankRow = ({ entry }) => (
@@ -223,22 +213,6 @@ export default function Highscore() {
     </Card>
   );
 
-  // Kiosk Overlay (Invisible click handler to exit)
-  const renderKioskControls = () => {
-    if (!forceKiosk && !KIOSK_PARAM) return null;
-    return (
-      <Box
-        onDoubleClick={handleKioskExit}
-        sx={{
-          position: 'fixed', top: 0, right: 0, width: 100, height: 100, zIndex: 9999,
-          cursor: 'none',
-          '&:hover': { cursor: 'default' } // Show cursor only here
-        }}
-        title="Double click to exit Kiosk"
-      />
-    );
-  };
-
   const handleMilestone = (goal, level) => {
     const target = Math.max(1, Number(goal.targetUnits));
     const total = target * (level);
@@ -260,18 +234,12 @@ export default function Highscore() {
       height: '100vh', display: 'flex', flexDirection: 'column',
       bgcolor: 'background.default', color: 'text.primary',
       overflow: 'hidden',
-      ...((forceKiosk || KIOSK_PARAM || isFull) && {
+      ...(isFull && {
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999
       })
     }}>
       <CssBaseline />
-      <BodyFlag active={forceKiosk || KIOSK_PARAM} />
-      <GlobalStyles styles={{
-        body: { overflow: 'hidden' },
-        ...(forceKiosk || KIOSK_PARAM ? { '* ': { cursor: 'none !important' } } : {})
-      }} />
-
-      {renderKioskControls()}
+      <GlobalStyles styles={{ body: { overflow: 'hidden' } }} />
 
       <GoalOverlay
         trigger={overlay.active}
@@ -280,14 +248,12 @@ export default function Highscore() {
         onComplete={() => setOverlay({ ...overlay, active: false })}
       />
 
-      {/* Toolbar (Hidden in Kiosk unless hovered top, or completely hidden?) 
-          Actually KIOSK_PARAM hides it usually. 
-      */}
-      {/* Toolbar */}
-      {(!forceKiosk && !KIOSK_PARAM && !isFull) && (
+      {/* Toolbar: normal im Fluss; im Vollbild als Overlay, das sich nach kurzer Zeit ausblendet */}
+      {(!isFull || toolbarVisible) && (
         <Box sx={{
           p: 1.5, borderBottom: '1px solid', borderColor: 'divider',
-          bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 }, flexWrap: 'wrap'
+          bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 }, flexWrap: 'wrap',
+          ...(isFull && { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, opacity: 0.96 })
         }}>
           <Button startIcon={<CloseIcon />} onClick={() => navigate('/dashboard')}>
             Dashboard
@@ -320,14 +286,9 @@ export default function Highscore() {
               <Typography variant="caption">Auto-Rotate</Typography>
             </Box>
           </Tooltip>
-          <Tooltip title="Vollbild">
-            <IconButton onClick={toggleFull}>
+          <Tooltip title={isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
+            <IconButton onClick={toggleFull} aria-label={isFull ? 'Vollbild verlassen' : 'Vollbild'}>
               {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Kiosk-Modus (gesperrt)">
-            <IconButton onClick={() => { if (window.confirm('Kiosk-Modus aktivieren? (Doppelklick oben rechts zum Beenden)')) setForceKiosk(true); }}>
-              <MonitorIcon />
             </IconButton>
           </Tooltip>
           {isAdmin && (
