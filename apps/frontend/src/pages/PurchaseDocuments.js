@@ -5,14 +5,10 @@ import api from "../services/api";
 import { API_BASE_URL } from "../config/api";
 import {
   Box,
-  Paper,
   Typography,
   Button,
-  Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableRow,
   IconButton,
   Chip,
@@ -43,6 +39,9 @@ import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { useTheme, alpha } from "@mui/material/styles";
 import KPICard from '../components/common/KPICard';
+import FilterBar from '../components/common/FilterBar';
+import { DocumentTable, DocumentTableHead, documentRowSx, documentChildRowSx } from '../components/common/DocumentTable';
+import MobileDocumentCard from '../components/common/MobileDocumentCard';
 import { summarizeItems } from "../utils/purchaseDocs";
 
 /* ---------------- helpers ---------------- */
@@ -317,36 +316,13 @@ export default function PurchaseDocuments() {
   }, [documents]);
 
   /* -------- Mobile Card Component -------- */
-  const MobileDocumentCard = ({ doc }) => {
+  const PurchaseDocCard = ({ doc }) => {
     const hasChildren = (doc.lieferscheine || []).length > 0;
     const [expanded, setExpanded] = useState(false);
     const isRechnung = doc.type === "RECHNUNG";
 
     return (
-      <Paper
-        sx={{
-          mb: 2,
-          p: 2,
-          borderRadius: 3,
-          border: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
-          position: "relative",
-          overflow: "hidden",
-        }}
-        elevation={0}
-      >
-        {/* Type Indicator Strip */}
-        <Box
-          sx={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 4,
-            bgcolor: isRechnung ? "primary.main" : "info.main",
-          }}
-        />
-
-        <Stack spacing={1.5} sx={{ pl: 1 }}>
+      <MobileDocumentCard stripColor={isRechnung ? "primary.main" : "info.main"}>
           {/* Header: Number & Date */}
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
             <Box>
@@ -436,8 +412,7 @@ export default function PurchaseDocuments() {
               )}
             </Box>
           )}
-        </Stack>
-      </Paper>
+      </MobileDocumentCard>
     );
   };
 
@@ -451,7 +426,7 @@ export default function PurchaseDocuments() {
       <Box sx={{ mb: 4 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
           <Box>
-            <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: "-0.02em" }}>
+            <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: "-0.02em", fontSize: { xs: "1.6rem", sm: "2.125rem" } }}>
               Einkauf
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -514,6 +489,7 @@ export default function PurchaseDocuments() {
             onClick={() => navigate("/purchases/create", { state: { type: "RECHNUNG" } })}
             sx={{
               height: "100%",
+              minHeight: 140,
               borderRadius: 3,
               fontSize: "1.1rem",
               fontWeight: 800,
@@ -562,9 +538,7 @@ export default function PurchaseDocuments() {
       </Grid>
 
       {/* Filters */}
-      <Paper elevation={0} sx={{ p: 2, mb: 3, borderRadius: 3, border: `1px solid ${alpha(theme.palette.divider, 0.8)}`, bgcolor: "background.paper" }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
-          <Box sx={{ display: "flex", gap: 2, width: { xs: "100%", sm: "auto" }, flexWrap: "wrap" }}>
+      <FilterBar hasActiveFilters={hasActiveFilters} onReset={resetFilters}>
             <DatePicker
               label="Von"
               value={filters.startDate}
@@ -586,12 +560,7 @@ export default function PurchaseDocuments() {
               noOptionsText="Kein Lieferant"
               renderInput={(params) => <TextField {...params} label="Lieferant" placeholder="Alle Lieferanten" />}
             />
-          </Box>
-          <Button variant="text" size="small" onClick={resetFilters} disabled={!hasActiveFilters} sx={{ ml: "auto !important", width: { xs: "100%", sm: "auto" } }}>
-            Filter zurücksetzen
-          </Button>
-        </Stack>
-      </Paper>
+      </FilterBar>
 
       {/* Loading / Error */}
       {isLoading && <CircularProgress sx={{ display: "block", mx: "auto", my: 4 }} />}
@@ -606,22 +575,12 @@ export default function PurchaseDocuments() {
         <>
           {isMobile ? (
             <Box>
-              {documents.map(doc => <MobileDocumentCard key={doc.id} doc={doc} />)}
+              {documents.map(doc => <PurchaseDocCard key={doc.id} doc={doc} />)}
               {documents.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 4 }}>Keine Belege gefunden</Typography>}
             </Box>
           ) : (
-            <TableContainer
-              component={Paper}
-              elevation={0}
-              sx={{
-                borderRadius: 3,
-                border: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
-                overflow: "hidden"
-              }}
-            >
-              <Table stickyHeader sx={{ minWidth: 800 }}>
-                <TableHead>
-                  <TableRow sx={{ "& th": { fontWeight: 700, bgcolor: alpha(theme.palette.primary.main, 0.04) } }}>
+            <DocumentTable minWidth={800}>
+                <DocumentTableHead>
                     <TableCell width="20%">Belegnummer</TableCell>
                     <TableCell width="20%">Lieferant</TableCell>
                     <TableCell align="center" width="10%">Nachweis</TableCell>
@@ -629,8 +588,7 @@ export default function PurchaseDocuments() {
                     <TableCell width="15%">Status</TableCell>
                     <TableCell width="10%">Datum</TableCell>
                     <TableCell align="center" width="10%">Aktion</TableCell>
-                  </TableRow>
-                </TableHead>
+                </DocumentTableHead>
                 <TableBody>
                   {documents.map((doc) => {
                     const isRowDeleting = deletingId === doc.id;
@@ -639,7 +597,7 @@ export default function PurchaseDocuments() {
 
                     return (
                       <React.Fragment key={doc.id}>
-                        <TableRow hover sx={{ "& td": { borderBottomColor: alpha(theme.palette.divider, 0.5) } }}>
+                        <TableRow hover sx={documentRowSx(theme)}>
                           <TableCell>
                             <Stack direction="row" alignItems="center" spacing={1}>
                               <IconButton
@@ -706,7 +664,7 @@ export default function PurchaseDocuments() {
 
                         {/* Expanded Children */}
                         {expanded && (doc.lieferscheine || []).map(ls => (
-                          <TableRow key={ls.id} sx={{ bgcolor: alpha(theme.palette.action.hover, 0.05) }}>
+                          <TableRow key={ls.id} sx={documentChildRowSx(theme)}>
                             <TableCell colSpan={7} sx={{ py: 1, px: 0 }}>
                               <Box sx={{ pl: 8, pr: 2, display: 'flex', alignItems: 'center', justifyContent: "space-between" }}>
                                 <Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 0, flexWrap: "wrap" }}>
@@ -731,9 +689,13 @@ export default function PurchaseDocuments() {
                       </React.Fragment>
                     );
                   })}
+                  {documents.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 4, color: "text.secondary" }}>Keine Belege gefunden</TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
-              </Table>
-            </TableContainer>
+            </DocumentTable>
           )}
         </>
       )}
