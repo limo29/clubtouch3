@@ -31,7 +31,7 @@ const KIND_LABEL = {
   DEPOSIT_TO_BANK: 'Einzahlung',
   WITHDRAWAL_FROM_BANK: 'Abhebung',
   TOPUP_TRANSFER: 'Aufladung',
-  INVOICE_PAID: 'Ausgangsrechnung',
+  INVOICE_PAID: 'Kundenrechnung',
   PURCHASE_TRANSFER: 'Einkauf',
 };
 
@@ -69,10 +69,19 @@ export default function BankReconciliation({ data, actual, compact = false, load
           <Row compact={compact} label={openingLabel} value={money(data.opening)} strong />
           <Row compact={compact} indent label={`+ Einzahlungen aus der Kasse (${cnt(inf.bankDeposits)})`} value={money(tot(inf.bankDeposits))} color="success.main" />
           <Row compact={compact} indent label={`+ Aufladungen per Überweisung (${cnt(inf.topUpsTransfer)})`} value={money(tot(inf.topUpsTransfer))} color="success.main" />
-          <Row compact={compact} indent label={`+ Bezahlte Ausgangsrechnungen (${cnt(inf.invoicesPaid)})`} value={money(tot(inf.invoicesPaid))} color="success.main" />
+          <Row compact={compact} indent label={`+ Bezahlte Kundenrechnungen per Überweisung (${cnt(inf.invoicesPaid)})`} value={money(tot(inf.invoicesPaid))} color="success.main" />
           <Row compact={compact} indent label={`− Einkäufe per Überweisung (${cnt(outf.purchasesTransfer)})`} value={money(-tot(outf.purchasesTransfer))} color="error.main" />
           <Row compact={compact} indent label={`− Abhebungen für die Kasse (${cnt(outf.bankWithdrawals)})`} value={money(-tot(outf.bankWithdrawals))} color="error.main" />
           <Row compact={compact} label="Bank-Soll laut App" value={money(data.expected)} strong rule />
+          {cnt(data.invoicesPaidCash) > 0 && (
+            <Row
+              compact={compact}
+              indent
+              label={`Nachrichtlich: bar bezahlte Kundenrechnungen laufen über die Kasse (${cnt(data.invoicesPaidCash)})`}
+              value={money(tot(data.invoicesPaidCash))}
+              color="text.secondary"
+            />
+          )}
           {hasActual && (
             <>
               <Row compact={compact} label="Eingetragene Kontostände (Ist)" value={money(actual)} strong />

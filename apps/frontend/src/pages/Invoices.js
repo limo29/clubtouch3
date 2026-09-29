@@ -4,13 +4,15 @@ import {
   Stack, IconButton, List, ListItemText, Button, Dialog, DialogTitle,
   DialogContent, MenuItem, Chip, Drawer, useMediaQuery,
   Tooltip, Divider, ListItemButton, ListItemIcon,
-  TableBody, TableCell, TableRow, CircularProgress, Alert
+  TableBody, TableCell, TableRow, CircularProgress, Alert,
+  ToggleButtonGroup, ToggleButton
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import {
   Search, Person, Add, Download, Edit, Settings,
   Close as CloseIcon, ExpandMore, ExpandLess,
-  MarkEmailRead, Warning, CheckCircle, Drafts
+  MarkEmailRead, Warning, CheckCircle, Drafts,
+  Payments, AccountBalance
 } from '@mui/icons-material';
 import { DatePicker, MobileDatePicker, DesktopDatePicker } from '@mui/x-date-pickers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -53,12 +55,23 @@ const fmtDate = (d) => {
 };
 const EMPTY_FILTERS = { status: '', search: '', startDate: null, endDate: null };
 
+// Zahlungsart einer bezahlten Kundenrechnung (null = Altbestand ohne Zahlungsart, gilt als Bank)
+const PAYMENT = {
+  CASH: { label: 'Bar', long: 'bar bezahlt (Kasse)', Icon: Payments },
+  TRANSFER: { label: 'Überweisung', long: 'per Überweisung bezahlt (Bank)', Icon: AccountBalance },
+};
+const paymentOf = (pm) => PAYMENT[pm] || null;
+
 /** Status-Chip; Klick öffnet den Statuswechsel (wie der Bezahlt-Chip im Einkauf) */
 function StatusChip({ inv, onClick, disabled }) {
   const st = statusOf(inv.status);
   const canChange = !disabled && inv.status !== 'CANCELLED';
+  const pay = inv.status === 'PAID' ? paymentOf(inv.paymentMethod) : null;
+  const tip = pay
+    ? `${pay.long}${inv.paidAt ? ` am ${fmtDate(inv.paidAt)}` : ''}${canChange ? ' · Klicken, um den Status zu ändern' : ''}`
+    : (canChange ? 'Klicken, um den Status zu ändern' : '');
   return (
-    <Tooltip title={canChange ? 'Klicken, um den Status zu ändern' : ''}>
+    <Tooltip title={tip}>
       <span>
         <Chip
           size="small"
@@ -66,7 +79,8 @@ function StatusChip({ inv, onClick, disabled }) {
           onClick={canChange ? onClick : undefined}
           color={st.color}
           variant={inv.status === 'DRAFT' ? 'outlined' : 'filled'}
-          label={st.label}
+          icon={pay ? <pay.Icon fontSize="small" /> : undefined}
+          label={pay ? `${st.label} · ${pay.label}` : st.label}
           sx={{ cursor: canChange ? 'pointer' : 'default', fontWeight: 600 }}
         />
       </span>
@@ -206,12 +220,18 @@ export default function Invoices() {
     }
   });
   const updateStatusMutation = useMutation({
-    mutationFn: async ({ id, status }) => (await api.patch(`/invoices/${id}/status`, { status })).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    mutationFn: async ({ id, status, paymentMethod, paidAt }) =>
+      (await api.patch(`/invoices/${id}/status`, { status, paymentMethod, paidAt })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      // Bar bezahlte Kundenrechnungen verändern das Kassen-Soll, überwiesene die Bank-Abstimmung
+      queryClient.invalidateQueries({ queryKey: ['cash-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['bank-reconciliation'] });
+    }
   });
-  const setStatus = (inv, status) => {
+  const setStatus = (inv, status, extra = {}) => {
     if (updateStatusMutation.isPending) return;
-    updateStatusMutation.mutate({ id: inv.id, status });
+    updateStatusMutation.mutate({ id: inv.id, status, ...extra });
   };
 
   const invoices = useMemo(() => invoicesData?.invoices || [], [invoicesData]);
@@ -247,8 +267,22 @@ export default function Invoices() {
 
   // Statuswechsel: Dialog (Desktop) / Bottom Sheet (kompakt)
   const [statusSheet, setStatusSheet] = useState({ open: false, inv: null });
-  const openStatusSheet = (inv) => setStatusSheet({ open: true, inv });
-  const closeStatusSheet = () => setStatusSheet({ open: false, inv: null });
+  // Schritt "Bezahlt": Zahlungsart (Pflicht, Vorgabe Überweisung) und Zahldatum (Vorgabe heute)
+  const [payStep, setPayStep] = useState(false);
+  const [payMethod, setPayMethod] = useState('TRANSFER');
+  const [payDate, setPayDate] = useState(new Date());
+  const openStatusSheet = (inv) => { setPayStep(false); setPayMethod('TRANSFER'); setPayDate(new Date()); setStatusSheet({ open: true, inv }); };
+  const closeStatusSheet = () => { setStatusSheet({ open: false, inv: null }); setPayStep(false); };
+  const confirmPaid = () => {
+    if (!statusSheet.inv || !payMethod || !payDate || Number.isNaN(payDate.getTime())) return;
+    // Zahldatum: gewählter Tag, Uhrzeit jetzt (heute) bzw. 12:00 (Vergangenheit), damit es im Geschäftstag liegt
+    const when = new Date(payDate);
+    const today = new Date();
+    if (when.toDateString() === today.toDateString()) when.setTime(today.getTime());
+    else when.setHours(12, 0, 0, 0);
+    setStatus(statusSheet.inv, 'PAID', { paymentMethod: payMethod, paidAt: when.toISOString() });
+    closeStatusSheet();
+  };
 
   const filteredCustomers = useMemo(() => {
     const s = customerSearch.toLowerCase();
@@ -656,24 +690,75 @@ export default function Invoices() {
           )}
         </DialogTitle>
         <DialogContent dividers>
-          <Stack spacing={1}>
-            {statusSheet.inv && statusSheet.inv.status === 'DRAFT' && (
-              <Button fullWidth variant="outlined" onClick={() => { setStatus(statusSheet.inv, 'SENT'); closeStatusSheet(); }}>
-                Auf „Versendet“ setzen
-              </Button>
-            )}
-            {statusSheet.inv && !['PAID', 'CANCELLED'].includes(statusSheet.inv.status) && (
-              <Button fullWidth variant="outlined" color="success" onClick={() => { setStatus(statusSheet.inv, 'PAID'); closeStatusSheet(); }}>
-                Als „Bezahlt“ markieren
-              </Button>
-            )}
-            {statusSheet.inv && statusSheet.inv.status !== 'CANCELLED' && (
-              <Button fullWidth variant="outlined" color="error" onClick={() => { setStatus(statusSheet.inv, 'CANCELLED'); closeStatusSheet(); }}>
-                Stornieren
-              </Button>
-            )}
-            <Button fullWidth onClick={closeStatusSheet}>Abbrechen</Button>
-          </Stack>
+          {payStep ? (
+            <Stack spacing={2}>
+              <Typography variant="subtitle2">Wie wurde bezahlt?</Typography>
+              <ToggleButtonGroup
+                exclusive
+                fullWidth
+                color="success"
+                value={payMethod}
+                onChange={(_, v) => { if (v) setPayMethod(v); }}
+                aria-label="Zahlungsart"
+              >
+                <ToggleButton value="CASH" aria-label="Bar"><Payments fontSize="small" sx={{ mr: 1 }} />Bar</ToggleButton>
+                <ToggleButton value="TRANSFER" aria-label="Überweisung"><AccountBalance fontSize="small" sx={{ mr: 1 }} />Überweisung</ToggleButton>
+              </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary">
+                {payMethod === 'CASH'
+                  ? 'Das Geld liegt in der Kasse und erhöht das Kassen-Soll beim nächsten Zählen.'
+                  : 'Der Betrag ist auf dem Konto eingegangen und zählt in der Bank-Abstimmung.'}
+              </Typography>
+              <DatePicker
+                label="Zahldatum"
+                value={payDate}
+                onChange={(v) => setPayDate(v)}
+                disableFuture
+                slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+              />
+              <Stack direction="row" spacing={1}>
+                <Button fullWidth onClick={() => setPayStep(false)}>Zurück</Button>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  color="success"
+                  onClick={confirmPaid}
+                  disabled={!payMethod || !payDate || Number.isNaN(payDate.getTime()) || updateStatusMutation.isPending}
+                >
+                  Als „Bezahlt“ speichern
+                </Button>
+              </Stack>
+            </Stack>
+          ) : (
+            <Stack spacing={1}>
+              {statusSheet.inv && statusSheet.inv.status === 'DRAFT' && (
+                <Button fullWidth variant="outlined" onClick={() => { setStatus(statusSheet.inv, 'SENT'); closeStatusSheet(); }}>
+                  Auf „Versendet“ setzen
+                </Button>
+              )}
+              {statusSheet.inv && !['PAID', 'CANCELLED'].includes(statusSheet.inv.status) && (
+                <Button fullWidth variant="outlined" color="success" onClick={() => setPayStep(true)}>
+                  Als „Bezahlt“ markieren …
+                </Button>
+              )}
+              {statusSheet.inv && statusSheet.inv.status === 'PAID' && (
+                <Button fullWidth variant="outlined" color="warning" onClick={() => { setStatus(statusSheet.inv, 'SENT'); closeStatusSheet(); }}>
+                  Zahlung zurücknehmen (wieder „Versendet“)
+                </Button>
+              )}
+              {statusSheet.inv && statusSheet.inv.status !== 'CANCELLED' && (
+                <Button fullWidth variant="outlined" color="error" onClick={() => { setStatus(statusSheet.inv, 'CANCELLED'); closeStatusSheet(); }}>
+                  Stornieren
+                </Button>
+              )}
+              <Button fullWidth onClick={closeStatusSheet}>Abbrechen</Button>
+            </Stack>
+          )}
+          {updateStatusMutation.isError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {updateStatusMutation.error?.response?.data?.error || 'Status konnte nicht geändert werden.'}
+            </Alert>
+          )}
           {updateStatusMutation.isPending && (
             <Typography role="status" aria-live="polite" variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
               Status wird aktualisiert…

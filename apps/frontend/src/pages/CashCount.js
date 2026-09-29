@@ -50,6 +50,7 @@ function ExpectedTable({ preview, isLoading, error }) {
   const bw = preview.bankWithdrawals || {};
   const oi = preview.otherIncome || {};
   const oe = preview.otherExpense || {};
+  const ci = preview.cashInvoices || {};
   const rows = [
     preview.hasBaseline
       ? { label: `Vorzählung vom ${fmtDateTime(preview.previousCount?.countedAt)}`, value: preview.baseline }
@@ -58,6 +59,7 @@ function ExpectedTable({ preview, isLoading, error }) {
     { label: `+ Stornos bar (${c.refunds ?? 0})`, value: preview.cashRefunds },
     { label: `+ Bar-Aufladungen (${c.topUps ?? 0})`, value: preview.cashTopUps },
     { label: `− Bar-Ausgaben (${c.expenses ?? 0})`, value: num(preview.cashExpenses) > 0 ? -num(preview.cashExpenses) : 0 },
+    { label: `+ Bar bezahlte Kundenrechnungen (${ci.count ?? 0})`, value: num(ci.total) },
     { label: `− Einzahlungen auf Bank (${bd.count ?? 0})`, value: num(bd.total) > 0 ? -num(bd.total) : 0 },
     { label: `+ Abhebungen von Bank (${bw.count ?? 0})`, value: num(bw.total) },
     { label: `+ Sonstige Bareinnahmen (${oi.count ?? 0})`, value: num(oi.total) },
