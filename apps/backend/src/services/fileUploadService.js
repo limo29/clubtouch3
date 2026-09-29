@@ -4,10 +4,11 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
+const { UPLOADS_DIR, fromPublicUrl } = require('../utils/uploadsDir');
 
 class FileUploadService {
   constructor() {
-    this.uploadDir = path.join(process.cwd(), 'uploads');
+    this.uploadDir = UPLOADS_DIR;
     this.baseUrl = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''); // ohne trailing /
     this.ensureUploadDirs();
   }
@@ -48,20 +49,8 @@ class FileUploadService {
     //  - "http://host/uploads/.."
     //  - "/uploads/.."
     //  - "uploads/.." (zur Sicherheit)
-    try {
-      let pathname = anyUrlOrPath;
-      if (/^https?:\/\//i.test(anyUrlOrPath)) {
-        const u = new URL(anyUrlOrPath);
-        pathname = u.pathname; // "/uploads/.."
-      }
-      // führende "/" entfernen, damit path.join(process.cwd(), ...) korrekt ist
-      const rel = pathname.replace(/^\/+/, '');
-      return path.join(process.cwd(), rel);
-    } catch {
-      // Fallback: als relative Angabe behandeln
-      const rel = String(anyUrlOrPath || '').replace(/^\/+/, '');
-      return path.join(process.cwd(), rel);
-    }
+    // Upload-Ordner ist konfigurierbar (Volume), deshalb nie über process.cwd() auflösen
+    return fromPublicUrl(anyUrlOrPath);
   }
 
   // -------- Nachweise (PDF/IMG auf Disk) --------

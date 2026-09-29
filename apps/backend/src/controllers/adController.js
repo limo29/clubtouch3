@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 const UPLOAD_PREFIX = '/uploads/ads/';
-const ADS_DIR = path.join(process.cwd(), 'uploads', 'ads');
+const { UPLOADS_DIR } = require('../utils/uploadsDir');
+const ADS_DIR = path.join(UPLOADS_DIR, 'ads');
 
 /** Dauer in Sekunden: 1..3600, sonst null (→ 400); undefined = nicht angegeben */
 function parseDuration(raw) {

@@ -1,4 +1,5 @@
 const purchaseDocumentService = require('../services/purchaseDocumentService');
+const { toPublicUrl } = require('../utils/uploadsDir');
 const receiptService = require('../services/receiptService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 const prisma = require('../utils/prisma');
@@ -13,11 +14,8 @@ class PurchaseDocumentController {
       // Datei-Upload verarbeiten
       let nachweisUrl = null;
       if (req.file) {
-        // req.file.path ist der volle Pfad, wir wollen den relativen
-        // z.B. /uploads/nachweise/xyz.pdf
-        nachweisUrl = req.file.path.replace(process.cwd(), '');
-        // Ggf. Backslashes ersetzen auf Windows
-        nachweisUrl = nachweisUrl.replace(/\\/g, '/');
+        // voller Pfad → öffentliche URL /uploads/nachweise/xyz.pdf (Upload-Ordner ist konfigurierbar)
+        nachweisUrl = toPublicUrl(req.file.path);
       }
 
       // 'items' wird als JSON-String übermittelt, wenn multipart/form-data verwendet wird
@@ -237,7 +235,7 @@ class PurchaseDocumentController {
 
       let nachweisUrl = undefined;
       if (req.file) {
-        nachweisUrl = req.file.path.replace(process.cwd(), '').replace(/\\/g, '/');
+        nachweisUrl = toPublicUrl(req.file.path);
       }
       // HINWEIS: Wenn der User 'nachweisUrl' auf 'null' setzt (Datei löschen),
       // müssen wir das im Frontend separat senden. Aktuell wird nur 'undefined' (nicht ändern)
