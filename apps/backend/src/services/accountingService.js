@@ -252,6 +252,116 @@ class AccountingService {
     };
   }
 
+  /**
+   * Bank-Abstimmung für einen Zeitraum (Kassenprüfer-Sicht).
+   *
+   *   Eröffnung  = Summe der Bankkonten aus dem letzten ABGESCHLOSSENEN Geschäftsjahr,
+   *                dessen Ende vor dem Zeitraum liegt (openingSource VORJAHRESABSCHLUSS),
+   *                sonst 0 (KEIN_VORJAHR)
+   *   + Einzahlungen aus der Kasse      (CashMovement DEPOSIT_TO_BANK, nicht storniert)
+   *   + Aufladungen per Überweisung     (AccountTopUp.method = TRANSFER)
+   *   + bezahlte Ausgangsrechnungen     (Invoice PAID, paidAt im Zeitraum; es gibt keine Zahlungsart,
+   *                                      Ausgangsrechnungen gelten als Bankeingang)
+   *   - per Überweisung bezahlte Einkäufe (PurchaseDocument RECHNUNG, paid, paymentMethod TRANSFER,
+   *                                      paidAt-Fallback documentDate wie in cashCountService)
+   *   - Abhebungen für die Kasse        (CashMovement WITHDRAWAL_FROM_BANK, nicht storniert)
+   *   = Bank-Soll (expected)
+   *
+   * Nicht enthalten (läuft nicht durch die App): Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden.
+   * Alle Beträge sind Number; movements sind nach Datum aufsteigend sortiert, amount signiert.
+   */
+  async getBankReconciliation(startDate, endDate) {
+    const start = parseLocalDate(startDate);
+    const end = endOfLocalDay(endDate);
+    const window = { gte: start, lte: end };
+
+    const [prevYear, cm, topUps, invoices, purchases] = await Promise.all([
+      prisma.fiscalYear.findFirst({
+        where: { closed: true, endDate: { lt: start }, report: { isNot: null } },
+        orderBy: { endDate: 'desc' },
+        include: { report: { select: { bankAccountsJson: true, createdAt: true } } }
+      }),
+      cashMovementService.summarize(window),
+      prisma.accountTopUp.findMany({
+        where: { method: 'TRANSFER', createdAt: window },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, amount: true, reference: true, createdAt: true, customer: { select: { name: true } } }
+      }),
+      prisma.invoice.findMany({
+        where: { status: 'PAID', paidAt: window },
+        orderBy: { paidAt: 'asc' },
+        select: { id: true, invoiceNumber: true, customerName: true, description: true, paidAt: true, totalAmount: true }
+      }),
+      prisma.purchaseDocument.findMany({
+        where: {
+          type: 'RECHNUNG', paid: true, paymentMethod: 'TRANSFER',
+          OR: [{ paidAt: window }, { paidAt: null, documentDate: window }]
+        },
+        orderBy: { documentDate: 'asc' },
+        select: { id: true, documentNumber: true, supplier: true, description: true, paidAt: true, documentDate: true, totalAmount: true }
+      })
+    ]);
+
+    const prevBanks = prevYear && Array.isArray(prevYear.report?.bankAccountsJson) ? prevYear.report.bankAccountsJson : [];
+    const opening = sumBy(prevBanks, b => b.balance);
+    const openingSource = prevYear ? 'VORJAHRESABSCHLUSS' : 'KEIN_VORJAHR';
+
+    const movements = [];
+    cm.bankDeposits.items.forEach(m => movements.push({
+      id: m.id, date: m.occurredAt, kind: 'DEPOSIT_TO_BANK', label: 'Einzahlung aus der Kasse',
+      reference: [m.bankAccount, m.note].filter(Boolean).join(' - ') || null, amount: round2(dec(m.amount))
+    }));
+    cm.bankWithdrawals.items.forEach(m => movements.push({
+      id: m.id, date: m.occurredAt, kind: 'WITHDRAWAL_FROM_BANK', label: 'Abhebung für die Kasse',
+      reference: [m.bankAccount, m.note].filter(Boolean).join(' - ') || null, amount: round2(-dec(m.amount))
+    }));
+    topUps.forEach(t => movements.push({
+      id: t.id, date: t.createdAt, kind: 'TOPUP_TRANSFER', label: `Aufladung per Überweisung${t.customer?.name ? ` (${t.customer.name})` : ''}`,
+      reference: t.reference || null, amount: round2(dec(t.amount))
+    }));
+    invoices.forEach(i => movements.push({
+      id: i.id, date: i.paidAt, kind: 'INVOICE_PAID', label: `Ausgangsrechnung bezahlt${i.customerName ? ` (${i.customerName})` : ''}`,
+      reference: i.invoiceNumber || null, amount: round2(dec(i.totalAmount))
+    }));
+    purchases.forEach(p => movements.push({
+      id: p.id, date: p.paidAt || p.documentDate, kind: 'PURCHASE_TRANSFER', label: `Einkauf per Überweisung${p.supplier ? ` (${p.supplier})` : ''}`,
+      reference: p.documentNumber || null, amount: round2(-dec(p.totalAmount))
+    }));
+    movements.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const inflows = {
+      bankDeposits: { total: cm.bankDeposits.total, count: cm.bankDeposits.count },
+      topUpsTransfer: { total: sumBy(topUps, t => t.amount), count: topUps.length },
+      invoicesPaid: { total: sumBy(invoices, i => i.totalAmount), count: invoices.length }
+    };
+    const outflows = {
+      purchasesTransfer: { total: sumBy(purchases, p => p.totalAmount), count: purchases.length },
+      bankWithdrawals: { total: cm.bankWithdrawals.total, count: cm.bankWithdrawals.count }
+    };
+    const inflowTotal = round2(inflows.bankDeposits.total + inflows.topUpsTransfer.total + inflows.invoicesPaid.total);
+    const outflowTotal = round2(outflows.purchasesTransfer.total + outflows.bankWithdrawals.total);
+
+    return {
+      period: { startDate: start, endDate: end, label: `${fmtDateDE(start)} - ${fmtDateDE(end)}` },
+      opening,
+      openingSource,
+      openingFiscalYear: prevYear ? { id: prevYear.id, name: prevYear.name, endDate: prevYear.endDate, accounts: prevBanks } : null,
+      inflows,
+      outflows,
+      inflowTotal,
+      outflowTotal,
+      expected: round2(opening + inflowTotal - outflowTotal),
+      movements,
+      notCovered: 'Nicht enthalten: Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden und alles, was nicht über die App gebucht wurde.'
+    };
+  }
+
+  /** Bank-Abstimmung inkl. Ist/Differenz aus erfassten Kontoständen (für Snapshot und Abschluss). */
+  _withActual(recon, bankAccounts) {
+    const actual = sumBy(bankAccounts || [], b => b.balance);
+    return { ...recon, actual, difference: round2(actual - recon.expected) };
+  }
+
   /** Liste Geschäftsjahre */
   async listFiscalYears() {
     return prisma.fiscalYear.findMany({
@@ -321,8 +431,11 @@ class AccountingService {
    * cashCount darf beim Entwurf null sein.
    */
   async _buildYearEndSnapshot(fy, { bankAccounts, physicalInventory, cashCount, draft = false }) {
-    const eur = await this.getProfitLoss(fy.startDate, fy.endDate);
-    const system = await this._inventorySystemSnapshot();
+    const [eur, system, bankRecon] = await Promise.all([
+      this.getProfitLoss(fy.startDate, fy.endDate),
+      this._inventorySystemSnapshot(),
+      this.getBankReconciliation(fy.startDate, fy.endDate)
+    ]);
 
     const physicalMap = new Map(
       (physicalInventory || []).map(x => [x.articleId, Number(x.physicalStock || 0)])
@@ -394,6 +507,8 @@ class AccountingService {
       },
       customerBalances,
       bankAccounts: banks,
+      // Bank-Abstimmung (v3): Soll aus Vorjahresabschluss + Überweisungsbewegungen vs. erfasste Kontostände
+      bankReconciliation: this._withActual(bankRecon, banks),
       cashCount: cashCount ? {
         id: cashCount.id,
         countedAt: cashCount.countedAt,
@@ -523,9 +638,10 @@ class AccountingService {
     const fy = await prisma.fiscalYear.findUnique({ where: { id: fiscalYearId } });
     if (!fy) throw new Error('Geschäftsjahr nicht gefunden');
 
-    const [eur, inventorySystem] = await Promise.all([
+    const [eur, inventorySystem, bankReconciliation] = await Promise.all([
       this.getProfitLoss(fy.startDate, fy.endDate),
-      this._inventorySystemSnapshot()
+      this._inventorySystemSnapshot(),
+      this.getBankReconciliation(fy.startDate, fy.endDate)
     ]);
 
     const { start, end } = this._cashCountWindow(fy);
@@ -552,6 +668,7 @@ class AccountingService {
         items: eur.liquidity.cashMovementItems
       },
       inventorySystem,
+      bankReconciliation,
       cashCount: cashCount ? {
         id: cashCount.id, countedAt: cashCount.countedAt,
         countedTotal: cashCount.countedTotal, expectedTotal: cashCount.expectedTotal,

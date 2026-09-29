@@ -17,6 +17,41 @@ class AccountingController {
     }
   }
 
+  // GET /bank-reconciliation?startDate&endDate
+  async bankReconciliation(req, res) {
+    try {
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) return res.status(400).json({ error: 'startDate und endDate erforderlich' });
+      const data = await accountingService.getBankReconciliation(startDate, endDate);
+      res.json({ bankReconciliation: data });
+    } catch (e) {
+      console.error('bankReconciliation error', e);
+      res.status(500).json({ error: 'Fehler bei der Bank-Abstimmung' });
+    }
+  }
+
+  // GET /fiscal-years/:id/bank-reconciliation
+  async fiscalYearBankReconciliation(req, res) {
+    try {
+      const { id } = req.params;
+      const fy = await prisma.fiscalYear.findUnique({ where: { id }, include: { report: { select: { bankAccountsJson: true, detailsJson: true } } } });
+      if (!fy) return res.status(404).json({ error: 'Geschäftsjahr nicht gefunden.' });
+      // Geschlossen: eingefrorener Snapshot (falls vorhanden), sonst live
+      const frozen = fy.closed && fy.report && fy.report.detailsJson && fy.report.detailsJson.bankReconciliation;
+      const data = frozen
+        ? fy.report.detailsJson.bankReconciliation
+        : await accountingService.getBankReconciliation(fy.startDate, fy.endDate);
+      res.json({
+        fiscalYear: { id: fy.id, name: fy.name, startDate: fy.startDate, endDate: fy.endDate, closed: fy.closed },
+        frozen: !!frozen,
+        bankReconciliation: data
+      });
+    } catch (e) {
+      console.error('fiscalYearBankReconciliation error', e);
+      res.status(500).json({ error: 'Fehler bei der Bank-Abstimmung' });
+    }
+  }
+
   async listFiscalYears(req, res) {
     try {
       const list = await accountingService.listFiscalYears();
