@@ -134,7 +134,7 @@ class CashCountService {
     const window = { lte: until };
     if (since) window.gt = since;
 
-    const [salesAgg, refundsAgg, topUpsAgg, cashExpenseDocs, mvSummary] = await Promise.all([
+    const [salesAgg, refundsAgg, topUpsAgg, cashExpenseDocs, mvSummary, cashInvoiceRows] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', paymentMethod: 'CASH', createdAt: window },
         _sum: { totalAmount: true }, _count: true
@@ -158,16 +158,32 @@ class CashCountService {
         select: { id: true, documentNumber: true, supplier: true, totalAmount: true, paidAt: true, documentDate: true },
         orderBy: { documentDate: 'asc' }
       }),
-      cashMovementService.summarize(window)
+      cashMovementService.summarize(window),
+      // Bar bezahlte Kundenrechnungen: das Geld landet in der Kasse (Zahlungsart seit 09/2026;
+      // Altbestand ohne Zahlungsart gilt als Bank und taucht hier nicht auf)
+      prisma.invoice.findMany({
+        where: { status: 'PAID', paymentMethod: 'CASH', paidAt: window },
+        select: { id: true, invoiceNumber: true, customerName: true, totalAmount: true, paidAt: true },
+        orderBy: { paidAt: 'asc' }
+      })
     ]);
 
     const cashSales = round2(dec(salesAgg._sum.totalAmount));
     const cashRefunds = round2(dec(refundsAgg._sum.totalAmount)); // negativ
     const cashTopUps = round2(dec(topUpsAgg._sum.amount));
     const cashExpenses = round2(cashExpenseDocs.reduce((a, d) => a + dec(d.totalAmount), 0)); // positiv
+    const cashInvoices = {
+      total: round2(cashInvoiceRows.reduce((a, i) => a + dec(i.totalAmount), 0)),
+      count: cashInvoiceRows.length,
+      items: cashInvoiceRows.map(i => ({
+        id: i.id, invoiceNumber: i.invoiceNumber, customerName: i.customerName,
+        amount: dec(i.totalAmount), paidAt: i.paidAt
+      }))
+    };
 
     return {
       cashSales, cashRefunds, cashTopUps, cashExpenses,
+      cashInvoices,
       // Kassenbewegungen additiv
       bankDeposits: mvSummary.bankDeposits,
       bankWithdrawals: mvSummary.bankWithdrawals,
@@ -179,6 +195,7 @@ class CashCountService {
         refunds: refundsAgg._count || 0,
         topUps: topUpsAgg._count || 0,
         expenses: cashExpenseDocs.length,
+        cashInvoices: cashInvoiceRows.length,
         bankDeposits: mvSummary.bankDeposits.count,
         bankWithdrawals: mvSummary.bankWithdrawals.count,
         otherIncome: mvSummary.otherIncome.count,
@@ -213,6 +230,7 @@ class CashCountService {
     const mv = await this.getCashMovements(since, until);
     const expectedTotal = round2(
       baseline + mv.cashSales + mv.cashRefunds + mv.cashTopUps - mv.cashExpenses
+      + (mv.cashInvoices ? mv.cashInvoices.total : 0)
       - (mv.bankDeposits ? mv.bankDeposits.total : 0)
       + (mv.bankWithdrawals ? mv.bankWithdrawals.total : 0)
       + (mv.otherIncome ? mv.otherIncome.total : 0)
@@ -257,6 +275,7 @@ class CashCountService {
       cashRefunds: expected.cashRefunds,
       cashTopUps: expected.cashTopUps,
       cashExpenses: expected.cashExpenses,
+      cashInvoices: expected.cashInvoices,
       bankDeposits: expected.bankDeposits,
       bankWithdrawals: expected.bankWithdrawals,
       otherIncome: expected.otherIncome,

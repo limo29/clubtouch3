@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const invoiceController = require('../controllers/invoiceController');
 const { authenticate, authorize } = require('../middleware/auth');
+const { validateInvoiceStatus } = require('../middleware/validation');
 
 // Alle Routes benötigen Authentifizierung
 router.use(authenticate);
@@ -45,6 +46,7 @@ router.post('/',
 // Status aktualisieren
 router.patch('/:id/status',
   authorize('ADMIN', 'CASHIER'),
+  validateInvoiceStatus,
   invoiceController.updateStatus
 );
 // NEU: Rechnung updaten (nur DRAFT)

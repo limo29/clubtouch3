@@ -1001,7 +1001,8 @@ class ExportService {
           { label: `+ Bar-Verkäufe (${n('sales')})`, value: this._fmtEUR(b.cashSales || 0), color: theme.color.success },
           { label: `+ Bar-Erstattungen / Stornos (${n('refunds')})`, value: this._fmtEUR(b.cashRefunds || 0), color: theme.color.danger },
           { label: `+ Bar-Aufladungen Kundenkonten (${n('topUps')})`, value: this._fmtEUR(b.cashTopUps || 0), color: theme.color.success },
-          { label: `- Bar bezahlte Eingangsrechnungen (${n('expenses')})`, value: this._fmtEUR(b.cashExpenses || 0), color: theme.color.danger },
+          { label: `- Bar bezahlte Lieferantenrechnungen (${n('expenses')})`, value: this._fmtEUR(b.cashExpenses || 0), color: theme.color.danger },
+          { label: `+ Bar bezahlte Kundenrechnungen (${n('cashInvoices')})`, value: this._fmtEUR(b.cashInvoices?.total ?? 0), color: theme.color.success },
           { label: `- Einzahlungen auf Bank (${n('bankDeposits')})`, value: this._fmtEUR(b.bankDeposits?.total ?? 0), color: theme.color.danger },
           { label: `+ Abhebungen von Bank (${n('bankWithdrawals')})`, value: this._fmtEUR(b.bankWithdrawals?.total ?? 0), color: theme.color.success },
           { label: `+ Sonstige Bareinnahmen (${n('otherIncome')})`, value: this._fmtEUR(b.otherIncome?.total ?? 0), color: theme.color.success },
@@ -1240,11 +1241,14 @@ class ExportService {
             { label: openingLabel, value: this._fmtEUR(br.opening), bold: true },
             { label: `+ Einzahlungen aus der Kasse (${cnt(inf.bankDeposits)})`, value: this._fmtEUR(tot(inf.bankDeposits)), color: theme.color.success },
             { label: `+ Aufladungen Kundenkonten per Überweisung (${cnt(inf.topUpsTransfer)})`, value: this._fmtEUR(tot(inf.topUpsTransfer)), color: theme.color.success },
-            { label: `+ Bezahlte Ausgangsrechnungen (${cnt(inf.invoicesPaid)})`, value: this._fmtEUR(tot(inf.invoicesPaid)), color: theme.color.success },
-            { label: `- Per Überweisung bezahlte Eingangsrechnungen (${cnt(outf.purchasesTransfer)})`, value: this._fmtEUR(-tot(outf.purchasesTransfer)), color: theme.color.danger },
+            { label: `+ Bezahlte Kundenrechnungen per Überweisung (${cnt(inf.invoicesPaid)})`, value: this._fmtEUR(tot(inf.invoicesPaid)), color: theme.color.success },
+            { label: `- Per Überweisung bezahlte Lieferantenrechnungen (${cnt(outf.purchasesTransfer)})`, value: this._fmtEUR(-tot(outf.purchasesTransfer)), color: theme.color.danger },
             { label: `- Abhebungen für die Kasse (${cnt(outf.bankWithdrawals)})`, value: this._fmtEUR(-tot(outf.bankWithdrawals)), color: theme.color.danger },
             { label: 'Bank-Soll laut App', value: this._fmtEUR(br.expected), bold: true, rule: true }
           ];
+          if (br.invoicesPaidCash && Number(br.invoicesPaidCash.count || 0) > 0) {
+            brRows.push({ label: `Nachrichtlich: bar bezahlte Kundenrechnungen laufen über die Kasse (${br.invoicesPaidCash.count})`, value: this._fmtEUR(br.invoicesPaidCash.total || 0) });
+          }
           if (banks.length > 0) {
             const actual = br.actual != null ? Number(br.actual) : banksTotal;
             const bd = br.difference != null ? Number(br.difference) : (actual - Number(br.expected || 0));

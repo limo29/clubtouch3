@@ -116,6 +116,9 @@ model Transaction {
   cancelledTransactions Transaction[] @relation("CancelledTransaction")
   Invoice               Invoice?      @relation(fields: [invoiceId], references: [id])
   invoiceId             String?
+
+  // Highscore/Kassenprüfung: Fenster je Kunde und Zeit
+  @@index([customerId, createdAt])
 }
 
 // Einzelne Positionen einer Transaktion 
@@ -130,6 +133,9 @@ model TransactionItem {
   transaction   Transaction @relation(fields: [transactionId], references: [id])
   articleId     String
   article       Article     @relation(fields: [articleId], references: [id])
+
+
+  @@index([articleId])
 }
 
 // Kundenkonto-Aufladungen 
@@ -337,6 +343,7 @@ model Invoice {
   taxRate         Decimal       @default(19) @db.Decimal(5, 2)
   status          InvoiceStatus @default(DRAFT)
   paidAt          DateTime?
+  paymentMethod   PaymentMethod? // nur CASH oder TRANSFER; null bei Altbestand (gilt als Bank)
   dueDate         DateTime
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

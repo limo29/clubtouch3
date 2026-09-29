@@ -218,6 +218,26 @@ const validateCashCount = [
 // Kassenbewegung (Ein-/Auszahlung, sonstige Bar-Ein-/Ausgaben)
 const CASH_MOVEMENT_TYPES = ['DEPOSIT_TO_BANK', 'WITHDRAWAL_FROM_BANK', 'OTHER_INCOME', 'OTHER_EXPENSE'];
 const CASH_MOVEMENT_NOTE_REQUIRED = ['OTHER_INCOME', 'OTHER_EXPENSE'];
+// Statuswechsel einer Kundenrechnung: bei PAID ist die Zahlungsart (nur bar oder Überweisung) Pflicht
+const validateInvoiceStatus = [
+  body('status')
+    .isIn(['DRAFT', 'SENT', 'PAID', 'CANCELLED'])
+    .withMessage('Ungültiger Status. Erlaubt: DRAFT, SENT, PAID, CANCELLED'),
+  body('paymentMethod')
+    .if(body('status').equals('PAID'))
+    .isIn(['CASH', 'TRANSFER'])
+    .withMessage('Zahlungsart fehlt oder ist ungültig. Erlaubt: CASH (bar) oder TRANSFER (Überweisung)'),
+  body('paidAt')
+    .optional({ values: 'falsy' })
+    .custom((value) => {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) throw new Error('Zahldatum ist ungültig');
+      if (d.getTime() > Date.now() + 60 * 1000) throw new Error('Zahldatum darf nicht in der Zukunft liegen');
+      return true;
+    }),
+  handleValidationErrors
+];
+
 const validateCashMovement = [
   body('type')
     .isIn(CASH_MOVEMENT_TYPES)
@@ -308,6 +328,7 @@ module.exports = {
   validateQuickSale,
   validateCashCount,
   validateCashMovement,
+  validateInvoiceStatus,
 
   handleValidationErrors
 };

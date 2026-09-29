@@ -29,10 +29,14 @@ class InvoiceController {
 
   async updateStatus(req, res) {
     try {
-      const { id } = req.params; const { status } = req.body;
-      const invoice = await invoiceService.updateInvoiceStatus(id, status, req.user.id);
+      const { id } = req.params; const { status, paymentMethod, paidAt } = req.body;
+      const invoice = await invoiceService.updateInvoiceStatus(id, status, req.user.id, { paymentMethod, paidAt });
       res.json({ message: 'Rechnungsstatus aktualisiert', invoice });
-    } catch (error) { console.error('Update invoice status error:', error); res.status(500).json({ error: 'Fehler beim Aktualisieren des Status' }); }
+    } catch (error) {
+      if (error.statusCode === 400) return res.status(400).json({ error: error.message });
+      if (error.code === 'P2025') return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+      console.error('Update invoice status error:', error); res.status(500).json({ error: 'Fehler beim Aktualisieren des Status' });
+    }
   }
 
   async downloadPDF(req, res) {

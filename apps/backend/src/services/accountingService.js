@@ -275,7 +275,7 @@ class AccountingService {
     const end = endOfLocalDay(endDate);
     const window = { gte: start, lte: end };
 
-    const [prevYear, cm, topUps, invoices, purchases] = await Promise.all([
+    const [prevYear, cm, topUps, invoices, purchases, cashInvoicesAgg] = await Promise.all([
       prisma.fiscalYear.findFirst({
         where: { closed: true, endDate: { lt: start }, report: { isNot: null } },
         orderBy: [{ endDate: 'desc' }, { createdAt: 'desc' }],
@@ -287,10 +287,12 @@ class AccountingService {
         orderBy: { createdAt: 'asc' },
         select: { id: true, amount: true, reference: true, createdAt: true, customer: { select: { name: true } } }
       }),
+      // Kundenrechnungen per Überweisung (null = Altbestand ohne Zahlungsart, gilt als Bank);
+      // bar bezahlte laufen über die Kasse (cashCountService) und werden hier nur nachrichtlich gezählt
       prisma.invoice.findMany({
-        where: { status: 'PAID', paidAt: window },
+        where: { status: 'PAID', paidAt: window, OR: [{ paymentMethod: 'TRANSFER' }, { paymentMethod: null }] },
         orderBy: { paidAt: 'asc' },
-        select: { id: true, invoiceNumber: true, customerName: true, description: true, paidAt: true, totalAmount: true }
+        select: { id: true, invoiceNumber: true, customerName: true, description: true, paidAt: true, totalAmount: true, paymentMethod: true }
       }),
       prisma.purchaseDocument.findMany({
         where: {
@@ -299,6 +301,10 @@ class AccountingService {
         },
         orderBy: { documentDate: 'asc' },
         select: { id: true, documentNumber: true, supplier: true, description: true, paidAt: true, documentDate: true, totalAmount: true }
+      }),
+      prisma.invoice.aggregate({
+        where: { status: 'PAID', paymentMethod: 'CASH', paidAt: window },
+        _sum: { totalAmount: true }, _count: true
       })
     ]);
 
@@ -320,7 +326,7 @@ class AccountingService {
       reference: t.reference || null, amount: round2(dec(t.amount))
     }));
     invoices.forEach(i => movements.push({
-      id: i.id, date: i.paidAt, kind: 'INVOICE_PAID', label: `Ausgangsrechnung bezahlt${i.customerName ? ` (${i.customerName})` : ''}`,
+      id: i.id, date: i.paidAt, kind: 'INVOICE_PAID', label: `Kundenrechnung per Überweisung${i.paymentMethod ? '' : ' (Altbestand ohne Zahlungsart)'}${i.customerName ? ` (${i.customerName})` : ''}`,
       reference: i.invoiceNumber || null, amount: round2(dec(i.totalAmount))
     }));
     purchases.forEach(p => movements.push({
@@ -333,6 +339,11 @@ class AccountingService {
       bankDeposits: { total: cm.bankDeposits.total, count: cm.bankDeposits.count },
       topUpsTransfer: { total: sumBy(topUps, t => t.amount), count: topUps.length },
       invoicesPaid: { total: sumBy(invoices, i => i.totalAmount), count: invoices.length }
+    };
+    // Nachrichtlich: bar bezahlte Kundenrechnungen laufen über die Kasse, nicht über die Bank
+    const invoicesPaidCash = {
+      total: round2(dec(cashInvoicesAgg._sum.totalAmount)),
+      count: cashInvoicesAgg._count || 0
     };
     const outflows = {
       purchasesTransfer: { total: sumBy(purchases, p => p.totalAmount), count: purchases.length },
@@ -348,11 +359,12 @@ class AccountingService {
       openingFiscalYear: prevYear ? { id: prevYear.id, name: prevYear.name, endDate: prevYear.endDate, accounts: prevBanks } : null,
       inflows,
       outflows,
+      invoicesPaidCash,
       inflowTotal,
       outflowTotal,
       expected: round2(opening + inflowTotal - outflowTotal),
       movements,
-      notCovered: 'Nicht enthalten: Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden und alles, was nicht über die App gebucht wurde.'
+      notCovered: 'Nicht enthalten: Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden und alles, was nicht über die App gebucht wurde. Bar bezahlte Kundenrechnungen laufen über die Kasse.'
     };
   }
 
