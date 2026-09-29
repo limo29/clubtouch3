@@ -28,9 +28,17 @@ export const API_ENDPOINTS = {
   HIGHSCORE: '/highscore',
   HIGHSCORE_ALL: '/highscore/all',
   HIGHSCORE_GOALS_PROGRESS: '/highscore/goals-progress',
+  HIGHSCORE_SETTINGS: '/highscore/settings',
+  HIGHSCORE_RESET: '/highscore/reset',
+  HIGHSCORE_ARCHIVE: '/highscore/archive',
+  PUBLIC_HIGHSCORE_ARCHIVE: '/public/highscore/archive',
 
   // Exports
-  EXPORTS: '/exports'
+  EXPORTS: '/exports',
+
+  // Cash Movements
+  CASH_MOVEMENTS: '/cash-movements',
+  CASH_MOVEMENTS_BANK_ACCOUNTS: '/cash-movements/bank-accounts',
 };
 
 export { API_BASE_URL, WS_URL };

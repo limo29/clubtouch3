@@ -21,13 +21,9 @@ const MenuRenderer = ({ categoryName, style, isEditor, fontSize, color }) => {
     useEffect(() => {
         const fetchArticles = async () => {
             try {
-                const res = await api.get('/articles?includeInactive=false');
-                if (res.data && res.data.articles) {
-                    const filtered = res.data.articles.filter(a =>
-                        a.category && a.category.toLowerCase() === categoryName.toLowerCase()
-                    );
-                    setArticles(filtered);
-                }
+                // Öffentlicher Endpoint: funktioniert auch auf dem Display ohne Login
+                const res = await api.get('/public/articles', { params: { category: categoryName } });
+                setArticles(res.data?.articles || []);
             } catch (err) {
                 console.error("Failed to load menu", err);
             }

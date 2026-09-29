@@ -1,38 +1,60 @@
 const prisma = require('../utils/prisma');
 const { Prisma } = require('@prisma/client');
 const { emitHighscoreUpdate } = require('../utils/websocket');
+const { BUSINESS_DAY_START_HOUR, businessDayWindow, businessDayLabel } = require('../utils/businessDay');
+
+// Die vier Boards (Tag/Jahr x Umsatz/Anzahl) werden einmal berechnet und kurz gecacht:
+// Public-Display, Clubscore-Seite und jeder Verkauf fragten sonst je vier Full-Scans an.
+const BOARD_CACHE_TTL_MS = 5000;
 
 class HighscoreService {
+  constructor() {
+    this._boardsCache = { at: 0, data: null, promise: null };
+  }
+
   async getSettings() {
     // Kannst du später aus DB/ENV laden
+    const lastReset = await this._getLastYearlyReset();
     return {
-      dailyResetHour: 12,          // 12:00 -> Tag läuft 12:00 bis 12:00
+      dailyResetHour: BUSINESS_DAY_START_HOUR, // derselbe Geschäftstag wie Tagesabschluss/Dashboard
       displayCount: 20,            // Top 20
       countInactiveArticles: false,
-      scoreMode: 'AMOUNT'
+      scoreMode: 'AMOUNT',
+      yearlyStart: this._yearlyStartFrom(lastReset),
+      lastYearlyReset: lastReset ? { at: lastReset.createdAt, byUserId: lastReset.userId } : null,
     };
   }
 
-  _getPeriodStart(type, resetHour = 12) {
-    const now = new Date();
-
-    if (type === 'DAILY') {
-      const start = new Date();
-      start.setHours(resetHour, 0, 0, 0);
-      if (now < start) start.setDate(start.getDate() - 1);
-      return start;
-    }
-    if (type === 'YEARLY') {
-      return new Date(now.getFullYear(), 0, 1);
-    }
-    const start = new Date();
-    start.setHours(resetHour, 0, 0, 0);
-    return start;
+  /** Letzter manueller Jahres-Reset (AuditLog-Marke, kein eigenes Schema). */
+  async _getLastYearlyReset() {
+    return prisma.auditLog.findFirst({
+      where: { entityType: 'Highscore', action: 'RESET_YEARLY_HIGHSCORE' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true, userId: true },
+    });
   }
 
-  _getDailyWindow(resetHour = 12) {
-    // liefert [start, end) für “heute” von 12:00 bis 12:00
-    const start = this._getPeriodStart('DAILY', resetHour);
+  /**
+   * Start der Jahreswertung: Kalenderjahresanfang, es sei denn, es gab in diesem
+   * Kalenderjahr einen manuellen Reset – dann zählt ab dem Reset-Zeitpunkt.
+   * (Vorher wurde der Reset nur archiviert und die Wertung lief unverändert weiter.)
+   */
+  _yearlyStartFrom(lastReset) {
+    const jan1 = new Date(new Date().getFullYear(), 0, 1);
+    if (lastReset && lastReset.createdAt > jan1) return lastReset.createdAt;
+    return jan1;
+  }
+
+  async _getPeriodStart(type, resetHour = BUSINESS_DAY_START_HOUR) {
+    if (type === 'YEARLY') {
+      return this._yearlyStartFrom(await this._getLastYearlyReset());
+    }
+    return businessDayWindow(new Date(), resetHour).start;
+  }
+
+  _getDailyWindow(resetHour = BUSINESS_DAY_START_HOUR) {
+    // liefert [start, end) für "heute" im Geschäftstag-Fenster
+    const { start } = businessDayWindow(new Date(), resetHour);
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
     return { start, end };
@@ -46,10 +68,28 @@ class HighscoreService {
     return articles.map(a => a.id);
   }
 
-  async calculateHighscore(type = 'DAILY', mode = 'AMOUNT') {
+  // Hinweis: "createdAt" ist timestamp ohne Zeitzone (Prisma speichert UTC). Ein JS-Date-Parameter
+  // kommt als timestamptz an; ohne "AT TIME ZONE 'UTC'" würde Postgres die Spalte in der
+  // Session-Zeitzone interpretieren und das Fenster um den UTC-Offset verschieben.
+  /** Einmal pro Board-Satz: Settings (inkl. Reset-Marke), zaehlende Artikel, Periodenstarts. */
+  async _buildContext() {
     const settings = await this.getSettings();
-    const startDate = this._getPeriodStart(type, settings.dailyResetHour);
     const articleIds = await this._getCountingArticleIds(settings.countInactiveArticles);
+    return {
+      settings,
+      articleIds,
+      starts: {
+        DAILY: businessDayWindow(new Date(), settings.dailyResetHour).start,
+        YEARLY: settings.yearlyStart,
+      },
+    };
+  }
+
+  async calculateHighscore(type = 'DAILY', mode = 'AMOUNT', ctx = null) {
+    const c = ctx || await this._buildContext();
+    const settings = c.settings;
+    const startDate = c.starts[type];
+    const articleIds = c.articleIds;
 
     if (!articleIds.length) {
       return { type, mode, startDate, entries: [], lastUpdated: new Date() };
@@ -77,7 +117,7 @@ class HighscoreService {
         FROM "Customer" c
         JOIN "Transaction" t   ON t."customerId" = c.id
         JOIN "TransactionItem" ti ON ti."transactionId" = t.id
-        WHERE t."createdAt" >= ${startDate}
+        WHERE t."createdAt" >= (${startDate}::timestamptz AT TIME ZONE 'UTC')
           AND t.cancelled = false
           AND t.type = 'SALE'
           AND ti."articleId" IN (${Prisma.join(articleIds)})
@@ -102,9 +142,74 @@ class HighscoreService {
     return { type, mode, startDate, entries, lastUpdated: new Date() };
   }
 
+  /**
+   * Alle vier Boards aus einem Kontext; Ergebnis BOARD_CACHE_TTL_MS lang gecacht,
+   * parallele Aufrufer teilen sich eine laufende Berechnung. `fresh` erzwingt Neuberechnung
+   * (nach Verkauf/Reset) und aktualisiert den Cache.
+   */
+  async getAllBoards({ fresh = false } = {}) {
+    const now = Date.now();
+    if (!fresh) {
+      if (this._boardsCache.data && now - this._boardsCache.at < BOARD_CACHE_TTL_MS) return this._boardsCache.data;
+      if (this._boardsCache.promise) return this._boardsCache.promise;
+    }
+    const promise = (async () => {
+      const ctx = await this._buildContext();
+      const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
+        this.calculateHighscore('DAILY', 'AMOUNT', ctx),
+        this.calculateHighscore('DAILY', 'COUNT', ctx),
+        this.calculateHighscore('YEARLY', 'AMOUNT', ctx),
+        this.calculateHighscore('YEARLY', 'COUNT', ctx),
+      ]);
+      const data = { daily: { amount: dailyAmount, count: dailyCount }, yearly: { amount: yearlyAmount, count: yearlyCount } };
+      this._boardsCache = { at: Date.now(), data, promise: null };
+      return data;
+    })();
+    this._boardsCache.promise = promise;
+    try {
+      return await promise;
+    } catch (err) {
+      if (this._boardsCache.promise === promise) this._boardsCache.promise = null;
+      throw err;
+    }
+  }
+
+  invalidateBoards() {
+    this._boardsCache = { at: 0, data: null, promise: null };
+  }
+
+  /**
+   * Archiv der Jahreswertungen: jeder manuelle Reset hat den Stand davor im AuditLog
+   * (`changes.archivedHighscore` / `archivedHighscoreCount`) eingefroren. Neueste zuerst.
+   * `top` kuerzt die Eintraege (Public-Display: 3), sonst voller Top-20-Stand.
+   */
+  async getArchive({ top = null, limit = 24 } = {}) {
+    const rows = await prisma.auditLog.findMany({
+      where: { entityType: 'Highscore', action: 'RESET_YEARLY_HIGHSCORE' },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { user: { select: { name: true } } },
+    });
+    const cut = (arr) => (top ? (arr || []).slice(0, top) : (arr || []));
+    return rows.map((r) => {
+      const amount = r.changes?.archivedHighscore || {};
+      const count = r.changes?.archivedHighscoreCount || {};
+      return {
+        id: r.id,
+        periodStart: r.changes?.periodStart || amount.startDate || null,
+        periodEnd: r.createdAt,
+        resetAt: r.createdAt,
+        resetBy: r.user?.name || null,
+        entriesCount: (amount.entries || []).length,
+        amount: { entries: cut(amount.entries) },
+        count: { entries: cut(count.entries) },
+      };
+    });
+  }
+
   async getCustomerPosition(customerId, type = 'DAILY', mode = 'AMOUNT') {
     const settings = await this.getSettings();
-    const startDate = this._getPeriodStart(type, settings.dailyResetHour);
+    const startDate = await this._getPeriodStart(type, settings.dailyResetHour);
     const articleIds = await this._getCountingArticleIds(settings.countInactiveArticles);
     if (!articleIds.length) return null;
 
@@ -125,7 +230,7 @@ class HighscoreService {
           FROM "Customer" c
           JOIN "Transaction" t    ON t."customerId" = c.id
           JOIN "TransactionItem" ti ON ti."transactionId" = t.id
-          WHERE t."createdAt" >= ${startDate}
+          WHERE t."createdAt" >= (${startDate}::timestamptz AT TIME ZONE 'UTC')
             AND t.cancelled = false
             AND t.type = 'SALE'
             AND ti."articleId" IN (${Prisma.join(articleIds)})
@@ -195,7 +300,7 @@ class HighscoreService {
       return {
         goals: [],
         meta: {
-          dayLabel: `Tag: ${String(settings.dailyResetHour).padStart(2, '0')}:00 → ${String(settings.dailyResetHour).padStart(2, '0')}:00`,
+          dayLabel: `Tag: ${businessDayLabel(settings.dailyResetHour)}`,
           goalsConfig: [],
           movingTargets
         }
@@ -240,7 +345,7 @@ class HighscoreService {
     return {
       goals,
       meta: {
-        dayLabel: `Tag: ${String(settings.dailyResetHour).padStart(2, '0')}:00 → ${String(settings.dailyResetHour).padStart(2, '0')}:00`,
+        dayLabel: `Tag: ${businessDayLabel(settings.dailyResetHour)}`,
         goalsConfig: cfg,
         movingTargets
       }
@@ -248,6 +353,16 @@ class HighscoreService {
   }
 
   /* ---------- Events nach Verkäufen ---------- */
+  /** Boards frisch rechnen und pushen (z.B. nach Storno, der ein Ranking verändern kann) */
+  async refreshBoards() {
+    try {
+      const boards = await this.getAllBoards({ fresh: true });
+      emitHighscoreUpdate(boards);
+    } catch (err) {
+      console.error('Error refreshing highscore:', err);
+    }
+  }
+
   async updateAfterSale(transactionId) {
     try {
       const transaction = await prisma.transaction.findUnique({
@@ -259,17 +374,8 @@ class HighscoreService {
       const hasRelevant = transaction.items.some(it => it.article?.countsForHighscore);
       if (!hasRelevant) return;
 
-      const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
-        this.calculateHighscore('DAILY', 'AMOUNT'),
-        this.calculateHighscore('DAILY', 'COUNT'),
-        this.calculateHighscore('YEARLY', 'AMOUNT'),
-        this.calculateHighscore('YEARLY', 'COUNT'),
-      ]);
-
-      emitHighscoreUpdate({
-        daily: { amount: dailyAmount, count: dailyCount },
-        yearly: { amount: yearlyAmount, count: yearlyCount }
-      });
+      const boards = await this.getAllBoards({ fresh: true });
+      emitHighscoreUpdate(boards);
     } catch (err) {
       console.error('Error updating highscore:', err);
     }
@@ -279,23 +385,26 @@ class HighscoreService {
     if (type !== 'YEARLY') {
       throw new Error('Nur der Jahres-Highscore kann manuell zurückgesetzt werden');
     }
-    const current = await this.calculateHighscore('YEARLY', 'AMOUNT');
-    await prisma.auditLog.create({
-      data: { userId, action: 'RESET_YEARLY_HIGHSCORE', entityType: 'Highscore', entityId: 'yearly', changes: { archivedHighscore: current } },
-    });
-
-    const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
-      this.calculateHighscore('DAILY', 'AMOUNT'),
-      this.calculateHighscore('DAILY', 'COUNT'),
+    // Stand vor dem Reset in beiden Modi archivieren; der AuditLog-Eintrag ist
+    // zugleich die Startmarke der neuen Jahreswertung (siehe _yearlyStartFrom).
+    const [archivedAmount, archivedCount] = await Promise.all([
       this.calculateHighscore('YEARLY', 'AMOUNT'),
       this.calculateHighscore('YEARLY', 'COUNT'),
     ]);
-
-    emitHighscoreUpdate({
-      daily: { amount: dailyAmount, count: dailyCount },
-      yearly: { amount: yearlyAmount, count: yearlyCount },
-      reset: true, resetType: 'YEARLY',
+    const created = await prisma.auditLog.create({
+      data: {
+        userId, action: 'RESET_YEARLY_HIGHSCORE', entityType: 'Highscore', entityId: 'yearly',
+        changes: {
+          periodStart: archivedAmount.startDate,
+          archivedHighscore: archivedAmount,
+          archivedHighscoreCount: archivedCount,
+        },
+      },
     });
+
+    const boards = await this.getAllBoards({ fresh: true });
+    emitHighscoreUpdate({ ...boards, reset: true, resetType: 'YEARLY' });
+    return { resetAt: created.createdAt, archivedEntries: archivedAmount.entries.length };
   }
 
   /* Customer Achievements – unverändert zu deinem Stand, hier gekürzt */
@@ -306,14 +415,14 @@ class HighscoreService {
       totalSpent,
       favoriteArticle,
     ] = await Promise.all([
-      prisma.transaction.count({ where: { customerId, cancelled: false } }),
-      prisma.transaction.aggregate({ where: { customerId, cancelled: false }, _sum: { totalAmount: true } }),
+      prisma.transaction.count({ where: { customerId, cancelled: false, type: 'SALE' } }),
+      prisma.transaction.aggregate({ where: { customerId, cancelled: false, type: 'SALE' }, _sum: { totalAmount: true } }),
       prisma.$queryRaw`
         SELECT a.name, COUNT(*) as count
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
-        WHERE t."customerId" = ${customerId} AND t.cancelled = false
+        WHERE t."customerId" = ${customerId} AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY a.id, a.name
         ORDER BY count DESC
         LIMIT 1

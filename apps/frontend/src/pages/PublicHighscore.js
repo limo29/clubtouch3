@@ -1,11 +1,15 @@
-import React, { useEffect, useState } from 'react'; // Optimization: Removed unused imports
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Box, Card, CardContent, Chip, Stack, CssBaseline,
-    Typography, GlobalStyles, alpha, useTheme, Grid
+    Typography, GlobalStyles, alpha, useTheme, Grid, IconButton, Tooltip, Fade
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import FlagIcon from '@mui/icons-material/Flag';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 
+import api from '../services/api';
+import { API_ENDPOINTS } from '../config/api';
 import Podium from '../components/common/Podium';
 import GoalOverlay from '../components/common/GoalOverlay';
 import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
@@ -14,6 +18,48 @@ import GoalBar from '../components/common/GoalBar';
 
 // Helper functions
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
+const CONTROLS_HIDE_MS = 3000; // Vollbild-Knopf blendet sich nach 3 s ohne Mausbewegung aus
+
+/** Dezenter Vollbild-Schalter rechts oben (Fullscreen API, Esc verlässt wie üblich). */
+function FullscreenControl() {
+    const [isFull, setIsFull] = useState(!!document.fullscreenElement);
+    const [visible, setVisible] = useState(true);
+    const timer = useRef(null);
+    useEffect(() => {
+        const onChange = () => setIsFull(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', onChange);
+        const arm = () => {
+            setVisible(true);
+            clearTimeout(timer.current);
+            timer.current = setTimeout(() => setVisible(false), CONTROLS_HIDE_MS);
+        };
+        arm();
+        window.addEventListener('mousemove', arm);
+        window.addEventListener('touchstart', arm, { passive: true });
+        return () => {
+            clearTimeout(timer.current);
+            document.removeEventListener('fullscreenchange', onChange);
+            window.removeEventListener('mousemove', arm);
+            window.removeEventListener('touchstart', arm);
+        };
+    }, []);
+    const toggle = async () => {
+        try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch { }
+    };
+    if (typeof document.documentElement.requestFullscreen !== 'function') return null;
+    return (
+        <Fade in={visible}>
+            <Box sx={{ position: 'fixed', top: 12, right: 12, zIndex: 10 }}>
+                <Tooltip title={isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
+                    <IconButton onClick={toggle} aria-label={isFull ? 'Vollbild verlassen' : 'Vollbild'}
+                        sx={{ color: 'rgba(255,255,255,0.7)', bgcolor: 'rgba(255,255,255,0.06)', '&:hover': { bgcolor: 'rgba(255,255,255,0.14)' } }}>
+                        {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                    </IconButton>
+                </Tooltip>
+            </Box>
+        </Fade>
+    );
+}
 
 
 
@@ -28,6 +74,19 @@ export default function PublicHighscore() {
     } = useHighscoreLogic();
 
     const [mode, setMode] = useState('AMOUNT'); // 'AMOUNT' | 'COUNT'
+    const yearlyStart = boards.yearly?.amount?.startDate ? new Date(boards.yearly.amount.startDate) : null;
+
+    // Letzte abgeschlossene Jahreswertung (nur Platz 1–3, öffentlicher Endpoint); leer, wenn nie zurückgesetzt wurde
+    const [lastArchive, setLastArchive] = useState(null);
+    useEffect(() => {
+        const load = () => api.get(API_ENDPOINTS.PUBLIC_HIGHSCORE_ARCHIVE)
+            .then(r => setLastArchive((r.data?.archive || []).find(a => a.amount?.entries?.length) || null))
+            .catch(() => setLastArchive(null));
+        load();
+        const t = setInterval(load, 10 * 60 * 1000);
+        return () => clearInterval(t);
+    }, []);
+    const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
 
     // Auto-rotate mode every 15s
     useEffect(() => {
@@ -84,7 +143,7 @@ export default function PublicHighscore() {
         );
     };
 
-    const Board = ({ title, data }) => {
+    const Board = ({ title, subtitle, data, footer }) => {
         const topThree = (data?.entries || []).slice(0, 3);
         const rest = (data?.entries || []).slice(3, 20);
 
@@ -99,7 +158,7 @@ export default function PublicHighscore() {
                             <Box>
                                 <Typography variant="h4" fontWeight={900}>{title}</Typography>
                                 <Typography variant="subtitle1" color="text.secondary">
-                                    {mode === 'AMOUNT' ? 'Nach Umsatz' : 'Nach Anzahl'} &bull; Top 20
+                                    {mode === 'AMOUNT' ? 'Nach Umsatz' : 'Nach Anzahl'} &bull; Top 20{subtitle ? <> &bull; {subtitle}</> : null}
                                 </Typography>
                             </Box>
                         </Stack>
@@ -141,6 +200,7 @@ export default function PublicHighscore() {
                             </Box>
                         </>
                     )}
+                    {footer}
                 </CardContent>
             </Card>
         );
@@ -168,6 +228,8 @@ export default function PublicHighscore() {
                 '::-webkit-scrollbar-thumb:hover': { background: '#555' }
             }} />
 
+            <FullscreenControl />
+
             <GoalOverlay
                 trigger={overlay.active}
                 type={overlay.type}
@@ -176,7 +238,7 @@ export default function PublicHighscore() {
             />
 
             {/* Header */}
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3, pr: 7 /* Platz für den Vollbild-Schalter */ }}>
                 <Stack direction="row" spacing={3} alignItems="center">
                     <Typography variant="h3" sx={{ fontWeight: 900, letterSpacing: -1, background: 'linear-gradient(45deg, #FFF, #999)', backgroundClip: 'text', textFillColor: 'transparent', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                         Clubscore
@@ -252,6 +314,7 @@ export default function PublicHighscore() {
                     <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
                         <Board
                             title="Tages-Ranking"
+                            subtitle="ab 06:00 Uhr"
                             data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count}
                         />
                     </Box>
@@ -260,7 +323,18 @@ export default function PublicHighscore() {
                     <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
                         <Board
                             title="Jahres-Charts"
+                            subtitle={yearlyStart ? `seit ${yearlyStart.toLocaleDateString('de-DE')}` : ''}
                             data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
+                            footer={lastArchive && (
+                                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ pt: 2, mt: 'auto', borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
+                                    <TrophyIcon sx={{ color: '#FFD700' }} />
+                                    <Typography variant="h6" sx={{ fontWeight: 700 }} noWrap>
+                                        Sieger {fmtDate(lastArchive.periodStart)} – {fmtDate(lastArchive.periodEnd)}:{' '}
+                                        {lastArchive.amount.entries[0].customerNickname || lastArchive.amount.entries[0].customerName}
+                                        <Typography component="span" color="primary" sx={{ fontWeight: 900, ml: 1 }}>{money(lastArchive.amount.entries[0].score)}</Typography>
+                                    </Typography>
+                                </Stack>
+                            )}
                         />
                     </Box>
                 </Box>

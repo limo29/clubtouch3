@@ -1,17 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Card, CardContent, Chip, IconButton, Stack,
   Typography, alpha, GlobalStyles, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Autocomplete, Grid, Tooltip, Switch, FormControlLabel, CssBaseline
+  Autocomplete, Grid, Tooltip, Switch, FormControlLabel, CssBaseline,
+  Snackbar, Alert, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Divider
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import HistoryIcon from '@mui/icons-material/History';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import FlagIcon from '@mui/icons-material/Flag';
 import CloseIcon from '@mui/icons-material/Close';
-import MonitorIcon from '@mui/icons-material/Monitor';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import { useAuth } from '../context/AuthContext';
 
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
@@ -23,7 +27,11 @@ import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
 
 /* ---------- Helpers ---------- */
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
-const KIOSK_PARAM = new URLSearchParams(window.location.search).get('kiosk') === '1';
+const dateDE = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
+const periodLabel = (a) => `${dateDE(a.periodStart)} – ${dateDE(a.periodEnd)}`;
+const MEDALS = ['🥇', '🥈', '🥉'];
+const RESET_WORD = 'RESET';
+const TOOLBAR_HIDE_MS = 3000; // im Vollbild: Leiste nach 3 s ohne Mausbewegung ausblenden
 
 const useLocalBool = (key, initial) => {
   const [val, setVal] = useState(() => {
@@ -52,18 +60,6 @@ function GridList({ items, renderItem }) {
   )
 }
 
-function BodyFlag({ active }) {
-  useEffect(() => {
-    if (active) {
-      document.body.setAttribute('data-kiosk', '1');
-    } else {
-      document.body.removeAttribute('data-kiosk');
-    }
-    return () => document.body.removeAttribute('data-kiosk');
-  }, [active]);
-  return null;
-}
-
 export default function Highscore() {
   // USE THE HOOK
   const {
@@ -72,8 +68,8 @@ export default function Highscore() {
   } = useHighscoreLogic();
 
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [autoRotate] = useLocalBool('hs_autoRotate', true);
-  const [forceKiosk, setForceKiosk] = useLocalBool('hs_forceKiosk', false);
   const [mode, setMode] = useState('AMOUNT');
   const [allArticles, setAllArticles] = useState([]);
 
@@ -81,6 +77,41 @@ export default function Highscore() {
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [goalDraft, setGoalDraft] = useState([]);
   const [movingTargetsDraft, setMovingTargetsDraft] = useState(false);
+
+  // Jahres-Reset (nur Admin)
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetWord, setResetWord] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
+  const yearlyStart = boards.yearly?.amount?.startDate ? new Date(boards.yearly.amount.startDate) : null;
+  const yearlyIsReset = !!yearlyStart && (yearlyStart.getMonth() !== 0 || yearlyStart.getDate() !== 1 || yearlyStart.getHours() !== 0);
+  const yearlyLabel = yearlyStart ? `seit ${dateDE(yearlyStart)}` : '';
+  const yearlyEntries = boards.yearly?.amount?.entries || [];
+
+  // Archiv: jeder Jahres-Reset friert den Stand davor ein (AuditLog) → "Frühere Jahreswertungen"
+  const [archive, setArchive] = useState([]);
+  const loadArchive = React.useCallback(() => {
+    api.get(API_ENDPOINTS.HIGHSCORE_ARCHIVE).then(r => setArchive(r.data?.archive || [])).catch(() => setArchive([]));
+  }, []);
+  useEffect(() => { loadArchive(); }, [loadArchive]);
+
+  const doReset = async () => {
+    if (resetWord.trim().toUpperCase() !== RESET_WORD) return;
+    setResetBusy(true);
+    try {
+      const r = await api.post(API_ENDPOINTS.HIGHSCORE_RESET, { type: 'YEARLY' });
+      const n = Number(r.data?.archivedEntries || 0);
+      setSnack({ open: true, severity: 'success', msg: `Jahres-Clubscore zurückgesetzt (${n} ${n === 1 ? 'Eintrag' : 'Einträge'} archiviert). Die Wertung zählt ab jetzt neu.` });
+      setResetOpen(false);
+      setResetWord('');
+      refresh();
+      loadArchive();
+    } catch (e) {
+      setSnack({ open: true, severity: 'error', msg: e.response?.data?.error || 'Zurücksetzen fehlgeschlagen' });
+    } finally {
+      setResetBusy(false);
+    }
+  };
 
   const [isFull, setIsFull] = useState(!!document.fullscreenElement);
   const toggleFull = async () => { try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch { } };
@@ -91,11 +122,25 @@ export default function Highscore() {
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // Vollbild ersetzt den früheren gesperrten Anzeigemodus: Leiste blendet sich aus und kommt bei Mausbewegung/Tipp zurück.
+  const [toolbarVisible, setToolbarVisible] = useState(true);
+  const hideTimer = useRef(null);
   useEffect(() => {
-    if (KIOSK_PARAM && !document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => { });
-    }
-  }, []);
+    if (!isFull) { setToolbarVisible(true); return undefined; }
+    const arm = () => {
+      setToolbarVisible(true);
+      clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => setToolbarVisible(false), TOOLBAR_HIDE_MS);
+    };
+    arm();
+    window.addEventListener('mousemove', arm);
+    window.addEventListener('touchstart', arm, { passive: true });
+    return () => {
+      clearTimeout(hideTimer.current);
+      window.removeEventListener('mousemove', arm);
+      window.removeEventListener('touchstart', arm);
+    };
+  }, [isFull]);
 
   // Fetch Articles for Config Dialog (only once)
   useEffect(() => {
@@ -126,16 +171,6 @@ export default function Highscore() {
     setGoalsOpen(false);
   };
 
-  const handleKioskExit = async () => {
-    setForceKiosk(false);
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-    } catch { }
-    if (KIOSK_PARAM) {
-      navigate('/dashboard');
-    }
-  };
-
   const RankRow = ({ entry }) => (
     <Stack direction="row" alignItems="center" justifyContent="space-between"
       sx={{
@@ -163,7 +198,7 @@ export default function Highscore() {
     </Stack>
   );
 
-  const Board = ({ title, data, icon }) => (
+  const Board = ({ title, subtitle, data, icon }) => (
     <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', overflow: 'hidden' }}>
       <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
@@ -172,7 +207,7 @@ export default function Highscore() {
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" fontWeight={800} noWrap>{title}</Typography>
-            <Typography variant="caption" color="text.secondary">Top 20 • {mode === 'AMOUNT' ? 'Umsatz' : 'Anzahl'}</Typography>
+            <Typography variant="caption" color="text.secondary">Top 20 • {mode === 'AMOUNT' ? 'Umsatz' : 'Anzahl'}{subtitle ? ` • ${subtitle}` : ''}</Typography>
           </Box>
         </Stack>
 
@@ -189,22 +224,6 @@ export default function Highscore() {
       </CardContent>
     </Card>
   );
-
-  // Kiosk Overlay (Invisible click handler to exit)
-  const renderKioskControls = () => {
-    if (!forceKiosk && !KIOSK_PARAM) return null;
-    return (
-      <Box
-        onDoubleClick={handleKioskExit}
-        sx={{
-          position: 'fixed', top: 0, right: 0, width: 100, height: 100, zIndex: 9999,
-          cursor: 'none',
-          '&:hover': { cursor: 'default' } // Show cursor only here
-        }}
-        title="Double click to exit Kiosk"
-      />
-    );
-  };
 
   const handleMilestone = (goal, level) => {
     const target = Math.max(1, Number(goal.targetUnits));
@@ -224,21 +243,16 @@ export default function Highscore() {
 
   return (
     <Box sx={{
-      height: '100vh', display: 'flex', flexDirection: 'column',
+      // im Layout bleiben AppBar (64px) und unterer Innenabstand (16px) frei, sonst ist der Fuß abgeschnitten
+      height: isFull ? '100vh' : 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column',
       bgcolor: 'background.default', color: 'text.primary',
       overflow: 'hidden',
-      ...((forceKiosk || KIOSK_PARAM || isFull) && {
+      ...(isFull && {
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999
       })
     }}>
       <CssBaseline />
-      <BodyFlag active={forceKiosk || KIOSK_PARAM} />
-      <GlobalStyles styles={{
-        body: { overflow: 'hidden' },
-        ...(forceKiosk || KIOSK_PARAM ? { '* ': { cursor: 'none !important' } } : {})
-      }} />
-
-      {renderKioskControls()}
+      <GlobalStyles styles={{ body: { overflow: 'hidden' } }} />
 
       <GoalOverlay
         trigger={overlay.active}
@@ -247,14 +261,12 @@ export default function Highscore() {
         onComplete={() => setOverlay({ ...overlay, active: false })}
       />
 
-      {/* Toolbar (Hidden in Kiosk unless hovered top, or completely hidden?) 
-          Actually KIOSK_PARAM hides it usually. 
-      */}
-      {/* Toolbar */}
-      {(!forceKiosk && !KIOSK_PARAM && !isFull) && (
+      {/* Toolbar: normal im Fluss; im Vollbild als Overlay, das sich nach kurzer Zeit ausblendet */}
+      {(!isFull || toolbarVisible) && (
         <Box sx={{
           p: 1.5, borderBottom: '1px solid', borderColor: 'divider',
-          bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2
+          bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 }, flexWrap: 'wrap',
+          ...(isFull && { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, opacity: 0.96 })
         }}>
           <Button startIcon={<CloseIcon />} onClick={() => navigate('/dashboard')}>
             Dashboard
@@ -266,10 +278,14 @@ export default function Highscore() {
               label={live ? "LIVE" : "OFFLINE"}
               variant="outlined" size="small"
             />
-            <Chip
-              label={startDate ? startDate.toLocaleDateString() : 'Heute'}
-              size="small"
-            />
+            <Tooltip title="Tages-Challenge: Geschäftstag ab 06:00 Uhr">
+              <Chip label={`Tag: ${startDate ? startDate.toLocaleDateString('de-DE') : 'Heute'}`} size="small" />
+            </Tooltip>
+            {yearlyStart && (
+              <Tooltip title={yearlyIsReset ? 'Jahreswertung wurde manuell zurückgesetzt' : 'Jahreswertung seit Jahresbeginn'}>
+                <Chip label={`Jahr: ${yearlyLabel}`} size="small" color={yearlyIsReset ? 'warning' : 'default'} variant="outlined" />
+              </Tooltip>
+            )}
           </Stack>
           <Button
             variant={goalProgress.goals.length ? 'contained' : 'outlined'}
@@ -283,21 +299,23 @@ export default function Highscore() {
               <Typography variant="caption">Auto-Rotate</Typography>
             </Box>
           </Tooltip>
-          <Tooltip title="Vollbild">
-            <IconButton onClick={toggleFull}>
+          <Tooltip title={isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
+            <IconButton onClick={toggleFull} aria-label={isFull ? 'Vollbild verlassen' : 'Vollbild'}>
               {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
             </IconButton>
           </Tooltip>
-          <Tooltip title="Kiosk Mode (Locked)">
-            <IconButton onClick={() => { if (window.confirm('Kiosk Modus aktivieren? (Double Click oben rechts zum Beenden)')) setForceKiosk(true); }}>
-              <MonitorIcon />
-            </IconButton>
-          </Tooltip>
+          {isAdmin && (
+            <Tooltip title="Jahres-Clubscore zurücksetzen (nur Admin)">
+              <Button color="warning" variant="outlined" size="small" startIcon={<RestartAltIcon />} onClick={() => { setResetWord(''); setResetOpen(true); }}>
+                Jahr zurücksetzen
+              </Button>
+            </Tooltip>
+          )}
         </Box>
       )}
 
       {/* Main Content */}
-      <Box sx={{ flex: 1, p: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box sx={{ flex: 1, p: 2, overflow: { xs: 'auto', md: 'hidden' }, display: 'flex', flexDirection: 'column', gap: 2 }}>
 
         {/* Top: Goals (if any) */}
         {/* Top: Goals (if any) */}
@@ -335,22 +353,77 @@ export default function Highscore() {
         )}
 
         {/* Bottom: Boards Split */}
-        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', gap: 2 }}>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+        {/* unter md scrollt die Seite und die Boards behalten ihre feste Höhe (sonst ragen sie über den Container hinaus) */}
+        <Box sx={{ flex: { xs: 'none', md: 1 }, minHeight: { xs: 'auto', md: 0 }, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
+          <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 520, md: 0 } }}>
             <Board
               title="Tages-Challenge"
+              subtitle="ab 06:00 Uhr"
               icon={<TrophyIcon />}
               data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count}
             />
           </Box>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 520, md: 0 } }}>
             <Board
               title="Jahres-Ranking"
+              subtitle={yearlyLabel}
               icon={<TrophyIcon />}
               data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
             />
           </Box>
         </Box>
+
+        {/* Archiv früherer Jahreswertungen (nur wenn es Resets gab; im Vollbild ausgeblendet) */}
+        {archive.length > 0 && !isFull && (
+          <Accordion variant="outlined" disableGutters sx={{ flexShrink: 0, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <HistoryIcon fontSize="small" color="primary" />
+                <Typography variant="subtitle1" fontWeight={700}>Frühere Jahreswertungen</Typography>
+                <Chip size="small" label={archive.length} />
+                {archive[0]?.amount?.entries?.[0] && (
+                  <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
+                    · zuletzt {periodLabel(archive[0])}: {archive[0].amount.entries[0].customerNickname || archive[0].amount.entries[0].customerName}
+                  </Typography>
+                )}
+              </Stack>
+            </AccordionSummary>
+            <AccordionDetails sx={{ pt: 0, maxHeight: { md: '40vh' }, overflowY: 'auto' }}>
+              <Stack divider={<Divider flexItem />} spacing={1.5}>
+                {archive.map((a) => {
+                  const top = (a.amount?.entries || []).slice(0, 3);
+                  const countWinner = a.count?.entries?.[0];
+                  return (
+                    <Box key={a.id}>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.5, sm: 2 }} alignItems={{ sm: 'center' }} sx={{ mb: 0.5 }}>
+                        <Typography variant="subtitle2" fontWeight={700}>{periodLabel(a)}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          zurückgesetzt am {dateDE(a.resetAt)}{a.resetBy ? ` von ${a.resetBy}` : ''} · {a.entriesCount} {a.entriesCount === 1 ? 'Teilnehmer' : 'Teilnehmer'}
+                        </Typography>
+                      </Stack>
+                      {top.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary">Keine Einträge in dieser Wertung.</Typography>
+                      ) : (
+                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 0.5, md: 3 }} flexWrap="wrap">
+                          {top.map((e, i) => (
+                            <Typography key={e.customerId || i} variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {MEDALS[i]} <strong>{e.customerNickname || e.customerName}</strong> · {money(e.score)}
+                            </Typography>
+                          ))}
+                          {countWinner && (
+                            <Typography variant="body2" color="text.secondary">
+                              Meiste Getränke: {countWinner.customerNickname || countWinner.customerName} ({countWinner.score})
+                            </Typography>
+                          )}
+                        </Stack>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+        )}
       </Box>
 
       {/* Dialog */}
@@ -402,6 +475,53 @@ export default function Highscore() {
           <Button variant="contained" onClick={saveGoals}>Speichern</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Jahres-Reset (Admin) */}
+      <Dialog open={resetOpen} onClose={() => !resetBusy && setResetOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Jahres-Clubscore zurücksetzen</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 0.5 }}>
+            <Alert severity="warning">
+              Das Jahres-Ranking startet danach bei null. Diese Aktion lässt sich nicht rückgängig machen.
+            </Alert>
+            <Typography variant="body2"><strong>Was passiert:</strong></Typography>
+            <Typography variant="body2" component="ul" sx={{ pl: 2.5, m: 0 }}>
+              <li>Der aktuelle Stand ({yearlyEntries.length} {yearlyEntries.length === 1 ? 'Eintrag' : 'Einträge'}{yearlyEntries[0] ? `, Platz 1: ${yearlyEntries[0].customerNickname || yearlyEntries[0].customerName} mit ${money(yearlyEntries[0].score)}` : ''}) wird im Protokoll archiviert (Umsatz und Anzahl).</li>
+              <li>Die Jahreswertung zählt ab dem Zeitpunkt des Zurücksetzens neu; ältere Verkäufe fließen nicht mehr ein.</li>
+              <li>Tages-Challenge, Tagesziele, Buchungen und Kundenguthaben bleiben unverändert.</li>
+              <li>Am 1. Januar beginnt die Wertung ohnehin automatisch neu.</li>
+            </Typography>
+            {yearlyIsReset && (
+              <Typography variant="body2" color="text.secondary">
+                Letzter Reset: {dateDE(yearlyStart)} um {yearlyStart.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr.
+              </Typography>
+            )}
+            <TextField
+              label={`Zur Bestätigung „${RESET_WORD}“ eingeben`}
+              value={resetWord}
+              onChange={(e) => setResetWord(e.target.value)}
+              autoFocus
+              fullWidth
+              inputProps={{ 'aria-label': 'Bestätigungswort' }}
+              onKeyDown={(e) => { if (e.key === 'Enter') doReset(); }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResetOpen(false)} disabled={resetBusy}>Abbrechen</Button>
+          <Button
+            variant="contained" color="warning" onClick={doReset}
+            disabled={resetBusy || resetWord.trim().toUpperCase() !== RESET_WORD}
+            startIcon={resetBusy ? <CircularProgress size={16} color="inherit" /> : <RestartAltIcon />}
+          >
+            {resetBusy ? 'Setze zurück…' : 'Jetzt zurücksetzen'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar open={snack.open} autoHideDuration={6000} onClose={() => setSnack((x) => ({ ...x, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={snack.severity} onClose={() => setSnack((x) => ({ ...x, open: false }))} variant="filled">{snack.msg}</Alert>
+      </Snackbar>
     </Box>
   );
 }

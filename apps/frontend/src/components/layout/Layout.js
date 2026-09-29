@@ -41,6 +41,7 @@ import {
   LightMode as LightModeIcon,
   SettingsBrightness as SystemModeIcon,
   Campaign,
+  PointOfSale,
   ExpandLess,
   ExpandMore,
   WifiOff,
@@ -65,21 +66,6 @@ const Layout = () => {
   const [anchorEl, setAnchorEl] = useState(null);
   const [anchorThemeEl, setAnchorThemeEl] = useState(null);
 
-  const [hideChrome, setHideChrome] = useState(() => document.body.hasAttribute('data-kiosk') || location.search.includes('kiosk=1'));
-
-  useEffect(() => {
-    setHideChrome(document.body.hasAttribute('data-kiosk') || location.search.includes('kiosk=1'));
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'attributes' && mutation.attributeName === 'data-kiosk') {
-          setHideChrome(document.body.hasAttribute('data-kiosk'));
-        }
-      });
-    });
-    observer.observe(document.body, { attributes: true });
-    return () => observer.disconnect();
-  }, [location.search]);
-
   const { mode, resolvedMode, setMode, toggleMode } = useColorMode();
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
@@ -99,7 +85,7 @@ const Layout = () => {
 
   // Auto-expand groups if active child
   useEffect(() => {
-    if (['/invoices', '/purchases', '/transactions', '/profit-loss', '/reports'].some(p => location.pathname.startsWith(p))) {
+    if (['/invoices', '/purchases', '/transactions', '/cash-count', '/profit-loss', '/reports'].some(p => location.pathname.startsWith(p))) {
       setOpenFinances(true);
     }
     if (['/articles', '/customers', '/users'].some(p => location.pathname.startsWith(p))) {
@@ -153,16 +139,20 @@ const Layout = () => {
           <List component="div" disablePadding>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/purchases')} onClick={() => { navigate('/purchases'); setMobileOpen(false); }}>
               <ListItemIcon><ShoppingBasket /></ListItemIcon>
-              <ListItemText primary="Einkäufe" />
+              <ListItemText primary="Einkauf" />
             </ListItemButton>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/invoices')} onClick={() => { navigate('/invoices'); setMobileOpen(false); }}>
               <ListItemIcon><Description /></ListItemIcon>
-              <ListItemText primary="Rechnungen" />
+              <ListItemText primary="Kundenrechnungen" />
             </ListItemButton>
 
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/transactions')} onClick={() => { navigate('/transactions'); setMobileOpen(false); }}>
               <ListItemIcon><Receipt /></ListItemIcon>
               <ListItemText primary="Transaktionen" />
+            </ListItemButton>
+            <ListItemButton sx={{ pl: 4 }} selected={isActive('/cash-count')} onClick={() => { navigate('/cash-count'); setMobileOpen(false); }}>
+              <ListItemIcon><PointOfSale /></ListItemIcon>
+              <ListItemText primary="Kasse zählen" />
             </ListItemButton>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/profit-loss')} onClick={() => { navigate('/profit-loss'); setMobileOpen(false); }}>
               <ListItemIcon><AccountBalance /></ListItemIcon>
@@ -210,10 +200,11 @@ const Layout = () => {
     if (p.startsWith('/dashboard')) return 'Dashboard';
     if (p.startsWith('/highscore')) return 'Highscore';
     if (p.startsWith('/ads')) return 'Werbung';
-    if (p.startsWith('/invoices')) return 'Rechnungen';
-    if (p.startsWith('/purchases')) return 'Ausgaben';
+    if (p.startsWith('/invoices')) return 'Kundenrechnungen';
+    if (p.startsWith('/purchases')) return 'Einkauf';
     if (p.startsWith('/transactions')) return 'Transaktionen';
-    if (p.startsWith('/profit-loss')) return 'EÜR';
+    if (p.startsWith('/cash-count')) return 'Kasse zählen';
+    if (p.startsWith('/profit-loss')) return 'Kassenprüfung';
     if (p.startsWith('/reports')) return 'Berichte';
     if (p.startsWith('/articles')) return 'Artikel';
     if (p.startsWith('/customers')) return 'Kunden';
@@ -222,11 +213,10 @@ const Layout = () => {
   })();
 
   const ThemeIcon = resolvedMode === 'dark' ? DarkModeIcon : LightModeIcon;
-  const showCenterSalesBtn = !hideChrome && !location.pathname.startsWith('/sales');
+  const showCenterSalesBtn = !location.pathname.startsWith('/sales');
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      {!hideChrome && (
         <AppBar
           position="fixed"
           sx={{
@@ -249,19 +239,21 @@ const Layout = () => {
               <MenuIcon />
             </IconButton>
 
-            <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
+            <Typography variant="h6" noWrap sx={{ flexGrow: 1, minWidth: 0, mr: 1 }}>
               {currentTitle}
             </Typography>
 
             {showCenterSalesBtn && (
               <Box
                 sx={{
-                  position: 'absolute',
+                  // Handy: im Fluss rechts neben dem Titel (sonst überdeckt der zentrierte Button den Titel)
+                  position: { xs: 'static', sm: 'absolute' },
                   left: '50%',
-                  transform: 'translateX(-50%)',
+                  transform: { xs: 'none', sm: 'translateX(-50%)' },
                   display: 'flex',
                   alignItems: 'center',
                   pointerEvents: 'none',
+                  mr: { xs: 1, sm: 0 },
                 }}
               >
                 <Button
@@ -269,9 +261,15 @@ const Layout = () => {
                   color="secondary"
                   startIcon={<ShoppingCart />}
                   onClick={() => navigate('/sales')}
-                  sx={{ pointerEvents: 'auto', textTransform: 'none', fontWeight: 700 }}
+                  aria-label="Verkauf öffnen"
+                  sx={{
+                    pointerEvents: 'auto', textTransform: 'none', fontWeight: 700,
+                    // Handy: nur Icon, sonst überdeckt der Button den Seitentitel
+                    minWidth: 0, px: { xs: 1, sm: 2 },
+                    '& .MuiButton-startIcon': { mr: { xs: 0, sm: 1 }, ml: { xs: 0, sm: -0.5 } },
+                  }}
                 >
-                  Verkauf öffnen
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Verkauf öffnen</Box>
                 </Button>
               </Box>
             )}
@@ -339,9 +337,7 @@ const Layout = () => {
             </Menu>
           </Toolbar>
         </AppBar>
-      )}
 
-      {!hideChrome && (
         <Box component="nav" sx={{ width: { lg: location.pathname.startsWith('/sales') ? 0 : drawerWidth }, flexShrink: { lg: 0 } }}>
           <Drawer
             variant="temporary"
@@ -371,17 +367,17 @@ const Layout = () => {
             {drawer}
           </Drawer>
         </Box>
-      )}
 
       {/* Main Content Area: Added display flex column to allow full height children */}
       <Box component="main" sx={{
         flexGrow: 1,
+        minWidth: 0, // sonst treiben Tabs/Tabellen die Min-Content-Breite über den Viewport (Handy)
         display: 'flex',
         flexDirection: 'column',
-        mt: hideChrome ? 0 : 8,
+        mt: 8,
         px: location.pathname.startsWith('/sales') ? 0 : 2,
         pb: 2,
-        width: (!hideChrome && !location.pathname.startsWith('/sales')) ? { lg: `calc(100% - ${drawerWidth}px)` } : '100%',
+        width: !location.pathname.startsWith('/sales') ? { lg: `calc(100% - ${drawerWidth}px)` } : '100%',
         ml: 0
       }}>
         <Outlet />

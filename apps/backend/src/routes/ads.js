@@ -15,4 +15,15 @@ router.put('/reorder', adController.reorderAds); // Specific route before :id
 router.put('/:id', upload.single('image'), adController.updateAd);
 router.delete('/:id', adController.deleteAd);
 
+// Upload-Fehler (zu groß, falscher Typ) als 400 mit verständlicher Meldung statt 500
+router.use((err, req, res, next) => {
+    if (err && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'Datei zu groß (maximal 500 MB)' });
+    }
+    if (err && (err.name === 'MulterError' || /Bilder und Videos/.test(err.message || ''))) {
+        return res.status(400).json({ error: err.message || 'Upload fehlgeschlagen' });
+    }
+    next(err);
+});
+
 module.exports = router;

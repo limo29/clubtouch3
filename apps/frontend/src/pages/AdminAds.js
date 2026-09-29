@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-    Box, Button, Card, CardContent, CardMedia, Container,
-    Dialog, DialogActions, DialogContent, DialogTitle, IconButton,
+    Alert, Box, Button, Card, CardContent, CardMedia, CircularProgress, Container,
+    Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, IconButton,
     Stack, TextField, Typography, MenuItem, Select, FormControl, InputLabel,
-    Grid, Switch, FormControlLabel, Divider, Tooltip
+    Grid, Switch, FormControlLabel, Divider, Tooltip, Snackbar, Chip, useMediaQuery
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
     DndContext,
     closestCenter,
     KeyboardSensor,
     PointerSensor,
+    TouchSensor,
     useSensor,
     useSensors
 } from '@dnd-kit/core';
@@ -28,6 +30,11 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import MovieIcon from '@mui/icons-material/Movie';
+import ImageIcon from '@mui/icons-material/Image';
+import DashboardCustomizeIcon from '@mui/icons-material/DashboardCustomize';
 
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import EditNoteIcon from '@mui/icons-material/EditNote';
@@ -36,10 +43,18 @@ import api from '../services/api';
 import SlideEditor from '../components/admin/SlideEditor';
 import SlideRenderer from '../components/ads/SlideRenderer';
 
+const MAX_UPLOAD_MB = 500;
+const TRANSITIONS = [
+    { value: 'FADE', label: 'Überblenden' },
+    { value: 'SLIDE', label: 'Schieben' },
+    { value: 'ZOOM', label: 'Zoom' },
+    { value: 'NONE', label: 'Hart' },
+];
+
 const isVideo = (url) => {
     if (!url) return false;
-    const ext = url.split('.').pop().toLowerCase();
-    return ['mp4', 'webm', 'ogg', 'mov'].includes(ext);
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    return ['mp4', 'webm', 'ogg', 'mov', 'm4v'].includes(ext);
 };
 
 const safeParse = (data) => {
@@ -53,7 +68,38 @@ const safeParse = (data) => {
     }
 };
 
-const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }) => {
+const apiError = (err, fallback) => err?.response?.data?.error || err?.message || fallback;
+
+const kindOf = (ad) => (ad.slideData ? 'slide' : isVideo(ad.imageUrl) ? 'video' : 'image');
+const KIND_LABEL = { slide: 'Slide', video: 'Video', image: 'Bild' };
+const KIND_ICON = { slide: <DashboardCustomizeIcon fontSize="inherit" />, video: <MovieIcon fontSize="inherit" />, image: <ImageIcon fontSize="inherit" /> };
+
+/** Dauer-Feld: lokal tippen, erst bei Verlassen/Enter speichern (vorher ging pro Tastendruck ein Request raus) */
+const DurationField = ({ value, onCommit, disabled }) => {
+    const [draft, setDraft] = useState(String(value ?? ''));
+    useEffect(() => { setDraft(String(value ?? '')); }, [value]);
+    const commit = () => {
+        const n = Math.round(Number(draft));
+        if (!Number.isFinite(n) || n < 1) { setDraft(String(value ?? '')); return; }
+        if (n !== Number(value)) onCommit(Math.min(3600, n));
+    };
+    return (
+        <TextField
+            label="Dauer (s)"
+            type="number"
+            size="small"
+            value={draft}
+            disabled={disabled}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } }}
+            slotProps={{ htmlInput: { min: 1, max: 3600, step: 1, inputMode: 'numeric' } }}
+            sx={{ width: 110 }}
+        />
+    );
+};
+
+const SortableAdItem = ({ ad, index, count, onUpdate, onDelete, onOpenSlideEditor, onPreview, onMove, busy }) => {
     const {
         attributes,
         listeners,
@@ -70,103 +116,110 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
         zIndex: isDragging ? 100 : 'auto',
         position: 'relative'
     };
+    const kind = kindOf(ad);
 
     return (
-        <Grid item xs={12} sm={6} md={4} ref={setNodeRef} style={style}>
-            <Card variant="elevation" elevation={2} sx={{ position: 'relative', borderRadius: 3, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ position: 'relative', height: 200, bgcolor: '#000' }}>
-                    {isVideo(ad.imageUrl) ? (
+        <Grid size={{ xs: 12, sm: 6, md: 4 }} ref={setNodeRef} style={style}>
+            <Card variant="elevation" elevation={2} sx={{ position: 'relative', borderRadius: 3, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column', opacity: ad.active ? 1 : 0.6 }}>
+                <Box sx={{ position: 'relative', aspectRatio: '16 / 9', bgcolor: '#000' }}>
+                    {kind === 'video' ? (
                         <Box
                             component="video"
                             src={ad.imageUrl}
+                            muted
+                            preload="metadata"
                             sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                            controls
                         />
+                    ) : kind === 'slide' ? (
+                        <Box sx={{ width: '100%', height: '100%', pointerEvents: 'none' }}>
+                            <SlideRenderer slideData={safeParse(ad.slideData)} />
+                        </Box>
                     ) : (
-                        ad.slideData ? (
-                            <Box sx={{ width: '100%', height: '100%', pointerEvents: 'none' }}>
-                                <SlideRenderer slideData={safeParse(ad.slideData)} />
-                            </Box>
-                        ) : (
-                            <CardMedia
-                                component="img"
-                                height="200"
-                                image={ad.imageUrl}
-                                alt="Ad"
-                                sx={{ objectFit: 'contain' }}
-                            />
-                        )
+                        <CardMedia
+                            component="img"
+                            image={ad.imageUrl}
+                            alt=""
+                            sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                        />
                     )}
 
-                    {/* Handle for dragging */}
-                    <Box
-                        {...attributes} {...listeners}
-                        sx={{
-                            position: 'absolute',
-                            top: 8, left: 8,
-                            bgcolor: 'rgba(0,0,0,0.5)',
-                            color: 'white',
-                            borderRadius: 1,
-                            p: 0.5,
-                            cursor: 'grab',
-                            '&:active': { cursor: 'grabbing' }
-                        }}
-                    >
-                        <DragIndicatorIcon />
-                    </Box>
+                    {/* Griff zum Ziehen (Maus/Touch), Reihenfolge = Abspielreihenfolge */}
+                    <Tooltip title="Ziehen zum Sortieren">
+                        <Box
+                            {...attributes} {...listeners}
+                            aria-label="Slide verschieben"
+                            sx={{
+                                position: 'absolute', top: 8, left: 8,
+                                bgcolor: 'rgba(0,0,0,0.55)', color: 'white', borderRadius: 1, p: 0.5,
+                                cursor: 'grab', touchAction: 'none', display: 'flex',
+                                '&:active': { cursor: 'grabbing' }
+                            }}
+                        >
+                            <DragIndicatorIcon />
+                        </Box>
+                    </Tooltip>
+                    <Chip
+                        size="small"
+                        icon={KIND_ICON[kind]}
+                        label={`${index + 1}. ${KIND_LABEL[kind]}`}
+                        sx={{ position: 'absolute', top: 8, right: 8, bgcolor: 'rgba(0,0,0,0.55)', color: 'white', '& .MuiChip-icon': { color: 'white' } }}
+                    />
+                    {!ad.active && (
+                        <Chip size="small" label="Inaktiv" color="warning" sx={{ position: 'absolute', bottom: 8, left: 8 }} />
+                    )}
                 </Box>
-                <CardContent>
-                    <Stack spacing={2}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                            <TextField
-                                label="Dauer (s)"
-                                type="number"
-                                size="small"
-                                value={ad.duration}
-                                onChange={(e) => onUpdate(ad.id, { duration: e.target.value })}
-                                sx={{ width: 100 }}
-                            />
-                            <FormControl size="small" sx={{ minWidth: 120 }}>
+                <CardContent sx={{ pt: 1.5 }}>
+                    <Stack spacing={1.5}>
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                            <DurationField value={ad.duration} disabled={busy} onCommit={(duration) => onUpdate(ad.id, { duration })} />
+                            <FormControl size="small" sx={{ minWidth: 140, flex: 1 }}>
                                 <InputLabel>Übergang</InputLabel>
                                 <Select
                                     value={ad.transition}
                                     label="Übergang"
+                                    disabled={busy}
                                     onChange={(e) => onUpdate(ad.id, { transition: e.target.value })}
                                 >
-                                    <MenuItem value="FADE">Fade</MenuItem>
-                                    <MenuItem value="SLIDE">Slide</MenuItem>
-                                    <MenuItem value="ZOOM">Zoom</MenuItem>
-                                    <MenuItem value="NONE">Kein</MenuItem>
+                                    {TRANSITIONS.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
                                 </Select>
                             </FormControl>
                         </Stack>
 
-                        <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
                             <FormControlLabel
                                 control={
                                     <Switch
-                                        checked={ad.active}
+                                        checked={!!ad.active}
+                                        disabled={busy}
                                         onChange={(e) => onUpdate(ad.id, { active: e.target.checked })}
                                         size="small"
                                     />
                                 }
                                 label={ad.active ? "Aktiv" : "Inaktiv"}
                             />
-                            <Box>
+                            <Stack direction="row" spacing={0}>
+                                <Tooltip title="Nach vorne">
+                                    <span><IconButton size="small" disabled={busy || index === 0} onClick={() => onMove(index, index - 1)} aria-label="nach vorne"><ArrowBackIcon fontSize="small" /></IconButton></span>
+                                </Tooltip>
+                                <Tooltip title="Nach hinten">
+                                    <span><IconButton size="small" disabled={busy || index >= count - 1} onClick={() => onMove(index, index + 1)} aria-label="nach hinten"><ArrowForwardIcon fontSize="small" /></IconButton></span>
+                                </Tooltip>
                                 <Tooltip title="Vorschau">
-                                    <IconButton size="small" onClick={() => onPreview(ad)}>
+                                    <IconButton size="small" onClick={() => onPreview(ad)} aria-label="Vorschau">
                                         <VisibilityIcon />
                                     </IconButton>
                                 </Tooltip>
-                                {ad.slideData && (
+                                {kind === 'slide' && (
                                     <Tooltip title="Slide bearbeiten">
-                                        <IconButton size="small" onClick={() => onOpenSlideEditor(ad)} color="primary">
+                                        <IconButton size="small" onClick={() => onOpenSlideEditor(ad)} color="primary" aria-label="Slide bearbeiten">
                                             <EditNoteIcon />
                                         </IconButton>
                                     </Tooltip>
                                 )}
-                                <IconButton color="error" onClick={() => onDelete(ad.id)}><DeleteIcon /></IconButton>
-                            </Box>
+                                <Tooltip title="Löschen">
+                                    <IconButton size="small" color="error" disabled={busy} onClick={() => onDelete(ad)} aria-label="Löschen"><DeleteIcon /></IconButton>
+                                </Tooltip>
+                            </Stack>
                         </Stack>
                     </Stack>
                 </CardContent>
@@ -176,153 +229,202 @@ const SortableAdItem = ({ ad, onUpdate, onDelete, onOpenSlideEditor, onPreview }
 };
 
 export default function AdminAds() {
+    const theme = useTheme();
+    const isXs = useMediaQuery(theme.breakpoints.down('sm'));
+    const isSmallEditor = useMediaQuery(theme.breakpoints.down('md'));
+
     const [ads, setAds] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [snack, setSnack] = useState(null); // { severity, message }
+
     const [uploadOpen, setUploadOpen] = useState(false);
     const [slideCreatorOpen, setSlideCreatorOpen] = useState(false);
     const [editSlideData, setEditSlideData] = useState(null);
     const [editAdId, setEditAdId] = useState(null);
     const [newImageUrl, setNewImageUrl] = useState('');
     const [newFile, setNewFile] = useState(null);
+    const [newFilePreview, setNewFilePreview] = useState(null);
     const [newDuration, setNewDuration] = useState(10);
     const [newTransition, setNewTransition] = useState('FADE');
+    const [uploadError, setUploadError] = useState('');
+    const [uploading, setUploading] = useState(false);
 
+    const [deleteTarget, setDeleteTarget] = useState(null);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [previewAd, setPreviewAd] = useState(null);
 
     const sensors = useSensors(
-        useSensor(PointerSensor),
-        useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
-        })
+        // Kleine Bewegung nötig, damit ein Tipp auf den Griff nicht schon zieht
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        // Touch: kurz halten, damit Scrollen auf dem Tablet weiter geht
+        useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     );
 
-    const fetchAds = async () => {
+    const notify = (message, severity = 'success') => setSnack({ message, severity });
+
+    const fetchAds = useCallback(async () => {
         try {
             const res = await api.get('/ads');
-            let sorted = res.data || [];
-            // Ideally backend sorts, but we ensure frontend honors it?
-            // Assuming backend returns in 'order'
-            setAds(sorted);
+            setAds(Array.isArray(res.data) ? res.data : []);
+            setLoadError('');
         } catch (err) {
             console.error(err);
+            setLoadError(apiError(err, 'Werbung konnte nicht geladen werden'));
+        } finally {
+            setLoading(false);
         }
-    };
+    }, []);
 
-    useEffect(() => { fetchAds(); }, []);
+    useEffect(() => { fetchAds(); }, [fetchAds]);
+
+    // Objekt-URL für die Vorschau der gewählten Datei sauber anlegen/freigeben
+    useEffect(() => {
+        if (!newFile || !newFile.type.startsWith('image/')) { setNewFilePreview(null); return undefined; }
+        const url = URL.createObjectURL(newFile);
+        setNewFilePreview(url);
+        return () => URL.revokeObjectURL(url);
+    }, [newFile]);
+
+    const resetUpload = () => {
+        setNewImageUrl(''); setNewFile(null); setNewDuration(10); setNewTransition('FADE'); setUploadError('');
+    };
 
     const handleFileSelect = (e) => {
         const file = e.target.files[0];
+        e.target.value = '';
         if (!file) return;
-
+        if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+            setUploadError(`Datei ist ${(file.size / 1024 / 1024).toFixed(0)} MB groß, erlaubt sind maximal ${MAX_UPLOAD_MB} MB.`);
+            return;
+        }
+        if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+            setUploadError('Nur Bilder und Videos sind erlaubt.');
+            return;
+        }
+        setUploadError('');
         setNewFile(file);
         setNewImageUrl('');
 
-        // Auto-detect duration for videos
+        // Dauer bei Videos aus der Datei übernehmen
         if (file.type.startsWith('video/')) {
             const video = document.createElement('video');
             video.preload = 'metadata';
             video.onloadedmetadata = () => {
                 window.URL.revokeObjectURL(video.src);
-                setNewDuration(Math.ceil(video.duration));
+                if (Number.isFinite(video.duration) && video.duration > 0) setNewDuration(Math.ceil(video.duration));
             };
             video.src = URL.createObjectURL(file);
         } else {
-            setNewDuration(10); // Default for images
+            setNewDuration(10);
         }
     };
 
     const handleCreate = async () => {
+        setUploading(true);
+        setUploadError('');
         try {
             const formData = new FormData();
             if (newFile) {
                 formData.append('image', newFile);
             } else if (newImageUrl) {
-                formData.append('imageUrl', newImageUrl);
+                formData.append('imageUrl', newImageUrl.trim());
             }
             formData.append('duration', newDuration);
             formData.append('transition', newTransition);
             formData.append('active', true);
 
-            await api.post('/ads', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
-            });
+            await api.post('/ads', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
             setUploadOpen(false);
-            setNewImageUrl('');
-            setNewFile(null);
+            resetUpload();
+            notify('Werbung hinzugefügt');
             fetchAds();
         } catch (err) {
             console.error(err);
-            alert('Fehler beim Erstellen');
+            setUploadError(apiError(err, 'Fehler beim Hochladen'));
+        } finally {
+            setUploading(false);
         }
     };
 
-    const handleDelete = async (id) => {
-        if (!window.confirm('Wirklich löschen?')) return;
+    const confirmDelete = async () => {
+        if (!deleteTarget) return;
+        setBusy(true);
         try {
-            await api.delete(`/ads/${id}`);
+            await api.delete(`/ads/${deleteTarget.id}`);
+            setDeleteTarget(null);
+            notify('Werbung gelöscht');
             fetchAds();
         } catch (err) {
             console.error(err);
+            notify(apiError(err, 'Löschen fehlgeschlagen'), 'error');
+        } finally {
+            setBusy(false);
         }
     };
 
     const handleUpdate = async (id, data) => {
+        // optimistisch anzeigen, bei Fehler zurückladen
+        setAds((list) => list.map((a) => (a.id === id ? { ...a, ...data } : a)));
         try {
             await api.put(`/ads/${id}`, data);
-            fetchAds();
         } catch (err) {
             console.error(err);
+            notify(apiError(err, 'Änderung konnte nicht gespeichert werden'), 'error');
+            fetchAds();
         }
+    };
+
+    const persistOrder = (newAds) => {
+        setAds(newAds);
+        api.put('/ads/reorder', { orderedIds: newAds.map(a => a.id) })
+            .catch(err => {
+                console.error("Reorder failed", err);
+                notify(apiError(err, 'Reihenfolge konnte nicht gespeichert werden'), 'error');
+                fetchAds();
+            });
     };
 
     const handleDragEnd = (event) => {
         const { active, over } = event;
-        if (active.id !== over.id) {
-            const oldIndex = ads.findIndex(a => a.id === active.id);
-            const newIndex = ads.findIndex(a => a.id === over.id);
+        if (!over || active.id === over.id) return;
+        const oldIndex = ads.findIndex(a => a.id === active.id);
+        const newIndex = ads.findIndex(a => a.id === over.id);
+        if (oldIndex < 0 || newIndex < 0) return;
+        persistOrder(arrayMove(ads, oldIndex, newIndex));
+    };
 
-            const newAds = arrayMove(ads, oldIndex, newIndex);
-            setAds(newAds);
-
-            // Sync with backend
-            api.put('/ads/reorder', { orderedIds: newAds.map(a => a.id) })
-                .catch(err => {
-                    console.error("Reorder failed", err);
-                    fetchAds();
-                });
-        }
+    const handleMove = (from, to) => {
+        if (to < 0 || to >= ads.length) return;
+        persistOrder(arrayMove(ads, from, to));
     };
 
     const handleSlideSave = async (file, slideData) => {
         const formData = new FormData();
         formData.append('image', file);
-        formData.append('duration', 10);
-        formData.append('transition', 'FADE');
-        formData.append('active', true);
+        if (!editAdId) {
+            formData.append('duration', 10);
+            formData.append('transition', 'FADE');
+            formData.append('active', true);
+        }
         if (slideData) formData.append('slideData', slideData);
 
         try {
             if (editAdId) {
-                // Update existing ad
-                await api.put(`/ads/${editAdId}`, formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' }
-                });
+                await api.put(`/ads/${editAdId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
             } else {
-                // Create new ad
-                await api.post('/ads', formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' }
-                });
+                await api.post('/ads', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
             }
-
             setSlideCreatorOpen(false);
             setEditAdId(null);
             setEditSlideData(null);
+            notify(editAdId ? 'Slide gespeichert' : 'Slide erstellt');
             fetchAds();
         } catch (err) {
             console.error("Failed to upload slide", err);
-            alert("Fehler beim Speichern der Slide");
+            notify(apiError(err, 'Fehler beim Speichern der Slide'), 'error');
         }
     };
 
@@ -337,75 +439,97 @@ export default function AdminAds() {
         setSlideCreatorOpen(true);
     };
 
+    const activeCount = ads.filter((a) => a.active).length;
+    const totalSeconds = ads.filter((a) => a.active).reduce((s, a) => s + (Number(a.duration) || 0), 0);
+
     return (
-        <Container maxWidth="lg" sx={{ py: 4 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
+        <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 } }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} sx={{ mb: 3 }}>
                 <Box>
-                    <Typography variant="h4" fontWeight="800" sx={{ background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                        Werbung & Digital Signage
+                    <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: '-0.02em' }}>
+                        Werbung
                     </Typography>
-                    <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
-                        Verwalte die Anzeigen auf den Bildschirmen
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        Bilder, Videos und Slides für den Bildschirm im Clubraum.
+                        {ads.length > 0 && ` ${activeCount} von ${ads.length} aktiv · Durchlauf ca. ${Math.round(totalSeconds)} s.`}
                     </Typography>
                 </Box>
-                <Stack direction="row" spacing={2}>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     <Button
                         variant="outlined"
+                        size={isXs ? 'small' : 'medium'}
                         startIcon={<OpenInNewIcon />}
                         onClick={() => window.open('/public/ads', '_blank')}
                     >
-                        Anzeige öffnen
+                        Display öffnen
                     </Button>
-                    <Button
-                        variant="outlined"
-                        startIcon={<EditNoteIcon />}
-                        onClick={() => openSlideEditor(null)}
-                    >
-                        Slide erstellen
-                    </Button>
+                    <Tooltip title={isSmallEditor ? 'Der Slide-Editor ist für PC oder Tablet im Querformat gedacht' : ''}>
+                        <span>
+                            <Button
+                                variant="outlined"
+                                size={isXs ? 'small' : 'medium'}
+                                startIcon={<EditNoteIcon />}
+                                onClick={() => openSlideEditor(null)}
+                            >
+                                Slide gestalten
+                            </Button>
+                        </span>
+                    </Tooltip>
                     <Button
                         variant="contained"
+                        size={isXs ? 'small' : 'medium'}
                         startIcon={<AddPhotoAlternateIcon />}
-                        onClick={() => setUploadOpen(true)}
-                        sx={{ boxShadow: '0 4px 14px 0 rgba(33, 150, 243, 0.3)' }}
+                        onClick={() => { resetUpload(); setUploadOpen(true); }}
                     >
-                        Neue Datei
+                        Bild/Video hochladen
                     </Button>
                 </Stack>
             </Stack>
 
-            <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
-            >
-                <SortableContext
-                    items={ads.map(val => val.id)}
-                    strategy={rectSortingStrategy}
-                >
-                    <Grid container spacing={3}>
-                        {ads.map((ad) => (
-                            <SortableAdItem
-                                key={ad.id}
-                                ad={ad}
-                                onUpdate={handleUpdate}
-                                onDelete={handleDelete}
-                                onOpenSlideEditor={openSlideEditor}
-                                onPreview={(ad) => {
-                                    setPreviewAd(ad);
-                                    setPreviewOpen(true);
-                                }}
-                            />
-                        ))}
-                    </Grid>
-                </SortableContext>
-            </DndContext>
+            {loadError && <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={fetchAds}>Erneut laden</Button>}>{loadError}</Alert>}
 
-            {/* Create Dialog */}
-            <Dialog open={uploadOpen} onClose={() => setUploadOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>Neue Werbung hinzufügen</DialogTitle>
-                <DialogContent>
-                    <Stack spacing={3} sx={{ mt: 1 }}>
+            {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
+            ) : ads.length === 0 && !loadError ? (
+                <Card variant="outlined" sx={{ borderStyle: 'dashed', borderRadius: 3 }}>
+                    <CardContent sx={{ textAlign: 'center', py: 6 }}>
+                        <UploadFileIcon sx={{ fontSize: 48, color: 'text.secondary' }} />
+                        <Typography variant="h6" sx={{ mt: 1 }}>Noch keine Werbung</Typography>
+                        <Typography color="text.secondary" sx={{ mb: 2 }}>Lade ein Bild oder Video hoch oder gestalte eine Slide mit Logo, Text und Speisekarte.</Typography>
+                        <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
+                            <Button variant="contained" startIcon={<AddPhotoAlternateIcon />} onClick={() => { resetUpload(); setUploadOpen(true); }}>Bild/Video hochladen</Button>
+                            <Button variant="outlined" startIcon={<EditNoteIcon />} onClick={() => openSlideEditor(null)}>Slide gestalten</Button>
+                        </Stack>
+                    </CardContent>
+                </Card>
+            ) : (
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <SortableContext items={ads.map(val => val.id)} strategy={rectSortingStrategy}>
+                        <Grid container spacing={{ xs: 2, md: 3 }}>
+                            {ads.map((ad, index) => (
+                                <SortableAdItem
+                                    key={ad.id}
+                                    ad={ad}
+                                    index={index}
+                                    count={ads.length}
+                                    busy={busy}
+                                    onUpdate={handleUpdate}
+                                    onDelete={setDeleteTarget}
+                                    onMove={handleMove}
+                                    onOpenSlideEditor={openSlideEditor}
+                                    onPreview={(a) => { setPreviewAd(a); setPreviewOpen(true); }}
+                                />
+                            ))}
+                        </Grid>
+                    </SortableContext>
+                </DndContext>
+            )}
+
+            {/* Upload-Dialog */}
+            <Dialog open={uploadOpen} onClose={() => !uploading && setUploadOpen(false)} maxWidth="sm" fullWidth fullScreen={isXs}>
+                <DialogTitle>Bild oder Video hochladen</DialogTitle>
+                <DialogContent dividers>
+                    <Stack spacing={3} sx={{ mt: 0.5 }}>
                         <Box
                             sx={{
                                 border: '2px dashed',
@@ -413,89 +537,82 @@ export default function AdminAds() {
                                 borderRadius: 2,
                                 p: 3,
                                 textAlign: 'center',
-                                bgcolor: newFile ? 'primary.soft' : 'background.paper',
                                 cursor: 'pointer',
                                 '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
                             }}
                             component="label"
                         >
-                            <input
-                                type="file"
-                                hidden
-                                accept="image/*,video/*"
-                                onChange={handleFileSelect}
-                            />
+                            <input type="file" hidden accept="image/*,video/*" onChange={handleFileSelect} />
                             {newFile ? (
                                 <Stack spacing={1} alignItems="center">
-                                    {newFile.type.startsWith('image/') ? (
-                                        <Box
-                                            component="img"
-                                            src={URL.createObjectURL(newFile)}
-                                            sx={{ maxHeight: 150, maxWidth: '100%', objectFit: 'contain', borderRadius: 1 }}
-                                        />
+                                    {newFilePreview ? (
+                                        <Box component="img" src={newFilePreview} alt="" sx={{ maxHeight: 150, maxWidth: '100%', objectFit: 'contain', borderRadius: 1 }} />
                                     ) : (
-                                        <Stack alignItems="center" spacing={1}>
-                                            <PlayCircleOutlineIcon sx={{ fontSize: 48, color: 'text.secondary' }} />
-                                            <Typography variant="body2">{newFile.name}</Typography>
-                                        </Stack>
+                                        <PlayCircleOutlineIcon sx={{ fontSize: 48, color: 'text.secondary' }} />
                                     )}
-                                    <Button size="small" color="error" onClick={(e) => {
-                                        e.preventDefault();
-                                        setNewFile(null);
-                                    }}>Entfernen</Button>
+                                    <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>{newFile.name} · {(newFile.size / 1024 / 1024).toFixed(1)} MB</Typography>
+                                    <Button size="small" color="error" onClick={(e) => { e.preventDefault(); setNewFile(null); }}>Entfernen</Button>
                                 </Stack>
                             ) : (
                                 <Stack spacing={1} alignItems="center">
                                     <UploadFileIcon sx={{ fontSize: 40, color: 'text.secondary' }} />
-                                    <Typography color="text.secondary">
-                                        Klicken um Bild oder Video auszuwählen
-                                    </Typography>
+                                    <Typography color="text.secondary">Tippen, um ein Bild oder Video auszuwählen</Typography>
+                                    <Typography variant="caption" color="text.secondary">Querformat 16:9 passt am besten · maximal {MAX_UPLOAD_MB} MB</Typography>
                                 </Stack>
                             )}
                         </Box>
 
-                        <Divider>ODER</Divider>
+                        <Divider>oder</Divider>
 
                         <TextField
-                            label="Datei URL"
+                            label="Link zu Bild/Video"
                             fullWidth
                             value={newImageUrl}
-                            onChange={(e) => {
-                                setNewImageUrl(e.target.value);
-                                setNewFile(null);
-                            }}
+                            onChange={(e) => { setNewImageUrl(e.target.value); setNewFile(null); }}
                             disabled={!!newFile}
-                            helperText="Direkter Link zum Bild/Video (z.B. Imgur, S3)"
+                            helperText="Direkter Link (https://…), z.B. aus der Vereins-Cloud"
                         />
 
-                        <Stack direction="row" spacing={2}>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                             <TextField
                                 label="Dauer (Sekunden)"
                                 type="number"
                                 value={newDuration}
                                 onChange={(e) => setNewDuration(e.target.value)}
+                                slotProps={{ htmlInput: { min: 1, max: 3600, step: 1, inputMode: 'numeric' } }}
                                 sx={{ flex: 1 }}
-                                helperText={newFile?.type?.startsWith('video/') ? "Automatisch erkannt" : "Standard: 10s"}
+                                helperText={newFile?.type?.startsWith('video/') ? 'Aus dem Video übernommen' : 'Standard: 10 s'}
                             />
                             <FormControl sx={{ flex: 1 }}>
                                 <InputLabel>Übergang</InputLabel>
-                                <Select
-                                    value={newTransition}
-                                    label="Übergang"
-                                    onChange={(e) => setNewTransition(e.target.value)}
-                                >
-                                    <MenuItem value="FADE">Fade</MenuItem>
-                                    <MenuItem value="SLIDE">Slide</MenuItem>
-                                    <MenuItem value="ZOOM">Zoom</MenuItem>
-                                    <MenuItem value="NONE">Kein</MenuItem>
+                                <Select value={newTransition} label="Übergang" onChange={(e) => setNewTransition(e.target.value)}>
+                                    {TRANSITIONS.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
                                 </Select>
                             </FormControl>
                         </Stack>
+
+                        {uploadError && <Alert severity="error">{uploadError}</Alert>}
                     </Stack>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setUploadOpen(false)}>Abbrechen</Button>
-                    <Button variant="contained" onClick={handleCreate} disabled={!newImageUrl && !newFile}>Speichern</Button>
+                    <Button onClick={() => setUploadOpen(false)} disabled={uploading}>Abbrechen</Button>
+                    <Button variant="contained" onClick={handleCreate} disabled={uploading || (!newImageUrl.trim() && !newFile)} startIcon={uploading ? <CircularProgress size={16} color="inherit" /> : null}>
+                        {uploading ? 'Lädt hoch…' : 'Speichern'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Löschen bestätigen */}
+            <Dialog open={!!deleteTarget} onClose={() => !busy && setDeleteTarget(null)} maxWidth="xs" fullWidth>
+                <DialogTitle>Werbung löschen?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        {deleteTarget ? `${KIND_LABEL[kindOf(deleteTarget)]} Nr. ${ads.findIndex((a) => a.id === deleteTarget.id) + 1} wird vom Display entfernt. Die hochgeladene Datei wird mitgelöscht.` : ''}
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setDeleteTarget(null)} disabled={busy}>Abbrechen</Button>
+                    <Button color="error" variant="contained" onClick={confirmDelete} disabled={busy}>Löschen</Button>
                 </DialogActions>
             </Dialog>
 
@@ -507,47 +624,39 @@ export default function AdminAds() {
                 initialData={editSlideData}
             />
 
-            {/* Preview Dialog */}
+            {/* Vorschau */}
             <Dialog
                 open={previewOpen}
                 onClose={() => setPreviewOpen(false)}
                 maxWidth={false}
                 PaperProps={{
                     sx: {
-                        width: '80vw',
-                        height: '80vh',
-                        maxWidth: '1280px',
-                        maxHeight: '720px',
-                        overflow: 'hidden',
-                        bgcolor: 'black'
+                        width: '92vw', aspectRatio: '16 / 9', maxWidth: '1280px', maxHeight: '90vh',
+                        overflow: 'hidden', bgcolor: 'black'
                     }
                 }}
             >
                 {previewAd && (
-                    <Box sx={{ width: '100%', height: '100%' }}>
+                    <Box sx={{ width: '100%', height: '100%' }} onClick={() => setPreviewOpen(false)}>
                         {isVideo(previewAd.imageUrl) ? (
-                            <Box
-                                component="video"
-                                src={previewAd.imageUrl}
-                                sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                                controls
-                                autoPlay
-                            />
+                            <Box component="video" src={previewAd.imageUrl} sx={{ width: '100%', height: '100%', objectFit: 'contain' }} controls autoPlay muted />
+                        ) : previewAd.slideData ? (
+                            <SlideRenderer slideData={safeParse(previewAd.slideData)} />
                         ) : (
-                            previewAd.slideData ? (
-                                <SlideRenderer slideData={safeParse(previewAd.slideData)} />
-                            ) : (
-                                <Box
-                                    component="img"
-                                    src={previewAd.imageUrl}
-                                    sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                                />
-                            )
+                            <Box component="img" src={previewAd.imageUrl} alt="" sx={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                         )}
                     </Box>
                 )}
             </Dialog>
 
-        </Container >
+            <Snackbar
+                open={!!snack}
+                autoHideDuration={4000}
+                onClose={() => setSnack(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+                {snack ? <Alert onClose={() => setSnack(null)} severity={snack.severity} variant="filled" sx={{ width: '100%' }}>{snack.message}</Alert> : null}
+            </Snackbar>
+        </Container>
     );
 }

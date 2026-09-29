@@ -110,7 +110,8 @@ const NavCard = ({ title, icon: Icon, color, to }) => {
           sx={{
             color: isDark ? color[1] : "white",
             textTransform: "uppercase",
-            fontSize: { xs: "0.80rem", md: "0.9rem" },
+            // lange Titel (Kundenrechnungen, Kassenprüfung) brechen am weichen Trennstrich um statt abgeschnitten zu werden
+            fontSize: title.length > 10 ? { xs: "0.66rem", md: "0.74rem" } : { xs: "0.80rem", md: "0.9rem" },
             letterSpacing: "0.5px",
             lineHeight: 1.2,
             textShadow: isDark ? "none" : "0 2px 4px rgba(0,0,0,0.2)",
@@ -235,10 +236,10 @@ export default function Dashboard() {
           {[
             { title: 'Verkauf', icon: LocalBar, color: ['#FFC107', '#FF9800'], to: '/sales' },
             { title: 'Einkauf', icon: ShoppingCart, color: ['#66BB6A', '#43A047'], to: '/purchases' },
-            { title: 'Rechnungen', icon: ReceiptLong, color: ['#42A5F5', '#1E88E5'], to: '/invoices' },
+            { title: 'Kunden\u00ADrechnungen', icon: ReceiptLong, color: ['#42A5F5', '#1E88E5'], to: '/invoices' },
             { title: 'Bestände', icon: Inventory, color: ['#26C6DA', '#00ACC1'], to: '/articles' },
             { title: 'Statistik', icon: Assessment, color: ['#AB47BC', '#8E24AA'], to: '/reports' },
-            { title: 'Abrechnung', icon: AccountBalance, color: ['#EF5350', '#E53935'], to: '/profit-loss' },
+            { title: 'Kassen\u00ADprüfung', icon: AccountBalance, color: ['#EF5350', '#E53935'], to: '/profit-loss' },
             { title: 'Clubscore', icon: EmojiEvents, color: ['#29B6F6', '#039BE5'], to: '/highscore' },
             { title: 'Werbung', icon: Campaign, color: ['#EC407A', '#D81B60'], to: '/ads' },
           ].map((item) => (
@@ -252,7 +253,7 @@ export default function Dashboard() {
         Übersicht
       </Typography>
       <Grid container spacing={3} sx={{ mb: 5 }} alignItems="stretch">
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Umsatz Heute"
             value={money(sum.totalRevenue)}
@@ -263,9 +264,9 @@ export default function Dashboard() {
             sx={{ height: "100%" }}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
-            title="Offene Rechnungen"
+            title="Offene Kundenrechnungen"
             value={openInvoicesCount}
             icon={ShoppingBasket}
             color={openInvoicesCount > 0 ? "warning" : "success"}
@@ -274,7 +275,7 @@ export default function Dashboard() {
             sx={{ height: "100%" }}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Lagerbestand"
             value={lowStockCount}
@@ -285,7 +286,7 @@ export default function Dashboard() {
             sx={{ height: "100%" }}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card
             elevation={0}
             sx={{
@@ -327,7 +328,7 @@ export default function Dashboard() {
       <Grid container spacing={3}>
 
         {/* LEFT: Warnings & Ranking */}
-        <Grid item xs={12} lg={4}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <Stack spacing={3}>
             {/* Warnings */}
             {(lowStockCount > 0 || lowBalanceCount > 0) ? (
@@ -391,7 +392,7 @@ export default function Dashboard() {
         </Grid>
 
         {/* MIDDLE: Top Articles */}
-        <Grid item xs={12} md={6} lg={4}>
+        <Grid size={{ xs: 12, md: 6, lg: 4 }}>
           <Paper elevation={0} sx={{ borderRadius: 4, border: `1px solid ${theme.palette.divider}`, height: "100%", overflow: "hidden" }}>
             <Box sx={{ p: 2.5, bgcolor: "background.default", borderBottom: `1px solid ${theme.palette.divider}` }}>
               <Typography variant="h6" fontWeight={800}>Bestseller</Typography>
@@ -413,7 +414,7 @@ export default function Dashboard() {
         </Grid>
 
         {/* RIGHT: Live Feed & Distribution */}
-        <Grid item xs={12} md={6} lg={4}>
+        <Grid size={{ xs: 12, md: 6, lg: 4 }}>
           <Stack spacing={3}>
 
             {/* Live Feed */}

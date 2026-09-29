@@ -49,6 +49,18 @@ router.post('/:id/mark-unpaid',
   purchaseDocumentController.markAsUnpaid
 );
 
+// Belegliste mit Nachweis-Info (GET /api/purchase-documents/receipts?startDate&endDate)
+// und ZIP-Export (GET /api/purchase-documents/receipts.zip?startDate&endDate)
+// MÜSSEN vor /:id stehen, damit Express nicht "receipts" als ID matcht
+router.get('/receipts',
+  authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
+  purchaseDocumentController.receipts
+);
+router.get('/receipts.zip',
+  authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
+  purchaseDocumentController.receiptsZip
+);
+
 // Einzelner Beleg (GET /api/purchase-documents/:id)
 // Diese Route MUSS nach /suppliers stehen
 router.get('/:id',

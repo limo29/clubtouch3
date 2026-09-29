@@ -1,4 +1,7 @@
 const purchaseDocumentService = require('../services/purchaseDocumentService');
+const { toPublicUrl } = require('../utils/uploadsDir');
+const receiptService = require('../services/receiptService');
+const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 const prisma = require('../utils/prisma');
 
 class PurchaseDocumentController {
@@ -11,11 +14,8 @@ class PurchaseDocumentController {
       // Datei-Upload verarbeiten
       let nachweisUrl = null;
       if (req.file) {
-        // req.file.path ist der volle Pfad, wir wollen den relativen
-        // z.B. /uploads/nachweise/xyz.pdf
-        nachweisUrl = req.file.path.replace(process.cwd(), '');
-        // Ggf. Backslashes ersetzen auf Windows
-        nachweisUrl = nachweisUrl.replace(/\\/g, '/');
+        // voller Pfad → öffentliche URL /uploads/nachweise/xyz.pdf (Upload-Ordner ist konfigurierbar)
+        nachweisUrl = toPublicUrl(req.file.path);
       }
 
       // 'items' wird als JSON-String übermittelt, wenn multipart/form-data verwendet wird
@@ -83,7 +83,8 @@ class PurchaseDocumentController {
         startDate: req.query.startDate,
         endDate: req.query.endDate,
         paid: req.query.paid,
-        search: req.query.search
+        search: req.query.search,
+        supplier: req.query.supplier
       };
 
       const documents = await purchaseDocumentService.listDocuments(filters);
@@ -234,7 +235,7 @@ class PurchaseDocumentController {
 
       let nachweisUrl = undefined;
       if (req.file) {
-        nachweisUrl = req.file.path.replace(process.cwd(), '').replace(/\\/g, '/');
+        nachweisUrl = toPublicUrl(req.file.path);
       }
       // HINWEIS: Wenn der User 'nachweisUrl' auf 'null' setzt (Datei löschen),
       // müssen wir das im Frontend separat senden. Aktuell wird nur 'undefined' (nicht ändern)
@@ -283,6 +284,56 @@ class PurchaseDocumentController {
     }
   }
 
+
+  // GET /receipts?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  async receipts(req, res) {
+    try {
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'startDate und endDate (YYYY-MM-DD) sind erforderlich.' });
+      }
+      const start = parseLocalDate(startDate);
+      const end   = endOfLocalDay(endDate);
+      if (!start || !end) {
+        return res.status(400).json({ error: 'Ungültiges Datumsformat – erwartet YYYY-MM-DD.' });
+      }
+      const result = await receiptService.listReceipts(start, end);
+      res.json(result);
+    } catch (e) {
+      console.error('receipts error', e);
+      res.status(500).json({ error: 'Fehler beim Laden der Belege.' });
+    }
+  }
+
+  // GET /receipts.zip?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  async receiptsZip(req, res) {
+    try {
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'startDate und endDate (YYYY-MM-DD) sind erforderlich.' });
+      }
+      const start = parseLocalDate(startDate);
+      const end   = endOfLocalDay(endDate);
+      if (!start || !end) {
+        return res.status(400).json({ error: 'Ungültiges Datumsformat – erwartet YYYY-MM-DD.' });
+      }
+      const { stream, filename } = await receiptService.buildReceiptZip(start, end, {
+        name: 'Zeitraum',
+        createdBy: req.user ? req.user.name : ''
+      });
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      stream.on('error', (err) => {
+        console.error('ZIP-Stream-Fehler', err);
+        if (!res.headersSent) res.status(500).json({ error: 'ZIP-Fehler' });
+        else res.end();
+      });
+      stream.pipe(res);
+    } catch (e) {
+      console.error('receiptsZip error', e);
+      res.status(500).json({ error: 'Fehler beim Erstellen des ZIP.' });
+    }
+  }
 
   // TODO:
   // async updateDocument(req, res) { ... }

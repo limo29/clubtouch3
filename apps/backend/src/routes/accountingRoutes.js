@@ -7,14 +7,22 @@ router.use(authenticate);
 
 router.get('/profit-loss', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.profitLoss);
 
+// Bank-Abstimmung (Soll aus Vorjahresabschluss + Überweisungsbewegungen)
+router.get('/bank-reconciliation', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.bankReconciliation);
+
 router.get('/fiscal-years', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.listFiscalYears);
 router.post('/fiscal-years', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.createFiscalYear);
 
 router.get('/fiscal-years/:id/preview', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.fiscalYearPreview);
 router.post('/fiscal-years/:id/close', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.closeFiscalYear);
 
+router.get('/fiscal-years/:id/bank-reconciliation', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.fiscalYearBankReconciliation);
+
 // PDF Abschlussbericht
 router.get('/fiscal-years/:id/report', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.yearEndReportPDF);
 
+// Belegliste + ZIP für ein Geschäftsjahr (Kassenprüfer-Export)
+router.get('/fiscal-years/:id/receipts', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.fiscalYearReceipts);
+router.get('/fiscal-years/:id/receipts.zip', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.fiscalYearReceiptsZip);
 
 module.exports = router;

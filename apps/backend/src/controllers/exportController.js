@@ -1,5 +1,6 @@
 const exportService = require('../services/exportService');
 const prisma = require('../utils/prisma');
+const { BUSINESS_DAY_START_HOUR, parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 
 class ExportController {
   // Export Transaktionen als CSV
@@ -30,9 +31,6 @@ class ExportController {
       res.send(result.data);
     } catch (error) {
       console.error('Export transactions error:', error);
-      try {
-        require('fs').writeFileSync('error_debug.txt', error.stack || String(error));
-      } catch (fsErr) { console.error('Log write failed', fsErr); }
       res.status(500).json({ error: 'Fehler beim Export der Transaktionen', details: error.message });
     }
   }
@@ -88,9 +86,11 @@ class ExportController {
   // Export Tagesabschluss als PDF
   async exportDailySummary(req, res) {
     try {
-      const date = req.query.date ? new Date(req.query.date) : new Date();
-      const startHour = req.query.startHour ? parseInt(req.query.startHour) : 6;
-      const result = await exportService.exportDailySummaryPDF(date, startHour);
+      // 'YYYY-MM-DD' unverändert durchreichen: businessDayWindow behandelt ein
+      // reines Datum als "dieser Geschäftstag" (ohne Vortag-Verschiebung).
+      const date = req.query.date || new Date();
+      const startHour = req.query.startHour ? parseInt(req.query.startHour) : BUSINESS_DAY_START_HOUR;
+      const result = await exportService.exportDailySummaryPDF(date, startHour, { createdBy: req.user.name });
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -99,7 +99,7 @@ class ExportController {
           action: 'EXPORT_DAILY_SUMMARY',
           entityType: 'Export',
           entityId: 'daily-summary',
-          changes: { date: date.toISOString(), startHour }
+          changes: { date: typeof date === 'string' ? date : date.toISOString(), startHour }
         }
       });
 
@@ -115,8 +115,8 @@ class ExportController {
   // Vorschau Tagesabschluss (JSON)
   async getDailySummaryPreview(req, res) {
     try {
-      const date = req.query.date ? new Date(req.query.date) : new Date();
-      const startHour = req.query.startHour ? parseInt(req.query.startHour) : 6;
+      const date = req.query.date || new Date();
+      const startHour = req.query.startHour ? parseInt(req.query.startHour) : BUSINESS_DAY_START_HOUR;
 
       const transactionService = require('../services/transactionService');
       const data = await transactionService.getDailySummary(date, startHour);
@@ -139,7 +139,8 @@ class ExportController {
 
       const result = await exportService.exportMonthlySummaryPDF(
         parseInt(year),
-        parseInt(month)
+        parseInt(month),
+        { createdBy: req.user.name }
       );
 
       // Audit-Log
@@ -168,11 +169,13 @@ class ExportController {
       const { customerId } = req.params;
       const { startDate, endDate } = req.query;
 
-      // Default: Letzter Monat
-      const end = endDate ? new Date(endDate) : new Date();
-      const start = startDate ? new Date(startDate) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+      // Default: letzte 30 Tage bis jetzt. "Bis"-Tag inklusive.
+      const end = endDate ? endOfLocalDay(endDate) : new Date();
+      const start = startDate
+        ? parseLocalDate(startDate)
+        : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      const result = await exportService.exportCustomerStatementPDF(customerId, start, end);
+      const result = await exportService.exportCustomerStatementPDF(customerId, start, end, { createdBy: req.user.name });
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -237,6 +240,13 @@ class ExportController {
           parameters: ['year', 'month']
         },
         {
+          id: 'eur',
+          name: 'Einnahmen-Überschuss-Rechnung',
+          description: 'EÜR mit Belegen, Eigenverbrauch und offenen Posten als PDF',
+          format: 'PDF',
+          parameters: ['startDate', 'endDate']
+        },
+        {
           id: 'customer-statement',
           name: 'Kontoauszug',
           description: 'Kontobewegungen eines Kunden als PDF',
@@ -253,20 +263,14 @@ class ExportController {
   }
   async exportEUR(req, res) {
     try {
-      try { require('fs').appendFileSync('C:/Users/elias/.gemini/antigravity/brain/af9754be-7cfa-46f3-9ee9-9accd4ec3d7a/backend_error.log', '\n[DEBUG] exportEUR hit\n'); } catch (e) { }
       const { startDate, endDate } = req.query;
       if (!startDate || !endDate) return res.status(400).json({ error: 'startDate und endDate erforderlich' });
-      const result = await exportService.exportEURPDF(startDate, endDate);
+      const result = await exportService.exportEURPDF(startDate, endDate, { createdBy: req.user.name });
       res.setHeader('Content-Type', result.mimeType);
       res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
       res.send(result.data);
     } catch (e) {
       console.error('Export EUR error', e);
-      try {
-        const fs = require('fs');
-        const path = 'C:/Users/elias/.gemini/antigravity/brain/af9754be-7cfa-46f3-9ee9-9accd4ec3d7a/backend_error.log';
-        fs.appendFileSync(path, `\n[${new Date().toISOString()}] Export EUR Error:\n${e.stack || e}\n`);
-      } catch (logErr) { console.error(logErr); }
       res.status(500).json({ error: 'Fehler beim EÜR-Export', details: e.message });
     }
   }

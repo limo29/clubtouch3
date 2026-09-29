@@ -90,10 +90,37 @@ class InvoiceService {
 
   async getInvoice(id) { return prisma.invoice.findUnique({ where: { id }, include: { items: { include: { article: true } }, customer: true, user: { select: { name: true } }, transactions: true } }); }
 
-  async updateInvoiceStatus(id, status, userId) {
-    const data = { status }; if (status === 'PAID') data.paidAt = new Date();
+  /**
+   * Statuswechsel. Bei PAID ist die Zahlungsart Pflicht (CASH = Bargeld in die Kasse,
+   * TRANSFER = Bankeingang); paidAt optional (Vorgabe jetzt). Jeder andere Status
+   * löscht paidAt und paymentMethod wieder. Altbestand ohne Zahlungsart (null) gilt
+   * in Kassen-Soll und Bank-Abstimmung weiterhin als Bank.
+   */
+  async updateInvoiceStatus(id, status, userId, { paymentMethod, paidAt } = {}) {
+    const data = { status };
+    if (status === 'PAID') {
+      if (!['CASH', 'TRANSFER'].includes(paymentMethod)) {
+        const err = new Error('Zahlungsart fehlt: bar (CASH) oder Überweisung (TRANSFER)');
+        err.statusCode = 400; throw err;
+      }
+      const when = paidAt ? new Date(paidAt) : new Date();
+      if (Number.isNaN(when.getTime()) || when.getTime() > Date.now() + 60 * 1000) {
+        const err = new Error('Zahldatum ist ungültig oder liegt in der Zukunft');
+        err.statusCode = 400; throw err;
+      }
+      data.paidAt = when;
+      data.paymentMethod = paymentMethod;
+    } else {
+      data.paidAt = null;
+      data.paymentMethod = null;
+    }
     const inv = await prisma.invoice.update({ where: { id }, data });
-    await prisma.auditLog.create({ data: { userId, action: `UPDATE_INVOICE_STATUS_${status}`, entityType: 'Invoice', entityId: id } });
+    await prisma.auditLog.create({
+      data: {
+        userId, action: `UPDATE_INVOICE_STATUS_${status}`, entityType: 'Invoice', entityId: id,
+        changes: status === 'PAID' ? { paymentMethod: data.paymentMethod, paidAt: data.paidAt } : undefined
+      }
+    });
     return inv;
   }
 

@@ -1,4 +1,15 @@
 const prisma = require('../utils/prisma');
+const {
+  BUSINESS_DAY_START_HOUR,
+  businessDayWindow,
+  parseLocalDate,
+  endOfLocalDay,
+  formatLocalDate,
+} = require('../utils/businessDay');
+
+// Prisma speichert DateTime als "timestamp without time zone" in UTC. Stundenwerte für
+// Berichte müssen in lokaler Zeit gruppiert werden, sonst steht im Tagesabschluss 17:00 statt 19:00.
+const LOCAL_TZ = process.env.REPORT_TIMEZONE || 'Europe/Berlin';
 
 class TransactionService {
   async createSale(data, userId) {
@@ -256,6 +267,9 @@ class TransactionService {
       };
     });
 
+
+    // Clubscore: ein Storno kann ein Ranking verändern → Boards neu berechnen und pushen
+    require('./highscoreService').refreshBoards();
     return result;
   }
 
@@ -267,8 +281,8 @@ class TransactionService {
 
     if (startDate || endDate) {
       where.createdAt = {};
-      if (startDate) where.createdAt.gte = new Date(startDate);
-      if (endDate) where.createdAt.lte = new Date(endDate);
+      if (startDate) where.createdAt.gte = parseLocalDate(startDate);
+      if (endDate) where.createdAt.lte = endOfLocalDay(endDate); // "Bis"-Tag inklusive
     }
 
     if (customerId) where.customerId = customerId;
@@ -331,20 +345,10 @@ class TransactionService {
   }
 
   // Tagesabschluss
-  async getDailySummary(date = new Date(), startHour = 6) {
-    const requestDate = new Date(date);
-    // Wenn die angefragte Zeit vor dem Tagesbeginn liegt (z.B. 1 Uhr nachts, Start 6 Uhr),
-    // dann gehört das noch zum "Geschäftstag" von gestern.
-    if (requestDate.getHours() < startHour) {
-      requestDate.setDate(requestDate.getDate() - 1);
-    }
-
-    const startOfDay = new Date(requestDate);
-    startOfDay.setHours(startHour, 0, 0, 0);
-
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
-    endOfDay.setTime(endOfDay.getTime() - 1); // 1ms vor dem nächsten Start
+  // Geschäftstag-Fenster (Standard 06:00 -> 06:00) kommt zentral aus utils/businessDay.
+  // `date` darf ein Date oder 'YYYY-MM-DD' (lokal interpretiert) sein.
+  async getDailySummary(date = new Date(), startHour = BUSINESS_DAY_START_HOUR) {
+    const { start: startOfDay, end: endOfDay, businessDate } = businessDayWindow(date, startHour);
 
     const [
       totalSales,
@@ -431,8 +435,8 @@ class TransactionService {
       FROM "TransactionItem" ti
       JOIN "Transaction" t ON ti."transactionId" = t.id
       JOIN "Article" a ON ti."articleId" = a.id
-      WHERE t."createdAt" >= ${startOfDay}
-        AND t."createdAt" <= ${endOfDay}
+      WHERE t."createdAt" >= (${startOfDay}::timestamptz AT TIME ZONE 'UTC')
+        AND t."createdAt" <= (${endOfDay}::timestamptz AT TIME ZONE 'UTC')
         AND t.cancelled = false
         AND t.type = 'SALE'
       GROUP BY a.id, a.name, a.category
@@ -442,33 +446,62 @@ class TransactionService {
 
       // Umsatzverteilung nach Stunden
       prisma.$queryRaw`
-      SELECT 
-        EXTRACT(HOUR FROM "createdAt") as hour,
-        COUNT(*) as transactions,
-        SUM("totalAmount") as revenue
-      FROM "Transaction"
-      WHERE "createdAt" >= ${startOfDay}
-        AND "createdAt" <= ${endOfDay}
-        AND cancelled = false
-        AND type = 'SALE'
-      GROUP BY hour
-      ORDER BY 
-        CASE 
-          WHEN EXTRACT(HOUR FROM "createdAt") < ${startHour} THEN EXTRACT(HOUR FROM "createdAt") + 24 
-          ELSE EXTRACT(HOUR FROM "createdAt") 
-        END
+      SELECT hour, transactions, revenue FROM (
+        SELECT 
+          EXTRACT(HOUR FROM (("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${LOCAL_TZ})) as hour,
+          COUNT(*) as transactions,
+          SUM("totalAmount") as revenue
+        FROM "Transaction"
+        WHERE "createdAt" >= (${startOfDay}::timestamptz AT TIME ZONE 'UTC')
+          AND "createdAt" <= (${endOfDay}::timestamptz AT TIME ZONE 'UTC')
+          AND cancelled = false
+          AND type = 'SALE'
+        GROUP BY 1
+      ) h
+      ORDER BY CASE WHEN hour < ${startHour} THEN hour + 24 ELSE hour END
     `
     ]);
 
     function safeNumber(value) {
       if (value === null || value === undefined) return 0;
       if (typeof value === 'bigint') return Number(value);
-      return value;
+      return Number(value);
     }
 
+    // Aufladungen, Stornos und die Transaktionsliste des Tages (für Tagesabschluss-PDF)
+    const [topUps, refunds, dayTransactions] = await Promise.all([
+      prisma.accountTopUp.findMany({
+        where: { createdAt: { gte: startOfDay, lte: endOfDay } },
+        include: { customer: { select: { name: true, nickname: true } } },
+        orderBy: { createdAt: 'asc' }
+      }),
+      prisma.transaction.findMany({
+        where: { type: 'REFUND', createdAt: { gte: startOfDay, lte: endOfDay } },
+        include: {
+          user: { select: { name: true } },
+          customer: { select: { name: true } },
+          originalTransaction: { select: { id: true, createdAt: true, totalAmount: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+      }),
+      prisma.transaction.findMany({
+        where: { type: { in: ['SALE', 'REFUND'] }, createdAt: { gte: startOfDay, lte: endOfDay } },
+        include: {
+          user: { select: { name: true } },
+          customer: { select: { name: true } },
+          items: { select: { quantity: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+      })
+    ]);
+
+    const topUpsCash = topUps.filter(t => t.method === 'CASH').reduce((a, t) => a + safeNumber(t.amount), 0);
+    const topUpsTransfer = topUps.filter(t => t.method === 'TRANSFER').reduce((a, t) => a + safeNumber(t.amount), 0);
+
     return {
-      date: date.toISOString().split('T')[0],
+      date: formatLocalDate(businessDate),
       startHour,
+      window: { start: startOfDay, end: endOfDay },
       summary: {
         totalRevenue: safeNumber(totalSales._sum.totalAmount),
         totalTransactions: totalSales._count || 0,
@@ -477,10 +510,32 @@ class TransactionService {
         accountRevenue: safeNumber(accountSales._sum.totalAmount),
         accountTransactions: accountSales._count || 0,
         cancelledRevenue: safeNumber(cancelledSales._sum.totalAmount),
-        cancelledTransactions: cancelledSales._count || 0
+        cancelledTransactions: cancelledSales._count || 0,
+        topUpsCash,
+        topUpsTransfer,
+        topUpsTotal: topUpsCash + topUpsTransfer,
+        topUpsCount: topUps.length
       },
       topArticles: topArticles.map(a => ({ ...a, quantity_sold: safeNumber(a.quantity_sold), revenue: safeNumber(a.revenue) })),
-      hourlyDistribution: hourlyDistribution.map(h => ({ hour: h.hour, transactions: safeNumber(h.transactions), revenue: safeNumber(h.revenue) }))
+      hourlyDistribution: hourlyDistribution.map(h => ({ hour: safeNumber(h.hour), transactions: safeNumber(h.transactions), revenue: safeNumber(h.revenue) })),
+      topUps: topUps.map(t => ({
+        id: t.id, createdAt: t.createdAt, method: t.method, amount: safeNumber(t.amount),
+        reference: t.reference || null,
+        customer: t.customer ? (t.customer.nickname ? `${t.customer.name} (${t.customer.nickname})` : t.customer.name) : '—'
+      })),
+      cancellations: refunds.map(r => ({
+        id: r.id, createdAt: r.createdAt, paymentMethod: r.paymentMethod, amount: safeNumber(r.totalAmount),
+        cashier: r.user ? r.user.name : '—', customer: r.customer ? r.customer.name : null,
+        originalTransactionId: r.originalTransactionId,
+        originalCreatedAt: r.originalTransaction ? r.originalTransaction.createdAt : null
+      })),
+      transactions: dayTransactions.map(t => ({
+        id: t.id, createdAt: t.createdAt, type: t.type, paymentMethod: t.paymentMethod,
+        amount: safeNumber(t.totalAmount), cancelled: t.cancelled,
+        itemCount: t.items.reduce((a, i) => a + Number(i.quantity || 0), 0),
+        customer: t.customer ? t.customer.name : null,
+        cashier: t.user ? t.user.name : '—'
+      }))
     };
   }
 

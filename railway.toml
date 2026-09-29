@@ -17,6 +17,20 @@ dockerfile = "Dockerfile"
 PORT = "8080"
 NODE_ENV = "production"
 
+# --- Uploads (Artikelbilder, Belegnachweise, Werbung) ---
+# Der Container hat kein dauerhaftes Dateisystem: ohne Volume sind alle Uploads nach jedem
+# Deploy oder Neustart weg. Railway-Volumes lassen sich nicht in dieser Datei anlegen,
+# sondern einmalig im Dashboard oder per CLI:
+#
+#   railway volume add --service backend --mount-path /app/uploads
+#   (Dashboard: Projekt-Canvas -> Rechtsklick -> "Volume" -> Service "backend", Mount Path /app/uploads)
+#
+# Railway setzt dann RAILWAY_VOLUME_MOUNT_PATH, das der Backend-Code automatisch als Upload-Ordner
+# nutzt (apps/backend/src/utils/uploadsDir.js). Ein anderer Pfad braucht keine Code-Aenderung.
+# Alternativ laesst sich der Ordner explizit mit UPLOADS_DIR setzen.
+# Das Image laeuft als root, daher ist RAILWAY_RUN_UID nicht noetig; bei Wechsel auf USER nodejs
+# im Dockerfile zusaetzlich RAILWAY_RUN_UID=0 setzen (Railway-Doku zu Volumes).
+
 # --- Frontend Service ---
 [[services]]
 name = "frontend"

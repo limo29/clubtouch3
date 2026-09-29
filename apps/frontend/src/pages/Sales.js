@@ -1,26 +1,29 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
-  Box, Grid, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
-  Avatar, Stack, IconButton, List, ListItem, Button, Dialog, DialogTitle,
+  Box, Grid, Card, CardContent, TextField, InputAdornment, Typography,
+  Avatar, Stack, IconButton, List, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, Chip, useMediaQuery, Divider, Collapse,
   Snackbar, Alert
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
-  Search, ShoppingCart, AttachMoney,
-  History, AccountBalanceWallet, LocalBar, Remove, DeleteOutline, Add,
+  Search, AttachMoney,
+  History, AccountBalanceWallet, LocalBar,
   Close, TrendingUp, TrendingDown, RestoreFromTrash
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import { useOffline } from '../context/OfflineContext';
+import { ARTICLES_QUERY_KEY } from '../hooks/useArticles';
+import { useArticleLines, toSalePayload } from '../hooks/useArticleLines';
+import ArticleLinePicker from '../components/articles/ArticleLinePicker';
+import { isCurrentBusinessDay } from '../utils/businessDay';
+import { num, money } from '../utils/format';
 
 /* Helpers */
-const num = (v) => { if (v === null || v === undefined) return 0; if (typeof v === 'number') return v; const x = parseFloat(String(v).replace(',', '.')); return Number.isNaN(x) ? 0 : x; };
-const money = (v) => `€${num(v).toFixed(2)}`;
 const withinHours = (date, h) => { const d = new Date(date); if (Number.isNaN(d.getTime())) return false; return Date.now() - d.getTime() <= h * 60 * 60 * 1000; };
-const isToday = (d) => { const date = new Date(d); const today = new Date(); return date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear(); };
+const timeLabel = (d) => { const date = new Date(d); return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); };
 
 /* Change Calculator */
 function ChangeCalculator({ total, open, onClose, autoHideMs = 20000 }) {
@@ -40,7 +43,7 @@ function ChangeCalculator({ total, open, onClose, autoHideMs = 20000 }) {
     return () => clearTimeout(timerRef.current);
   }, [open, lastTs, autoHideMs, onClose]);
   const poke = () => setLastTs(Date.now());
-  const quicks = [5, 10, 20, 50, 100].map(v => ({ val: v, label: `€${v}` }));
+  const quicks = [5, 10, 20, 50, 100].map(v => ({ val: v, label: `${v} €` }));
   return (
     <Collapse in={open}>
       <Box sx={{ mt: 1.5, p: 1.5, border: '1px dashed', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.default' }} onMouseMove={poke} onKeyDown={poke}>
@@ -74,9 +77,8 @@ const Sales = () => {
   const [showOwnerConfirm, setShowOwnerConfirm] = useState(false);
 
   const [customerSearch, setCustomerSearch] = useState('');
-  const [articleSearch, setArticleSearch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [cart, setCart] = useState([]);
+  // Warenkorb im gemeinsamen Zeilenmodell; der Verkauf setzt nie Kisten (crateQty bleibt 0)
+  const { lines, setLines, clear: clearCart, totalAmount: total } = useArticleLines([]);
   const [showTopUp, setShowTopUp] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState('');
   const [topUpMethod, setTopUpMethod] = useState('CASH');
@@ -99,11 +101,6 @@ const Sales = () => {
     }
   });
 
-  const { data: articlesRaw } = useQuery({
-    queryKey: ['articles', 'sales'],
-    queryFn: async () => (await api.get(API_ENDPOINTS.ARTICLES)).data
-  });
-
   // Keep target selection in sync if customer updates (e.g. balance change)
   useEffect(() => {
     if (bookingTarget.type === 'CUSTOMER' && bookingTarget.data?.id && customersData?.customers) {
@@ -111,13 +108,6 @@ const Sales = () => {
       if (updated) setBookingTarget(prev => ({ ...prev, data: updated }));
     }
   }, [customersData, bookingTarget.data?.id, bookingTarget.type]);
-
-  const articles = useMemo(() => {
-    const raw = Array.isArray(articlesRaw) ? articlesRaw : (articlesRaw?.articles ?? []);
-    return (raw || [])
-      .filter(a => a?.active)
-      .map(a => ({ ...a, price: num(a.price), unit: a.unit || 'Stück', stock: num(a.stock), minStock: num(a.minStock) }));
-  }, [articlesRaw]);
 
   // History Query
   const { data: historyData, refetch: refetchHistory, isFetching: historyLoading } = useQuery({
@@ -132,37 +122,37 @@ const Sales = () => {
   /* Mutations */
   const cancelTransactionMutation = useMutation({
     mutationFn: async (id) => api.post(`/transactions/${id}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); refetchHistory(); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
   });
 
   const cancelTopUpMutation = useMutation({
     mutationFn: async (topUpId) => api.post(`/customers/${historyCustomer.id}/topup/${topUpId}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); refetchHistory(); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
   });
 
   const topUpMutation = useMutation({
     mutationFn: async (data) => api.post(`/customers/${data.customerId}/topup`, { amount: num(data.amount), method: data.method, reference: data.reference }),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); setShowTopUp(false); setTopUpAmount(''); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); setShowTopUp(false); setTopUpAmount(''); }
   });
 
   const quickSaleMutation = useMutation({
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
-    onSuccess: () => { queryClient.invalidateQueries(['customers-sales']); queryClient.invalidateQueries(['articles', 'sales']); setCart([]); setShowChangeCalc(false); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); queryClient.invalidateQueries({ queryKey: ARTICLES_QUERY_KEY }); clearCart(); setShowChangeCalc(false); }
   });
 
   /* Logic & Actions */
   const { isOnline, addTransaction } = useOffline();
 
   const handleBooking = () => {
-    if (!cart.length) return;
-    const items = cart.map(i => ({ articleId: i.id, quantity: i.quantity }));
+    if (!lines.length) return;
+    // Backend-Vertrag unverändert: [{ articleId, quantity }]
+    const items = toSalePayload(lines);
 
-    // Offline Handling
     // Offline Handling
     if (!isOnline) {
       if (bookingTarget.type === 'CASH') {
         addTransaction({ paymentMethod: 'CASH', items });
-        setCart([]);
+        clearCart();
         showFeedback('Offline: Buchung wurde gespeichert', 'info');
       } else if (bookingTarget.type === 'CUSTOMER' && bookingTarget.data) {
         addTransaction({ paymentMethod: 'ACCOUNT', customerId: bookingTarget.data.id, items });
@@ -180,11 +170,11 @@ const Sales = () => {
           };
         });
 
-        setCart([]);
+        clearCart();
         showFeedback(`Offline: Buchung für ${bookingTarget.data.nickname || bookingTarget.data.name} gespeichert`, 'info');
       } else if (bookingTarget.type === 'OWNER') {
         addTransaction({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items });
-        setCart([]);
+        clearCart();
         showFeedback('Offline: Wirt-Buchung gespeichert', 'info');
       }
       return;
@@ -231,21 +221,6 @@ const Sales = () => {
     }
   };
 
-  const addToCart = (a) => {
-    const exists = cart.find(i => i.id === a.id);
-    exists ? setCart(cart.map(i => i.id === a.id ? { ...i, quantity: num(i.quantity) + 1 } : i)) : setCart([...cart, { ...a, quantity: 1 }]);
-  };
-
-  const updateQty = (id, delta) => {
-    setCart(prev => prev.map(i => {
-      if (i.id !== id) return i;
-      const newQty = Math.max(0, num(i.quantity) + delta);
-      return { ...i, quantity: newQty };
-    }).filter(i => i.quantity > 0));
-  };
-
-  const total = cart.reduce((s, i) => s + num(i.price) * num(i.quantity), 0);
-
   // Targets
   const setTargetCash = () => { setBookingTarget({ type: 'CASH' }); if (isMobile) setMobileTab(2); };
   const setTargetOwner = () => { setBookingTarget({ type: 'OWNER' }); if (isMobile) setMobileTab(2); };
@@ -259,55 +234,51 @@ const Sales = () => {
 
   const handleOpenHistory = async (customer) => { setHistoryCustomer(customer); setShowHistory(true); await refetchHistory(); };
 
-  // Filtered Data
-  // Filtered Data
-  const filteredCustomers = useMemo(() => {
-    const s = customerSearch.toLowerCase();
-
-    // 1. Alle Kunden, die zur Suche passen
+  // Kundenliste: zwei klar beschriftete Abschnitte.
+  // „Heute an der Theke" = Käufe im laufenden Geschäftstag (06:00 → 06:00), zuletzt aktiv zuerst,
+  // damit der Gast, der gerade bestellt hat, ganz oben steht. Darunter alle Kunden alphabetisch.
+  // Bei aktiver Suche nur die Treffer, ohne Doppelungen.
+  const { alphabetical, todayCustomers } = useMemo(() => {
+    const s = customerSearch.trim().toLowerCase();
     const matches = customersData.customers.filter(c =>
-      c.active !== false && ( // Nur aktive Kunden anzeigen
+      c.active !== false && (
         c.name.toLowerCase().includes(s) || (c.nickname && c.nickname.toLowerCase().includes(s))
       )
     );
-
-    // 2. Sortiere alle alphabetisch
-    const alphabetical = [...matches].sort((a, b) => {
-      const nameA = (a.nickname || a.name).toLowerCase();
-      const nameB = (b.nickname || b.name).toLowerCase();
-      return nameA.localeCompare(nameB);
-    });
-
-    // 3. Finde aktive Kunden (Heute was gekauft)
-    // backend update sorgt dafür, dass lastActivity bei jedem Kauf gesetzt wird
-    const activeToday = alphabetical.filter(c => isToday(c.lastActivity));
-
-    // 4. Markiere diese als "Special Highlight" Kopien
-    const activeCopies = activeToday.map(c => ({ ...c, _specialActive: true }));
-
-    // 5. Array Zusammensetzen: Aktive (oben) + Alphabetisch (unten)
-    return [...activeCopies, ...alphabetical];
+    const alphabetical = [...matches].sort((a, b) =>
+      (a.nickname || a.name).toLowerCase().localeCompare((b.nickname || b.name).toLowerCase(), 'de')
+    );
+    const todayCustomers = s
+      ? []
+      : alphabetical
+        .filter(c => isCurrentBusinessDay(c.lastActivity))
+        .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity))
+        .map(c => ({ ...c, _specialActive: true }));
+    return { alphabetical, todayCustomers };
   }, [customersData.customers, customerSearch]);
 
-  const categories = useMemo(() => ['all', ...new Set((articles || []).map(a => a.category).filter(Boolean))], [articles]);
-  const filteredArticles = (articles || [])
-    .filter(a => (selectedCategory === 'all' || a.category === selectedCategory) && a.name.toLowerCase().includes(articleSearch.toLowerCase()))
-    .sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name));
-
-  // Alphabet Quick Nav
+  // Alphabet-Schnellnavigation: Buchstaben ohne Kunden werden abgeschwächt dargestellt
   const alphabet = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const letterOf = (c) => { const n = (c.nickname || c.name || '').toUpperCase(); return /^[A-Z]/.test(n) ? n[0] : '#'; };
+  const presentLetters = useMemo(() => new Set(alphabetical.map(letterOf)), [alphabetical]);
   const scrollToLetter = (letter) => {
-    const target = filteredCustomers.find(c => {
-      if (c._specialActive) return false; // Überspringe die "Doppelten" oben
-      const name = c.nickname || c.name;
-      if (letter === '#') return !/^[A-Z]/i.test(name);
-      return name.toUpperCase().startsWith(letter);
-    });
+    const target = alphabetical.find(c => letterOf(c) === letter);
     if (target) {
       const el = document.getElementById(`customer-${target.id}`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
+
+  const SectionLabel = ({ children }) => (
+    <Typography
+      variant="overline"
+      sx={{ position: 'sticky', top: -12, zIndex: 1, display: 'block', mx: -1.5, px: 1.5, py: 0.5, mb: 1, mt: 0.5,
+        bgcolor: 'background.paper', color: 'text.secondary', fontWeight: 800, letterSpacing: '0.08em', lineHeight: 1.6,
+        borderBottom: '1px solid', borderColor: 'divider' }}
+    >
+      {children}
+    </Typography>
+  );
 
   /* Sub-Components */
   const CustomerRow = ({ customer }) => {
@@ -318,6 +289,7 @@ const Sales = () => {
         onClick={() => setTargetCustomer(customer)}
         sx={{
           p: 1.5,
+          scrollMarginTop: 40,
           border: isSelected ? '2px solid' : '1px solid',
           borderColor: isSelected ? 'primary.main' : (customer._specialActive ? 'rgba(76, 175, 80, 0.3)' : 'divider'),
           cursor: 'pointer',
@@ -342,7 +314,9 @@ const Sales = () => {
           </Avatar>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography noWrap variant="body1" sx={{ fontWeight: 600, fontSize: '1rem' }}>{customer.nickname || customer.name}</Typography>
-            {customer.nickname && (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.name}</Typography>)}
+            {customer._specialActive
+              ? (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.nickname ? `${customer.name} · ` : ''}zuletzt {timeLabel(customer.lastActivity)}</Typography>)
+              : customer.nickname && (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.name}</Typography>)}
           </Box>
           <Typography variant="body1" fontWeight={800} color={customer.balance < 5 ? 'error' : 'success.main'} sx={{ flexShrink: 0 }}>
             {money(customer.balance)}
@@ -360,246 +334,133 @@ const Sales = () => {
     );
   };
 
-  return (
-    <Box sx={{ pb: 0, height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
-      {/* Mobile Tab Navigation */}
-      {isMobile && (
-        <Box sx={{ mb: 1.5 }}>
-          <Tabs
-            value={mobileTab}
-            onChange={(e, v) => setMobileTab(v)}
-            variant="fullWidth"
-            indicatorColor="primary"
-            textColor="primary"
-            sx={{
-              bgcolor: 'background.paper', borderRadius: 2, boxShadow: 1,
-              '& .MuiTab-root': { fontWeight: 700 }
-            }}
-          >
-            <Tab label="Kunden" />
-            <Tab label="Artikel" />
-            <Tab label={`Warenkorb (${cart.reduce((a, c) => a + c.quantity, 0)})`} />
-          </Tabs>
-        </Box>
-      )}
-
-      <Box sx={{
-        display: isMobile ? 'block' : 'grid',
-        gap: 2,
-        gridTemplateColumns: { md: '280px 1fr 280px', lg: '340px 1fr 320px' },
-        height: isMobile ? 'calc(100% - 64px)' : '100%',
-        overflow: 'hidden'
-      }}>
-
-        {/* LEFT COLUMN: CUSTOMERS */}
-        <Box sx={{ display: (isMobile && mobileTab !== 0) ? 'none' : 'block', height: '100%', overflow: 'hidden' }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-              <Stack spacing={1.5} sx={{ mb: 2 }}>
-                <Button variant={isTargetSelected('CASH') ? 'contained' : 'outlined'} color="success" fullWidth size="large" startIcon={<AttachMoney />} onClick={setTargetCash} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
-                  Bar bezahlen
-                </Button>
-                <Button variant={isTargetSelected('OWNER') ? 'contained' : 'outlined'} color="warning" fullWidth size="large" startIcon={<LocalBar />} onClick={setTargetOwner} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
-                  Auf den Wirt
-                </Button>
-              </Stack>
-              <TextField placeholder="Kunde suchen…" size="small" fullWidth value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }} />
-            </Box>
-            <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              <Stack sx={{ width: 40, overflowY: 'auto', alignItems: 'center', py: 1, borderRight: '1px solid', borderColor: 'divider', bgcolor: 'background.default', '&::-webkit-scrollbar': { display: 'none' } }} spacing={0}>
-                {alphabet.map(char => (
-                  <Box key={char} onClick={() => scrollToLetter(char)}
-                    sx={{
-                      cursor: 'pointer', fontWeight: 900, fontSize: '0.9rem', color: 'text.secondary', width: '100%', textAlign: 'center', py: 0.75,
-                      '&:hover': { color: 'primary.main', bgcolor: 'action.hover' }
-                    }}>
-                    {char}
-                  </Box>
-                ))}
-              </Stack>
-              <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
-                {filteredCustomers.map(c => <CustomerRow key={c._specialActive ? `active-${c.id}` : c.id} customer={c} />)}
-              </Box>
-            </Box>
-          </Card>
-        </Box>
-
-        {/* MIDDLE COLUMN: ARTICLES */}
-        <Box sx={{ display: (isMobile && mobileTab !== 1) ? 'none' : 'block', height: '100%', overflow: 'hidden' }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <TextField placeholder="Artikel suchen…" size="small" fullWidth value={articleSearch} onChange={e => setArticleSearch(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }} />
-              <Tabs value={selectedCategory} onChange={(e, v) => setSelectedCategory(v)} variant="scrollable" scrollButtons="auto" sx={{ mt: 1, minHeight: 48, '& .MuiTab-root': { minHeight: 48, fontSize: '1rem', fontWeight: 600 } }}>
-                {categories.map(c => <Tab key={c} value={c} label={c === 'all' ? 'Alle' : c} />)}
-              </Tabs>
-            </Box>
-            <Box sx={{ p: 2, overflowY: 'auto', flex: 1 }}>
-              <Box sx={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                gap: 2,
-                pb: 2
+  /* Seitenleiste: Zahlungsziel + Kundenliste (unverändert) */
+  const customersSidebar = (
+    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
+      <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+        <Stack spacing={1.5} sx={{ mb: 2 }}>
+          <Button variant={isTargetSelected('CASH') ? 'contained' : 'outlined'} color="success" fullWidth size="large" startIcon={<AttachMoney />} onClick={setTargetCash} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
+            Bar bezahlen
+          </Button>
+          <Button variant={isTargetSelected('OWNER') ? 'contained' : 'outlined'} color="warning" fullWidth size="large" startIcon={<LocalBar />} onClick={setTargetOwner} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
+            Auf den Wirt
+          </Button>
+        </Stack>
+        <TextField placeholder="Kunde suchen…" size="small" fullWidth value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }} />
+      </Box>
+      <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <Stack sx={{ width: 40, overflowY: 'auto', alignItems: 'center', py: 1, borderRight: '1px solid', borderColor: 'divider', bgcolor: 'background.default', '&::-webkit-scrollbar': { display: 'none' } }} spacing={0}>
+          {alphabet.map(char => (
+            <Box key={char} onClick={() => scrollToLetter(char)}
+              sx={{
+                cursor: presentLetters.has(char) ? 'pointer' : 'default', fontWeight: 900, fontSize: '0.9rem', width: '100%', textAlign: 'center', py: 0.75,
+                color: presentLetters.has(char) ? 'text.secondary' : 'action.disabled',
+                '&:hover': { color: 'primary.main', bgcolor: 'action.hover' }
               }}>
-                {(filteredArticles || []).map(a => {
-                  const cartItem = cart.find(i => i.id === a.id);
-                  const qty = cartItem ? cartItem.quantity : 0;
-                  return (
-                    <Card key={a.id} sx={{
-                      height: '100%', display: 'flex', flexDirection: 'column', cursor: 'pointer', position: 'relative',
-                      '&:hover': { transform: 'scale(1.02)', boxShadow: 6, zIndex: 2 }, transition: 'all .2s',
-                      border: '1px solid', borderColor: 'divider'
-                    }} onClick={() => addToCart(a)}>
-                      <Box sx={{
-                        height: 160,
-                        background: 'linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%)', // Default fallback gradient
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden'
-                      }}>
-                        {a.imageMedium ? (
-                          <Box component="img" src={a.imageMedium} alt={a.name} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} />
-                        ) : (
-                          <LocalBar sx={{ fontSize: 64, color: 'rgba(255,255,255,0.2)' }} />
-                        )}
-
-                        {/* Price Badge */}
-                        <Box sx={{ position: 'absolute', bottom: 0, right: 0, bgcolor: 'rgba(0,0,0,0.85)', color: '#fff', px: 1.5, py: 0.5, borderTopLeftRadius: 8, fontWeight: 900, fontSize: '1.1rem' }}>
-                          {money(a.price)}
-                        </Box>
-                        {/* Quantity Badge Overlay */}
-                        {qty > 0 && (
-                          <Box sx={{
-                            position: 'absolute',
-                            top: 8,
-                            right: 8,
-                            width: 32,
-                            height: 32,
-                            borderRadius: '50%',
-                            bgcolor: 'primary.main',
-                            color: '#fff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontWeight: 'bold',
-                            boxShadow: 3,
-                            border: '2px solid #fff'
-                          }}>
-                            {qty}
-                          </Box>
-                        )}
-                      </Box>
-                      <CardContent sx={{ p: 2, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 80 }}>
-                        <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.2, mb: 0.5, fontSize: '1.05rem', wordBreak: 'break-word' }}>{a.name}</Typography>
-                        <Box sx={{ mt: 'auto' }}>
-                          {a.stock <= 0 && <Chip size="small" color="error" label="Leer" sx={{ alignSelf: 'flex-start', fontWeight: 'bold' }} />}
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </Box>
+              {char}
             </Box>
-          </Card>
-        </Box>
-
-        {/* RIGHT COLUMN: CART */}
-        <Box sx={{ display: (isMobile && mobileTab !== 2) ? 'none' : 'block', height: '100%', overflow: 'hidden' }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', position: 'relative' }}>
-            <CardContent sx={{ p: 2, flex: 1, overflowY: 'auto' }}>
-              {/* Mobile Customer Balance Display */}
-              {isMobile && bookingTarget.type === 'CUSTOMER' && bookingTarget.data && (
-                <Card variant="outlined" sx={{ mb: 2, bgcolor: 'primary.lighter', borderColor: 'primary.main' }}>
-                  <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
-                    <Typography variant="caption" color="text.secondary" fontWeight="bold">Aktuelles Guthaben</Typography>
-                    <Stack direction="row" alignItems="center" justifyContent="space-between">
-                      <Typography variant="body1" fontWeight="bold">{bookingTarget.data.nickname || bookingTarget.data.name}</Typography>
-                      <Typography variant="h5" fontWeight={900} color={bookingTarget.data.balance < 0 ? 'error.main' : 'success.main'}>
-                        {money(bookingTarget.data.balance)}
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              )}
-
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 800, display: 'flex', alignItems: 'center' }}>
-                <ShoppingCart sx={{ mr: 1 }} /> Warenkorb
-              </Typography>
-              {!cart.length ? (
-                <Box sx={{ textAlign: 'center', mt: 8, opacity: 0.4 }}>
-                  <ShoppingCart sx={{ fontSize: 64, mb: 2 }} />
-                  <Typography variant="h6">Leer</Typography>
-                </Box>
-              ) : (
-                <List disablePadding>
-                  {cart.map(i => (
-                    <ListItem key={i.id} sx={{ py: 1.5, px: 0, borderBottom: '1px solid', borderColor: 'divider' }}>
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="body1" fontWeight={700}>{i.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">{money(i.price)} | Sum: {money(i.price * i.quantity)}</Typography>
-                      </Box>
-                      <Stack direction="row" alignItems="center" spacing={0}>
-                        <IconButton onClick={() => updateQty(i.id, -1)} color={i.quantity === 1 ? 'error' : 'default'} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '8px 0 0 8px' }}>
-                          {i.quantity === 1 ? <DeleteOutline /> : <Remove />}
-                        </IconButton>
-                        <Box sx={{ minWidth: 40, textAlign: 'center', fontWeight: 800, borderTop: '1px solid', borderBottom: '1px solid', borderColor: 'divider', height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {i.quantity}
-                        </Box>
-                        <IconButton onClick={() => updateQty(i.id, 1)} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '0 8px 8px 0' }}>
-                          <Add />
-                        </IconButton>
-                      </Stack>
-                    </ListItem>
-                  ))}
-                </List>
-              )}
-            </CardContent>
-            <Box sx={{ p: 2, bgcolor: 'background.default', borderTop: '1px solid', borderColor: 'divider' }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                <Button size="small" onClick={() => setShowChangeCalc(v => !v)}>Wechselgeld</Button>
-                <Stack alignItems="flex-end">
-                  <Typography variant="caption" color="text.secondary">Gesamt</Typography>
-                  <Typography variant="h4" sx={{ fontWeight: 900, color: 'primary.main' }}>{money(total)}</Typography>
-                </Stack>
-              </Stack>
-              <ChangeCalculator total={total} open={showChangeCalc} onClose={() => setShowChangeCalc(false)} />
-              <Button
-                fullWidth
-                variant="contained"
-                size="large"
-                disabled={!cart.length}
-                color={
-                  bookingTarget.type === 'CUSTOMER'
-                    ? (bookingTarget.data && (bookingTarget.data.balance - total < 0)
-                      ? (bookingTarget.data.balance - total < -10 ? 'error' : 'warning')
-                      : 'primary')
-                    : bookingTarget.type === 'OWNER' ? 'warning' : 'success'
-                }
-                onClick={handleBooking}
-                sx={{ py: 2, fontWeight: 800, fontSize: '1.2rem', boxShadow: 6, borderRadius: 2 }}
-              >
-                {bookingTarget.type === 'CASH' && 'Bar bezahlen'}
-                {bookingTarget.type === 'OWNER' && 'Auf Wirt buchen'}
-                {bookingTarget.type === 'CUSTOMER' && (() => {
-                  if (!bookingTarget.data) return 'Kunde?';
-                  const newBal = bookingTarget.data.balance - total;
-                  const name = bookingTarget.data.nickname || bookingTarget.data.name.split(' ')[0];
-                  if (newBal < -10) return `Limit Exceeded! (${money(newBal)})`;
-                  if (newBal < 0) return `Überziehen: ${name}`;
-                  return `Buchen: ${name}`;
-                })()}
-              </Button>
-              {bookingTarget.type === 'CUSTOMER' && bookingTarget.data && (bookingTarget.data.balance - total < 0) && (
-                <Typography variant="caption" color="error" display="block" textAlign="center" sx={{ mt: 1, fontWeight: 'bold' }}>
-                  {bookingTarget.data.balance - total < -10
-                    ? 'Buchung nicht möglich: Kreditlimit überschritten!'
-                    : 'Achtung: Konto wird überzogen!'}
-                </Typography>
-              )}
-              {bookingTarget.type === 'CUSTOMER' && !bookingTarget.data && (
-                <Typography variant="caption" color="error" display="block" textAlign="center" sx={{ mt: 1, fontWeight: 'bold' }}>Bitte wählen Sie links einen Kunden</Typography>
-              )}
-            </Box>
-          </Card>
+          ))}
+        </Stack>
+        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
+          {todayCustomers.length > 0 && (
+            <>
+              <SectionLabel>Heute an der Theke ({todayCustomers.length})</SectionLabel>
+              {todayCustomers.map(c => <CustomerRow key={`active-${c.id}`} customer={c} />)}
+              <SectionLabel>Alle Kunden ({alphabetical.length})</SectionLabel>
+            </>
+          )}
+          {alphabetical.map(c => <CustomerRow key={c.id} customer={c} />)}
+          {alphabetical.length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
+              {customerSearch ? `Kein Kunde passt zu „${customerSearch}“` : 'Noch keine Kunden angelegt'}
+            </Typography>
+          )}
         </Box>
       </Box>
+    </Card>
+  );
+
+  /* Mobile: Guthaben des gewählten Kunden über dem Warenkorb */
+  const cartHeader = (isMobile && bookingTarget.type === 'CUSTOMER' && bookingTarget.data) ? (
+    <Card variant="outlined" sx={{ mb: 2, bgcolor: 'primary.lighter', borderColor: 'primary.main' }}>
+      <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
+        <Typography variant="caption" color="text.secondary" fontWeight="bold">Aktuelles Guthaben</Typography>
+        <Stack direction="row" alignItems="center" justifyContent="space-between">
+          <Typography variant="body1" fontWeight="bold">{bookingTarget.data.nickname || bookingTarget.data.name}</Typography>
+          <Typography variant="h5" fontWeight={900} color={bookingTarget.data.balance < 0 ? 'error.main' : 'success.main'}>
+            {money(bookingTarget.data.balance)}
+          </Typography>
+        </Stack>
+      </CardContent>
+    </Card>
+  ) : null;
+
+  /* Kassenbereich: Wechselgeld, Gesamt, Buchen-Button, Hinweise (unverändert) */
+  const cartFooter = (
+    <>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Button size="small" onClick={() => setShowChangeCalc(v => !v)}>Wechselgeld</Button>
+        <Stack alignItems="flex-end">
+          <Typography variant="caption" color="text.secondary">Gesamt</Typography>
+          <Typography variant="h4" sx={{ fontWeight: 900, color: 'primary.main' }}>{money(total)}</Typography>
+        </Stack>
+      </Stack>
+      <ChangeCalculator total={total} open={showChangeCalc} onClose={() => setShowChangeCalc(false)} />
+      <Button
+        fullWidth
+        variant="contained"
+        size="large"
+        disabled={!lines.length}
+        color={
+          bookingTarget.type === 'CUSTOMER'
+            ? (bookingTarget.data && (bookingTarget.data.balance - total < 0)
+              ? (bookingTarget.data.balance - total < -10 ? 'error' : 'warning')
+              : 'primary')
+            : bookingTarget.type === 'OWNER' ? 'warning' : 'success'
+        }
+        onClick={handleBooking}
+        sx={{ py: 2, fontWeight: 800, fontSize: '1.2rem', boxShadow: 6, borderRadius: 2 }}
+      >
+        {bookingTarget.type === 'CASH' && 'Bar bezahlen'}
+        {bookingTarget.type === 'OWNER' && 'Auf Wirt buchen'}
+        {bookingTarget.type === 'CUSTOMER' && (() => {
+          if (!bookingTarget.data) return 'Kunde?';
+          const newBal = bookingTarget.data.balance - total;
+          const name = bookingTarget.data.nickname || bookingTarget.data.name.split(' ')[0];
+          if (newBal < -10) return `Limit überschritten (${money(newBal)})`;
+          if (newBal < 0) return `Überziehen: ${name}`;
+          return `Buchen: ${name}`;
+        })()}
+      </Button>
+      {bookingTarget.type === 'CUSTOMER' && bookingTarget.data && (bookingTarget.data.balance - total < 0) && (
+        <Typography variant="caption" color="error" display="block" textAlign="center" sx={{ mt: 1, fontWeight: 'bold' }}>
+          {bookingTarget.data.balance - total < -10
+            ? 'Buchung nicht möglich: Kreditlimit überschritten!'
+            : 'Achtung: Konto wird überzogen!'}
+        </Typography>
+      )}
+      {bookingTarget.type === 'CUSTOMER' && !bookingTarget.data && (
+        <Typography variant="caption" color="error" display="block" textAlign="center" sx={{ mt: 1, fontWeight: 'bold' }}>Bitte wählen Sie links einen Kunden</Typography>
+      )}
+    </>
+  );
+
+  return (
+    <Box sx={{ pb: 0, height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
+      <ArticleLinePicker
+        mode="sale"
+        lines={lines}
+        onChange={setLines}
+        sidebar={customersSidebar}
+        sidebarLabel="Kunden"
+        linesLabel="Warenkorb"
+        linesHeader={cartHeader}
+        linesFooter={cartFooter}
+        mobileTab={mobileTab}
+        onMobileTabChange={setMobileTab}
+        columns={{ md: '280px 1fr 280px', lg: '340px 1fr 320px' }}
+        height="100%"
+      />
 
       {/* Dialogs */}
       <Dialog open={showTopUp} onClose={() => setShowTopUp(false)} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: 3, p: 2 } }}>
@@ -638,7 +499,7 @@ const Sales = () => {
           {/* Quick Amounts - Banknotes */}
           <Grid container spacing={2} sx={{ mb: 4 }}>
             {[5, 10, 20, 50].map(v => (
-              <Grid item xs={6} md={3} key={v}>
+              <Grid size={{ xs: 6, md: 3 }} key={v}>
                 <Button
                   fullWidth
                   onClick={() => setTopUpAmount(String(v))}
@@ -909,8 +770,7 @@ const Sales = () => {
             color="warning"
             fullWidth
             onClick={() => {
-              const items = cart.map(i => ({ articleId: i.id, quantity: i.quantity }));
-              quickSaleMutation.mutate({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items });
+              quickSaleMutation.mutate({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items: toSalePayload(lines) });
               setShowOwnerConfirm(false);
             }}
             sx={{ fontWeight: 800 }}

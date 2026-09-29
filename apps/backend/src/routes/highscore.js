@@ -11,6 +11,7 @@ router.use(authenticate);
 
 // Highscores (Personal)
 router.get('/', highscoreController.getHighscore);
+router.get('/archive', highscoreController.getArchive);
 
 // Goals (Admin)
 router.post('/goals-progress', authorize('ADMIN', 'CASHIER'), highscoreController.setGoals);

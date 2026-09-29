@@ -5,14 +5,10 @@ import api from "../services/api";
 import { API_BASE_URL } from "../config/api";
 import {
   Box,
-  Paper,
   Typography,
   Button,
-  Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableRow,
   IconButton,
   Chip,
@@ -23,6 +19,8 @@ import {
   Tooltip,
   Divider,
   useMediaQuery,
+  Autocomplete,
+  TextField,
 } from "@mui/material";
 import {
   CheckCircle as CheckIcon,
@@ -34,12 +32,17 @@ import {
   ExpandLess,
   MoneyOff,
   ReceiptLong,
+  LocalShipping,
 } from "@mui/icons-material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { useTheme, alpha } from "@mui/material/styles";
 import KPICard from '../components/common/KPICard';
+import FilterBar from '../components/common/FilterBar';
+import { DocumentTable, DocumentTableHead, documentRowSx, documentChildRowSx } from '../components/common/DocumentTable';
+import MobileDocumentCard from '../components/common/MobileDocumentCard';
+import { summarizeItems } from "../utils/purchaseDocs";
 
 /* ---------------- helpers ---------------- */
 const num = (v) => {
@@ -158,7 +161,16 @@ export default function PurchaseDocuments() {
   const queryClient = useQueryClient();
   const theme = useTheme();
 
-  const [filters, setFilters] = useState({ startDate: null, endDate: null });
+  const EMPTY_FILTERS = { startDate: null, endDate: null, supplier: null };
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+
+  /* -------- Lieferanten für den Filter -------- */
+  const { data: suppliersData } = useQuery({
+    queryKey: ["purchase-suppliers"],
+    queryFn: () => api.get("/purchase-documents/suppliers").then((r) => r.data),
+    staleTime: 60_000,
+  });
+  const suppliers = suppliersData?.suppliers || [];
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [deletingId, setDeletingId] = useState(null);
   const [uploadDocId, setUploadDocId] = useState(null);
@@ -171,6 +183,7 @@ export default function PurchaseDocuments() {
       const params = {};
       if (filters.startDate) params.startDate = format(filters.startDate, "yyyy-MM-dd");
       if (filters.endDate) params.endDate = format(filters.endDate, "yyyy-MM-dd");
+      if (filters.supplier) params.supplier = filters.supplier;
       const res = await api.get("/purchase-documents", { params });
       const docs = Array.isArray(res.data?.documents) ? res.data.documents : [];
       // Sort: newest first
@@ -190,24 +203,24 @@ export default function PurchaseDocuments() {
   const markPaid = useMutation({
     mutationFn: ({ id, paymentMethod }) =>
       api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod }),
-    onSuccess: () => queryClient.invalidateQueries(["purchase-documents"]),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
   });
 
   const markUnpaid = useMutation({
     mutationFn: (id) => api.post(`/purchase-documents/${id}/mark-unpaid`),
-    onSuccess: () => queryClient.invalidateQueries(["purchase-documents"]),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
   });
 
   const del = useMutation({
     mutationFn: (id) => api.delete(`/purchase-documents/${id}`),
     onSuccess: () => {
       setDeletingId(null);
-      queryClient.invalidateQueries(["purchase-documents"]);
+      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
     },
     onError: () => setDeletingId(null),
   });
 
-  const isAnyMutating = markPaid.isLoading || markUnpaid.isLoading || del.isLoading;
+  const isAnyMutating = markPaid.isPending || markUnpaid.isPending || del.isPending;
 
   /* -------- Handlers -------- */
   const togglePaidStatus = (doc) => {
@@ -244,9 +257,10 @@ export default function PurchaseDocuments() {
   };
 
   const handleFilterChange = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
+  const hasActiveFilters = !!(filters.startDate || filters.endDate || filters.supplier);
   const resetFilters = () => {
-    setFilters({ startDate: null, endDate: null });
-    queryClient.invalidateQueries(["purchase-documents"]);
+    setFilters(EMPTY_FILTERS);
+    queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
   };
 
   const fmtDate = (d) => {
@@ -279,7 +293,7 @@ export default function PurchaseDocuments() {
       await api.patch(`/purchase-documents/${uploadDocId}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      queryClient.invalidateQueries(["purchase-documents"]);
+      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
     } catch (err) {
       console.error("Upload error:", err);
       window.alert("Fehler beim Hochladen des Nachweises.");
@@ -302,41 +316,18 @@ export default function PurchaseDocuments() {
   }, [documents]);
 
   /* -------- Mobile Card Component -------- */
-  const MobileDocumentCard = ({ doc }) => {
+  const PurchaseDocCard = ({ doc }) => {
     const hasChildren = (doc.lieferscheine || []).length > 0;
     const [expanded, setExpanded] = useState(false);
     const isRechnung = doc.type === "RECHNUNG";
 
     return (
-      <Paper
-        sx={{
-          mb: 2,
-          p: 2,
-          borderRadius: 3,
-          border: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
-          position: "relative",
-          overflow: "hidden",
-        }}
-        elevation={0}
-      >
-        {/* Type Indicator Strip */}
-        <Box
-          sx={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 4,
-            bgcolor: isRechnung ? "primary.main" : "info.main",
-          }}
-        />
-
-        <Stack spacing={1.5} sx={{ pl: 1 }}>
+      <MobileDocumentCard stripColor={isRechnung ? "primary.main" : "info.main"}>
           {/* Header: Number & Date */}
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
             <Box>
               <Typography variant="subtitle2" color="text.secondary" fontSize={11}>
-                {doc.type}
+                {isRechnung ? "Lieferantenrechnung" : "Lieferschein"}
               </Typography>
               <Typography variant="h6" fontWeight={700} lineHeight={1.2}>
                 {doc.documentNumber}
@@ -344,6 +335,16 @@ export default function PurchaseDocuments() {
               <Typography variant="body2" fontWeight={500} color="text.primary">
                 {doc.supplier}
               </Typography>
+              {hasChildren && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="info"
+                  icon={<LocalShipping />}
+                  label={`${doc.lieferscheine.length} Lieferschein${doc.lieferscheine.length === 1 ? "" : "e"} · Bestand gebucht`}
+                  sx={{ mt: 0.5, height: 22, fontSize: 11 }}
+                />
+              )}
             </Box>
             <Stack alignItems="flex-end">
               <Typography variant="body2" fontWeight={600} color={isRechnung ? "text.primary" : "text.secondary"}>
@@ -397,7 +398,7 @@ export default function PurchaseDocuments() {
                         <Typography variant="caption">{fmtDate(ls.documentDate)}</Typography>
                       </Stack>
                       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary">{ls.supplier}</Typography>
+                        <Typography variant="caption" color="text.secondary">{summarizeItems(ls.items) || ls.supplier}</Typography>
                         <Stack direction="row" spacing={1}>
                           <NachweisIcon nachweisUrl={ls.nachweisUrl} onClickUpload={() => handleUploadTrigger(ls.id)} />
                           <IconButton size="small" sx={{ p: 0.5 }} onClick={() => edit(ls.id)}>
@@ -411,8 +412,7 @@ export default function PurchaseDocuments() {
               )}
             </Box>
           )}
-        </Stack>
-      </Paper>
+      </MobileDocumentCard>
     );
   };
 
@@ -426,11 +426,11 @@ export default function PurchaseDocuments() {
       <Box sx={{ mb: 4 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
           <Box>
-            <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: "-0.02em" }}>
-              Einkäufe
+            <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: "-0.02em", fontSize: { xs: "1.6rem", sm: "2.125rem" } }}>
+              Einkauf
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              Verwaltung aller Rechnungen und Lieferscheine
+              Lieferantenrechnungen und Lieferscheine
             </Typography>
           </Box>
         </Stack>
@@ -446,7 +446,7 @@ export default function PurchaseDocuments() {
             onClick={() => navigate("/purchases/create", { state: { type: "RECHNUNG" } })}
             sx={{ py: 1.5, fontWeight: 700, boxShadow: theme.shadows[4] }}
           >
-            Neuer Einkauf
+            Neue Lieferantenrechnung
           </Button>
           <Button
             variant="outlined"
@@ -456,14 +456,14 @@ export default function PurchaseDocuments() {
             onClick={() => navigate("/purchases/create", { state: { type: "LIEFERSCHEIN" } })}
             sx={{ py: 1.5, color: "text.primary", borderColor: "divider" }}
           >
-            Lieferschein
+            Neuer Lieferschein
           </Button>
         </Stack>
       </Box>
 
       {/* Quick Stats & Actions Grid */}
       <Grid container spacing={2} sx={{ mb: 3 }} alignItems="stretch">
-        <Grid item xs={6} md={3}>
+        <Grid size={{ xs: 6, md: 3 }}>
           <KPICard
             title="Offen / Unbezahlt"
             value={stats.offeneRechnungen}
@@ -471,7 +471,7 @@ export default function PurchaseDocuments() {
             color="error"
           />
         </Grid>
-        <Grid item xs={6} md={3}>
+        <Grid size={{ xs: 6, md: 3 }}>
           <KPICard
             title="Ohne Nachweis"
             value={stats.ohneNachweis}
@@ -481,7 +481,7 @@ export default function PurchaseDocuments() {
         </Grid>
 
         {/* Desktop Action Buttons: Visible only on md+ */}
-        <Grid item xs={6} md={3} sx={{ display: { xs: "none", md: "block" } }}>
+        <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: "none", md: "block" } }}>
           <Button
             variant="contained"
             color="primary"
@@ -489,6 +489,7 @@ export default function PurchaseDocuments() {
             onClick={() => navigate("/purchases/create", { state: { type: "RECHNUNG" } })}
             sx={{
               height: "100%",
+              minHeight: 140,
               borderRadius: 3,
               fontSize: "1.1rem",
               fontWeight: 800,
@@ -502,10 +503,10 @@ export default function PurchaseDocuments() {
             }}
           >
             <AddIcon fontSize="large" />
-            Neuer Einkauf
+            Lieferantenrechnung
           </Button>
         </Grid>
-        <Grid item xs={6} md={3} sx={{ display: { xs: "none", md: "block" } }}>
+        <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: "none", md: "block" } }}>
           <Button
             variant="outlined"
             color="inherit"
@@ -537,9 +538,7 @@ export default function PurchaseDocuments() {
       </Grid>
 
       {/* Filters */}
-      <Paper elevation={0} sx={{ p: 2, mb: 3, borderRadius: 3, border: `1px solid ${alpha(theme.palette.divider, 0.8)}`, bgcolor: "background.paper" }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
-          <Box sx={{ display: "flex", gap: 2, width: { xs: "100%", sm: "auto" }, flexWrap: "wrap" }}>
+      <FilterBar hasActiveFilters={hasActiveFilters} onReset={resetFilters}>
             <DatePicker
               label="Von"
               value={filters.startDate}
@@ -552,12 +551,16 @@ export default function PurchaseDocuments() {
               onChange={(d) => handleFilterChange("endDate", d)}
               slotProps={{ textField: { size: "small", fullWidth: true, sx: { minWidth: 120, flex: 1 } } }}
             />
-          </Box>
-          <Button variant="text" size="small" onClick={resetFilters} sx={{ ml: "auto !important", width: { xs: "100%", sm: "auto" } }}>
-            Filter zurücksetzen
-          </Button>
-        </Stack>
-      </Paper>
+            <Autocomplete
+              options={suppliers}
+              value={filters.supplier}
+              onChange={(e, v) => handleFilterChange("supplier", v || null)}
+              size="small"
+              sx={{ minWidth: 200, flex: 1 }}
+              noOptionsText="Kein Lieferant"
+              renderInput={(params) => <TextField {...params} label="Lieferant" placeholder="Alle Lieferanten" />}
+            />
+      </FilterBar>
 
       {/* Loading / Error */}
       {isLoading && <CircularProgress sx={{ display: "block", mx: "auto", my: 4 }} />}
@@ -572,22 +575,12 @@ export default function PurchaseDocuments() {
         <>
           {isMobile ? (
             <Box>
-              {documents.map(doc => <MobileDocumentCard key={doc.id} doc={doc} />)}
+              {documents.map(doc => <PurchaseDocCard key={doc.id} doc={doc} />)}
               {documents.length === 0 && <Typography align="center" color="text.secondary" sx={{ py: 4 }}>Keine Belege gefunden</Typography>}
             </Box>
           ) : (
-            <TableContainer
-              component={Paper}
-              elevation={0}
-              sx={{
-                borderRadius: 3,
-                border: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
-                overflow: "hidden"
-              }}
-            >
-              <Table stickyHeader sx={{ minWidth: 800 }}>
-                <TableHead>
-                  <TableRow sx={{ "& th": { fontWeight: 700, bgcolor: alpha(theme.palette.primary.main, 0.04) } }}>
+            <DocumentTable minWidth={800}>
+                <DocumentTableHead>
                     <TableCell width="20%">Belegnummer</TableCell>
                     <TableCell width="20%">Lieferant</TableCell>
                     <TableCell align="center" width="10%">Nachweis</TableCell>
@@ -595,8 +588,7 @@ export default function PurchaseDocuments() {
                     <TableCell width="15%">Status</TableCell>
                     <TableCell width="10%">Datum</TableCell>
                     <TableCell align="center" width="10%">Aktion</TableCell>
-                  </TableRow>
-                </TableHead>
+                </DocumentTableHead>
                 <TableBody>
                   {documents.map((doc) => {
                     const isRowDeleting = deletingId === doc.id;
@@ -605,7 +597,7 @@ export default function PurchaseDocuments() {
 
                     return (
                       <React.Fragment key={doc.id}>
-                        <TableRow hover sx={{ "& td": { borderBottomColor: alpha(theme.palette.divider, 0.5) } }}>
+                        <TableRow hover sx={documentRowSx(theme)}>
                           <TableCell>
                             <Stack direction="row" alignItems="center" spacing={1}>
                               <IconButton
@@ -627,6 +619,19 @@ export default function PurchaseDocuments() {
                                 <Typography component="span" variant="body2" fontWeight={600}>
                                   {doc.documentNumber}
                                 </Typography>
+                                {hasChildren && (
+                                  <Tooltip title={`Wareneingang über ${doc.lieferscheine.length} Lieferschein${doc.lieferscheine.length === 1 ? "" : "e"} gebucht. Zum Anzeigen aufklappen.`}>
+                                    <Chip
+                                      size="small"
+                                      variant="outlined"
+                                      color="info"
+                                      icon={<LocalShipping />}
+                                      label={`${doc.lieferscheine.length} LS`}
+                                      onClick={() => toggleRow(doc.id)}
+                                      sx={{ ml: 1, height: 20, fontSize: 10 }}
+                                    />
+                                  </Tooltip>
+                                )}
                               </Box>
                             </Stack>
                           </TableCell>
@@ -659,13 +664,15 @@ export default function PurchaseDocuments() {
 
                         {/* Expanded Children */}
                         {expanded && (doc.lieferscheine || []).map(ls => (
-                          <TableRow key={ls.id} sx={{ bgcolor: alpha(theme.palette.action.hover, 0.05) }}>
+                          <TableRow key={ls.id} sx={documentChildRowSx(theme)}>
                             <TableCell colSpan={7} sx={{ py: 1, px: 0 }}>
                               <Box sx={{ pl: 8, pr: 2, display: 'flex', alignItems: 'center', justifyContent: "space-between" }}>
-                                <Stack direction="row" spacing={2} alignItems="center">
+                                <Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 0, flexWrap: "wrap" }}>
                                   <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>↳ {ls.documentNumber}</Typography>
-                                  <Typography variant="body2" color="text.secondary">{ls.supplier}</Typography>
                                   <Typography variant="caption" color="text.secondary">{fmtDate(ls.documentDate)}</Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {summarizeItems(ls.items) ? `Bestand gebucht: ${summarizeItems(ls.items)}` : "keine Positionen"}
+                                  </Typography>
                                 </Stack>
                                 <Stack direction="row" spacing={1} alignItems="center">
                                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mr: 4 }}>
@@ -682,9 +689,13 @@ export default function PurchaseDocuments() {
                       </React.Fragment>
                     );
                   })}
+                  {documents.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 4, color: "text.secondary" }}>Keine Belege gefunden</TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
-              </Table>
-            </TableContainer>
+            </DocumentTable>
           )}
         </>
       )}
