@@ -156,7 +156,7 @@ const Transactions = () => {
       {/* Daily Summary Cards */}
       {dailySummary && (
         <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <KPICard
               title="Heutiger Umsatz"
               value={formatCurrency(dailySummary.summary.totalRevenue)}
@@ -165,7 +165,7 @@ const Transactions = () => {
               subTitle={`${dailySummary.summary.totalTransactions} Transaktionen`}
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <KPICard
               title="Bar-Umsatz"
               value={formatCurrency(dailySummary.summary.cashRevenue)}
@@ -174,7 +174,7 @@ const Transactions = () => {
               subTitle={`${dailySummary.summary.cashTransactions} Transaktionen`}
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <KPICard
               title="Kundenkonto-Umsatz"
               value={formatCurrency(dailySummary.summary.accountRevenue)}
@@ -183,7 +183,7 @@ const Transactions = () => {
               subTitle={`${dailySummary.summary.accountTransactions} Transaktionen`}
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <KPICard
               title="Storniert"
               value={dailySummary.summary.cancelledTransactions}
@@ -198,7 +198,7 @@ const Transactions = () => {
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <DatePicker
               label="Von"
               value={filters.startDate}
@@ -206,7 +206,7 @@ const Transactions = () => {
               renderInput={(params) => <TextField {...params} size="small" fullWidth />}
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <DatePicker
               label="Bis"
               value={filters.endDate}
@@ -214,7 +214,7 @@ const Transactions = () => {
               renderInput={(params) => <TextField {...params} size="small" fullWidth />}
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <TextField
               select
               label="Zahlungsart"
@@ -228,7 +228,7 @@ const Transactions = () => {
               <MenuItem value="ACCOUNT">Kundenkonto</MenuItem>
             </TextField>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Button
               variant="outlined"
               startIcon={<FilterList />}
@@ -361,7 +361,7 @@ const Transactions = () => {
         <DialogContent>
           {selectedTransaction && (
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <Typography variant="subtitle2" color="text.secondary">
                   Transaktions-ID
                 </Typography>
@@ -384,7 +384,7 @@ const Transactions = () => {
                 </Typography>
               </Grid>
 
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <Typography variant="subtitle2" color="text.secondary">
                   Kunde
                 </Typography>
@@ -410,7 +410,7 @@ const Transactions = () => {
                 </Typography>
               </Grid>
 
-              <Grid item xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="h6" gutterBottom>
                   Artikel
@@ -428,7 +428,7 @@ const Transactions = () => {
               </Grid>
 
               {selectedTransaction.cancelled && (
-                <Grid item xs={12}>
+                <Grid size={{ xs: 12 }}>
                   <Alert severity="error">
                     Storniert am {format(new Date(selectedTransaction.cancelledAt), 'dd.MM.yyyy HH:mm', { locale: de })}
                   </Alert>

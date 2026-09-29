@@ -266,7 +266,7 @@ const SortableArticleItem = ({ article, onEdit, onExpired, onToggleStatus, isReo
   };
 
   return (
-    <Grid item xs={12} sm={6} md={4} lg={3} ref={setNodeRef} style={style}>
+    <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }} ref={setNodeRef} style={style}>
       <Box {...(isReordering ? attributes : {})} {...(isReordering ? listeners : {})} sx={{ height: '100%', touchAction: 'none' }}>
         <ArticleCard
           article={article}
@@ -302,6 +302,7 @@ const SortableArticleItem = ({ article, onEdit, onExpired, onToggleStatus, isReo
 const Articles = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const fullScreenDialog = useMediaQuery(theme.breakpoints.down('sm')); // Artikel-Dialog auf dem Handy als Vollbild
   const queryClient = useQueryClient();
 
   // State
@@ -574,7 +575,7 @@ const Articles = () => {
       {/* --- KPI Cards --- */}
       {/* --- KPI Cards --- */}
       <Grid container spacing={3} sx={{ mb: 4 }} alignItems="stretch">
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Artikel gesamt"
             value={articles.length}
@@ -582,7 +583,7 @@ const Articles = () => {
             color="primary"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Aktive Artikel"
             value={articles.filter(a => a.active).length}
@@ -590,7 +591,7 @@ const Articles = () => {
             color="success"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Niedriger Bestand"
             value={lowStockData?.count || 0}
@@ -599,7 +600,7 @@ const Articles = () => {
             subTitle={lowStockData?.count > 0 ? "Handlungsbedarf" : "Alles OK"}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <KPICard
             title="Kategorien"
             value={categories.length}
@@ -709,25 +710,31 @@ const Articles = () => {
         onClose={handleCloseDialog}
         maxWidth="md"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 3, overflow: 'hidden' } }}
+        fullScreen={fullScreenDialog}
+        // Das Paper selbst ist das Formular: so bleibt DialogContent scrollbar und die Aktionen unten fixiert
+        PaperProps={{
+          component: 'form',
+          onSubmit: handleSubmit(onSubmit),
+          noValidate: true,
+          sx: { borderRadius: fullScreenDialog ? 0 : 3, overflow: 'hidden' },
+        }}
       >
-        <form onSubmit={handleSubmit(onSubmit)}>
-          <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 3, bgcolor: 'background.paper', borderBottom: `1px solid ${theme.palette.divider}` }}>
-            <Box>
-              <Typography variant="h5" fontWeight={800}>
+          <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, p: { xs: 2, sm: 3 }, bgcolor: 'background.paper', borderBottom: `1px solid ${theme.palette.divider}` }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="h5" fontWeight={800} noWrap>
                 {editingArticle ? 'Artikel bearbeiten' : 'Neuer Artikel'}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {editingArticle ? `ID: ${editingArticle.id}` : 'Fügen Sie einen neuen Artikel zum Sortiment hinzu'}
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {editingArticle ? editingArticle.name : 'Neuen Artikel zum Sortiment hinzufügen'}
               </Typography>
             </Box>
             <IconButton onClick={handleCloseDialog} size="small" sx={{ bgcolor: 'action.hover' }}><Cancel /></IconButton>
           </DialogTitle>
 
-          <DialogContent sx={{ p: 0 }}>
+          <DialogContent dividers sx={{ p: 0 }}>
             <Grid container>
               {/* Left Panel: Image Upload */}
-              <Grid item xs={12} md={4} sx={{ bgcolor: alpha(theme.palette.action.hover, 0.5), borderRight: `1px solid ${theme.palette.divider}`, p: 3 }}>
+              <Grid size={{ xs: 12, md: 4 }} sx={{ bgcolor: alpha(theme.palette.action.hover, 0.5), borderRight: { md: `1px solid ${theme.palette.divider}` }, borderBottom: { xs: `1px solid ${theme.palette.divider}`, md: 'none' }, p: { xs: 2, sm: 3 } }}>
                 <Typography variant="overline" fontWeight={800} color="text.secondary" display="block" mb={2}>Artikelbild</Typography>
 
                 <Box
@@ -736,7 +743,7 @@ const Articles = () => {
                   onDrop={handleDrop}
                   sx={{
                     width: '100%',
-                    maxWidth: '350px', // Prevent massive explosion
+                    maxWidth: { xs: 180, md: 350 }, // Handy: kompakt, damit die Felder ohne Scrollen erreichbar bleiben
                     margin: '0 auto',
                     aspectRatio: '1/1',
                     borderRadius: 3,
@@ -783,14 +790,14 @@ const Articles = () => {
               </Grid>
 
               {/* Right Panel: Form Fields */}
-              <Grid item xs={12} md={8} sx={{ p: 3 }}>
-                <Stack spacing={4}>
+              <Grid size={{ xs: 12, md: 8 }} sx={{ p: { xs: 2, sm: 3 } }}>
+                <Stack spacing={{ xs: 3, md: 4 }}>
 
                   {/* Section 1: Core Info */}
                   <Box>
                     <Typography variant="overline" fontWeight={700} color="primary" display="block" gutterBottom>Allgemeine Informationen</Typography>
                     <Grid container spacing={2}>
-                      <Grid item xs={12}>
+                      <Grid size={{ xs: 12 }}>
                         <Controller
                           name="name"
                           control={control}
@@ -800,7 +807,7 @@ const Articles = () => {
                           )}
                         />
                       </Grid>
-                      <Grid item xs={12}>
+                      <Grid size={{ xs: 12 }}>
                         <Controller
                           name="category"
                           control={control}
@@ -861,7 +868,7 @@ const Articles = () => {
                           Tipp: Kategorien verschwinden automatisch, wenn kein Artikel mehr zu ihnen gehört.
                         </Typography>
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
                         <Controller
                           name="price"
                           control={control}
@@ -884,7 +891,7 @@ const Articles = () => {
                           )}
                         />
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
                         <Controller
                           name="order"
                           control={control}
@@ -910,7 +917,7 @@ const Articles = () => {
                   <Box>
                     <Typography variant="overline" fontWeight={700} color="primary" display="block" gutterBottom>Bestandsführung</Typography>
                     <Grid container spacing={2}>
-                      <Grid item xs={4}>
+                      <Grid size={{ xs: 12, sm: 4 }}>
                         <Controller
                           name="unit"
                           control={control}
@@ -922,7 +929,7 @@ const Articles = () => {
                           )}
                         />
                       </Grid>
-                      <Grid item xs={4}>
+                      <Grid size={{ xs: 12, sm: 4 }}>
                         <Controller
                           name="purchaseUnit"
                           control={control}
@@ -931,7 +938,7 @@ const Articles = () => {
                           )}
                         />
                       </Grid>
-                      <Grid item xs={4}>
+                      <Grid size={{ xs: 12, sm: 4 }}>
                         <Controller
                           name="unitsPerPurchase"
                           control={control}
@@ -952,7 +959,7 @@ const Articles = () => {
                       </Grid>
                       {/* Preview Calculation */}
                       {(watchPurchaseUnit && watchUnitsPerPurchase) && (
-                        <Grid item xs={12}>
+                        <Grid size={{ xs: 12 }}>
                           <Alert severity="info" sx={{ py: 0, px: 2, alignItems: 'center' }}>
                             <Typography variant="caption">
                               1 {watchPurchaseUnit} = {watchUnitsPerPurchase} {watchUnit}
@@ -961,7 +968,7 @@ const Articles = () => {
                         </Grid>
                       )}
 
-                      <Grid item xs={6}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
                         <Controller
                           name="minStock"
                           control={control}
@@ -971,7 +978,7 @@ const Articles = () => {
                         />
                       </Grid>
                       {!editingArticle && (
-                        <Grid item xs={6}>
+                        <Grid size={{ xs: 12, sm: 6 }}>
                           <Controller
                             name="initialStock"
                             control={control}
@@ -988,13 +995,12 @@ const Articles = () => {
               </Grid>
             </Grid>
           </DialogContent>
-          <DialogActions sx={{ p: 2, bgcolor: 'background.paper', borderTop: `1px solid ${theme.palette.divider}` }}>
+          <DialogActions sx={{ p: 2, bgcolor: 'background.paper', borderTop: `1px solid ${theme.palette.divider}`, pb: { xs: 'calc(16px + env(safe-area-inset-bottom, 0px))', sm: 2 } }}>
             <Button onClick={handleCloseDialog} color="inherit" sx={{ borderRadius: 2 }}>Abbrechen</Button>
-            <Button type="submit" variant="contained" disabled={articleMutation.isPending} size="large" sx={{ borderRadius: 2, px: 4 }} startIcon={<Save />}>
-              {editingArticle ? 'Speichern' : 'Anlegen'}
+            <Button type="submit" variant="contained" disabled={articleMutation.isPending} size="large" sx={{ borderRadius: 2, px: 4, flex: { xs: 1, sm: 'none' } }} startIcon={<Save />}>
+              {articleMutation.isPending ? 'Speichert…' : (editingArticle ? 'Speichern' : 'Anlegen')}
             </Button>
           </DialogActions>
-        </form>
       </Dialog>
 
       {/* Expired Dialog */}
