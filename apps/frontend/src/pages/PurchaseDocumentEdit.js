@@ -43,6 +43,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import ArticleLinePicker from "../components/articles/ArticleLinePicker";
 import { useArticleLines, toPurchasePayload, linesFromPurchaseItems } from "../hooks/useArticleLines";
 import { useArticles, ARTICLES_QUERY_KEY } from "../hooks/useArticles";
+import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentEdit               */
@@ -103,6 +104,11 @@ export default function PurchaseDocumentEdit() {
     enabled: !!id && documentData?.type === "RECHNUNG" && !!watchedSupplier,
   });
   const unassignedLieferscheine = unassignedData?.documents || [];
+
+  // Aktuell zugeordnete Lieferscheine (bereits verknüpfte + neu angehakte) für die Bestandsinfo
+  const linkedLieferscheine = [...(documentData?.lieferscheine || []), ...unassignedLieferscheine]
+    .filter((ls, idx, arr) => linkedLieferscheinIds.has(ls.id) && arr.findIndex((x) => x.id === ls.id) === idx);
+  const ownLineCount = lines.filter((l) => (Number(l.crateQty) || 0) + (Number(l.baseQty) || 0) > 0).length;
 
   /* ---------------------------- Fill Form once ---------------------------- */
   useEffect(() => {
@@ -276,6 +282,15 @@ export default function PurchaseDocumentEdit() {
         )}
         <Controller name="description" control={control} render={({ field }) => <TextField {...field} label="Kommentar / Beschreibung" multiline minRows={2} size="small" fullWidth />} />
 
+        {/* Lieferschein, der schon zu einer Rechnung gehört */}
+        {documentData?.type === "LIEFERSCHEIN" && documentData?.rechnung && (
+          <Alert severity="info">
+            Dieser Lieferschein ist der Rechnung <strong>{documentData.rechnung.documentNumber}</strong> zugeordnet
+            {documentData.rechnung.documentDate ? ` (${format(new Date(documentData.rechnung.documentDate), "dd.MM.yyyy", { locale: de })})` : ""}.
+            Der Wareneingang ist über diesen Lieferschein gebucht.
+          </Alert>
+        )}
+
         {/* Lieferscheine zuordnen */}
         {documentData?.type === "RECHNUNG" && (
           <Box>
@@ -283,6 +298,11 @@ export default function PurchaseDocumentEdit() {
             <Typography variant="subtitle1" fontWeight={700} gutterBottom>
               Lieferscheine zuordnen
             </Typography>
+            {linkedLieferscheine.length > 0 && (
+              <Box sx={{ mb: 1.5 }}>
+                <LinkedLieferscheineInfo lieferscheine={linkedLieferscheine} ownLineCount={ownLineCount} />
+              </Box>
+            )}
             {isLoadingUnassigned && <CircularProgress size={20} />}
             <List dense disablePadding>
               {(documentData?.lieferscheine || []).map((ls) => (

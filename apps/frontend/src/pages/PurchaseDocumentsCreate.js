@@ -34,6 +34,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import ArticleLinePicker from "../components/articles/ArticleLinePicker";
 import { useArticleLines, toPurchasePayload } from "../hooks/useArticleLines";
 import { useArticles, ARTICLES_QUERY_KEY } from "../hooks/useArticles";
+import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentCreate             */
@@ -98,6 +99,9 @@ export default function PurchaseDocumentCreate() {
   /* ---------------------------- Delivery Notes ---------------------------- */
   const [selectedLieferscheine, setSelectedLieferscheine] = useState([]);
   const supplierValue = watch("supplier");
+
+  // Positionen mit Menge > 0 auf der Rechnung selbst (für die Doppelbuchungs-Warnung)
+  const ownLineCount = lines.filter((l) => (Number(l.crateQty) || 0) + (Number(l.baseQty) || 0) > 0).length;
 
   const { data: unassignedLieferscheine = [], isLoading: isLoadingUnassigned } = useQuery({
     queryKey: ["unassigned-lieferscheine", supplierValue],
@@ -256,6 +260,11 @@ export default function PurchaseDocumentCreate() {
               />
             )}
           />
+        )}
+
+        {/* Regel: Lieferschein UND Rechnungspositionen buchen jeweils Bestand – Zuordnung ändert nichts */}
+        {isRechnung && selectedLieferscheine.length > 0 && (
+          <LinkedLieferscheineInfo lieferscheine={selectedLieferscheine} ownLineCount={ownLineCount} />
         )}
 
         <Button
