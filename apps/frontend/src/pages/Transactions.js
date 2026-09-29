@@ -44,6 +44,16 @@ import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import KPICard from '../components/common/KPICard';
 
+// Stornierbar sind Verkäufe und die geldlosen Buchungen (Eigenverbrauch, Abgelaufen).
+// Ein REFUND ist selbst schon der Storno und wird nie storniert.
+const CANCELLABLE_TYPES = ['SALE', 'OWNER_USE', 'EXPIRED'];
+
+const cancelCopy = (t) => {
+  if (t?.type === 'OWNER_USE') return { title: 'Eigenverbrauch stornieren', question: 'Soll diese „Auf den Wirt“-Buchung storniert werden? Der Bestand wird zurückgebucht.' };
+  if (t?.type === 'EXPIRED') return { title: 'Abschreibung stornieren', question: 'Soll diese Abschreibung (Abgelaufen/Bruch) storniert werden? Der Bestand wird zurückgebucht.' };
+  return { title: 'Transaktion stornieren', question: 'Möchten Sie diese Transaktion wirklich stornieren?' };
+};
+
 const Transactions = () => {
   const queryClient = useQueryClient();
   const [selectedTransaction, setSelectedTransaction] = useState(null);
@@ -324,8 +334,8 @@ const Transactions = () => {
                       <Info />
                     </IconButton>
                   </Tooltip>
-                  {!transaction.cancelled && transaction.type === 'SALE' && (
-                    <Tooltip title="Stornieren">
+                  {!transaction.cancelled && CANCELLABLE_TYPES.includes(transaction.type) && (
+                    <Tooltip title={transaction.type === 'SALE' ? 'Stornieren' : 'Buchung stornieren (Bestand zurückbuchen)'}>
                       <IconButton
                         size="small"
                         color="error"
@@ -444,22 +454,28 @@ const Transactions = () => {
 
       {/* Cancel Confirmation Dialog */}
       <Dialog open={cancelDialog} onClose={handleCloseCancel}>
-        <DialogTitle>Transaktion stornieren</DialogTitle>
+        <DialogTitle>{cancelCopy(selectedTransaction).title}</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
             Diese Aktion kann nicht rückgängig gemacht werden!
           </Alert>
-          <Typography>
-            Möchten Sie diese Transaktion wirklich stornieren?
-          </Typography>
+          <Typography>{cancelCopy(selectedTransaction).question}</Typography>
           {selectedTransaction && (
             <Box sx={{ mt: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                Betrag: {formatCurrency(selectedTransaction.totalAmount)}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Kunde: {selectedTransaction.customer?.name || 'Bar-Zahlung'}
-              </Typography>
+              {selectedTransaction.type === 'SALE' ? (
+                <>
+                  <Typography variant="body2" color="text.secondary">
+                    Betrag: {formatCurrency(selectedTransaction.totalAmount)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Kunde: {selectedTransaction.customer?.name || 'Bar-Zahlung'}
+                  </Typography>
+                </>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {selectedTransaction.items?.length || 0} Artikel werden wieder in den Bestand gebucht. Es fließt kein Geld.
+                </Typography>
+              )}
             </Box>
           )}
         </DialogContent>
