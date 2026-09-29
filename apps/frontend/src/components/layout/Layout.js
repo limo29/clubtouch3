@@ -154,11 +154,11 @@ const Layout = () => {
           <List component="div" disablePadding>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/purchases')} onClick={() => { navigate('/purchases'); setMobileOpen(false); }}>
               <ListItemIcon><ShoppingBasket /></ListItemIcon>
-              <ListItemText primary="Einkäufe" />
+              <ListItemText primary="Einkauf" />
             </ListItemButton>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/invoices')} onClick={() => { navigate('/invoices'); setMobileOpen(false); }}>
               <ListItemIcon><Description /></ListItemIcon>
-              <ListItemText primary="Rechnungen" />
+              <ListItemText primary="Kundenrechnungen" />
             </ListItemButton>
 
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/transactions')} onClick={() => { navigate('/transactions'); setMobileOpen(false); }}>
@@ -215,8 +215,8 @@ const Layout = () => {
     if (p.startsWith('/dashboard')) return 'Dashboard';
     if (p.startsWith('/highscore')) return 'Highscore';
     if (p.startsWith('/ads')) return 'Werbung';
-    if (p.startsWith('/invoices')) return 'Rechnungen';
-    if (p.startsWith('/purchases')) return 'Ausgaben';
+    if (p.startsWith('/invoices')) return 'Kundenrechnungen';
+    if (p.startsWith('/purchases')) return 'Einkauf';
     if (p.startsWith('/transactions')) return 'Transaktionen';
     if (p.startsWith('/cash-count')) return 'Kasse zählen';
     if (p.startsWith('/profit-loss')) return 'Kassenprüfung';

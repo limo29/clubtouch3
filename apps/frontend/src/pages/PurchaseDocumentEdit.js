@@ -352,10 +352,10 @@ export default function PurchaseDocumentEdit() {
             </IconButton>
             <Box>
               <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1.2, display: "block" }}>
-                Beleg bearbeiten ({documentData?.documentNumber})
+                Einkauf · Beleg bearbeiten ({documentData?.documentNumber})
               </Typography>
               <Typography variant="h5" fontWeight={700}>
-                {documentData?.type === "RECHNUNG" ? "Rechnung" : "Lieferschein"}
+                {documentData?.type === "RECHNUNG" ? "Lieferantenrechnung" : "Lieferschein"}
               </Typography>
             </Box>
           </Stack>

@@ -235,7 +235,7 @@ export default function Dashboard() {
           {[
             { title: 'Verkauf', icon: LocalBar, color: ['#FFC107', '#FF9800'], to: '/sales' },
             { title: 'Einkauf', icon: ShoppingCart, color: ['#66BB6A', '#43A047'], to: '/purchases' },
-            { title: 'Rechnungen', icon: ReceiptLong, color: ['#42A5F5', '#1E88E5'], to: '/invoices' },
+            { title: 'Kundenrechnungen', icon: ReceiptLong, color: ['#42A5F5', '#1E88E5'], to: '/invoices' },
             { title: 'Bestände', icon: Inventory, color: ['#26C6DA', '#00ACC1'], to: '/articles' },
             { title: 'Statistik', icon: Assessment, color: ['#AB47BC', '#8E24AA'], to: '/reports' },
             { title: 'Abrechnung', icon: AccountBalance, color: ['#EF5350', '#E53935'], to: '/profit-loss' },
@@ -265,7 +265,7 @@ export default function Dashboard() {
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <KPICard
-            title="Offene Rechnungen"
+            title="Offene Kundenrechnungen"
             value={openInvoicesCount}
             icon={ShoppingBasket}
             color={openInvoicesCount > 0 ? "warning" : "success"}

@@ -175,7 +175,7 @@ export default function Invoices() {
         '& input': { fontSize: { xs: 16, sm: 14 } }
       }}
     >
-      <Typography variant="h4" gutterBottom>Rechnungen</Typography>
+      <Typography variant="h4" gutterBottom>Kundenrechnungen</Typography>
 
       {/* KPI Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -461,7 +461,7 @@ export default function Invoices() {
           <Box sx={{ height: '100%', display: 'grid', gridTemplateRows: 'auto 1fr' }}>
             <DialogTitle sx={{ position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-                <span>{editInvoice ? `Rechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Rechnung'}</span>
+                <span>{editInvoice ? `Kundenrechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Kundenrechnung'}</span>
                 <Button color="error" startIcon={<CloseIcon />} onClick={() => setShowCreate(false)}>Abbrechen</Button>
               </Box>
             </DialogTitle>
@@ -501,7 +501,7 @@ export default function Invoices() {
         <Dialog open={showCreate} onClose={() => setShowCreate(false)} fullScreen>
           <DialogTitle sx={{ position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-              <span>{editInvoice ? `Rechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Rechnung'}</span>
+              <span>{editInvoice ? `Kundenrechnung bearbeiten – ${editInvoice.invoiceNumber}` : 'Neue Kundenrechnung'}</span>
               <Button color="error" startIcon={<CloseIcon />} onClick={() => setShowCreate(false)}>Abbrechen</Button>
             </Box>
           </DialogTitle>

@@ -60,8 +60,8 @@ describe('Navigation Layout', () => {
         const finanzen = screen.getByText('Finanzen');
         fireEvent.click(finanzen);
 
-        expect(screen.getByText('Rechnungen')).toBeInTheDocument();
-        expect(screen.getByText('Ausgaben')).toBeInTheDocument();
+        expect(screen.getByText('Kundenrechnungen')).toBeInTheDocument();
+        expect(screen.getByText('Einkauf')).toBeInTheDocument();
         expect(screen.getByText('Transaktionen')).toBeInTheDocument();
         expect(screen.getByText('EÜR')).toBeInTheDocument();
         expect(screen.getByText('Berichte')).toBeInTheDocument();

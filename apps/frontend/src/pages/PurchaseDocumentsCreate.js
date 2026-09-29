@@ -374,10 +374,10 @@ export default function PurchaseDocumentCreate() {
             </IconButton>
             <Box>
               <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1.2, display: "block" }}>
-                {isRechnung ? "Einkauf mit Wareneingang" : "Wareneingang ohne Einkauf"}
+                {isRechnung ? "Einkauf · Rechnung mit Wareneingang" : "Einkauf · Wareneingang, Rechnung folgt"}
               </Typography>
               <Typography variant="h5" fontWeight={700}>
-                {isRechnung ? "Neuer Einkauf" : "Neuer Lieferschein"}
+                {isRechnung ? "Neue Lieferantenrechnung" : "Neuer Lieferschein"}
               </Typography>
             </Box>
           </Stack>

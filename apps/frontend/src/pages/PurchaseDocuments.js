@@ -351,7 +351,7 @@ export default function PurchaseDocuments() {
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
             <Box>
               <Typography variant="subtitle2" color="text.secondary" fontSize={11}>
-                {doc.type}
+                {isRechnung ? "Lieferantenrechnung" : "Lieferschein"}
               </Typography>
               <Typography variant="h6" fontWeight={700} lineHeight={1.2}>
                 {doc.documentNumber}
@@ -452,10 +452,10 @@ export default function PurchaseDocuments() {
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
           <Box>
             <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: "-0.02em" }}>
-              Einkäufe
+              Einkauf
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              Verwaltung aller Rechnungen und Lieferscheine
+              Lieferantenrechnungen und Lieferscheine
             </Typography>
           </Box>
         </Stack>
@@ -471,7 +471,7 @@ export default function PurchaseDocuments() {
             onClick={() => navigate("/purchases/create", { state: { type: "RECHNUNG" } })}
             sx={{ py: 1.5, fontWeight: 700, boxShadow: theme.shadows[4] }}
           >
-            Neuer Einkauf
+            Neue Lieferantenrechnung
           </Button>
           <Button
             variant="outlined"
@@ -481,7 +481,7 @@ export default function PurchaseDocuments() {
             onClick={() => navigate("/purchases/create", { state: { type: "LIEFERSCHEIN" } })}
             sx={{ py: 1.5, color: "text.primary", borderColor: "divider" }}
           >
-            Lieferschein
+            Neuer Lieferschein
           </Button>
         </Stack>
       </Box>
@@ -527,7 +527,7 @@ export default function PurchaseDocuments() {
             }}
           >
             <AddIcon fontSize="large" />
-            Neuer Einkauf
+            Lieferantenrechnung
           </Button>
         </Grid>
         <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: "none", md: "block" } }}>
