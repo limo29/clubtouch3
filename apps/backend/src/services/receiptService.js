@@ -5,7 +5,8 @@
 const path = require('path');
 const fs = require('fs');
 const fsPromises = require('fs').promises;
-const { ZipArchive } = require('archiver');
+// archiver 7.x (CommonJS). Version 8 ist reines ESM und lässt sich unter Node 18 (Docker-Image) nicht per require laden.
+const archiver = require('archiver');
 const prisma = require('../utils/prisma');
 const fileUploadService = require('./fileUploadService');
 const exportService = require('./exportService');
@@ -204,8 +205,7 @@ class ReceiptService {
     const nameSlug = _supplierSlug(name).replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 40) || 'Zeitraum';
     const filename = `nachweise_${nameSlug}_${fmtYMD(start)}_${fmtYMD(end)}.zip`;
 
-    // Archiver erstellen (archiver v8: ZipArchive)
-    const archive = new ZipArchive({ zlib: { level: 6 } });
+    const archive = archiver('zip', { zlib: { level: 6 } });
 
     // Dateien hinzufügen
     for (const doc of list.documents) {
