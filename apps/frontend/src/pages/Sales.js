@@ -18,11 +18,12 @@ import { useOffline } from '../context/OfflineContext';
 import { ARTICLES_QUERY_KEY } from '../hooks/useArticles';
 import { useArticleLines, toSalePayload } from '../hooks/useArticleLines';
 import ArticleLinePicker from '../components/articles/ArticleLinePicker';
+import { isCurrentBusinessDay } from '../utils/businessDay';
 import { num, money } from '../utils/format';
 
 /* Helpers */
 const withinHours = (date, h) => { const d = new Date(date); if (Number.isNaN(d.getTime())) return false; return Date.now() - d.getTime() <= h * 60 * 60 * 1000; };
-const isToday = (d) => { const date = new Date(d); const today = new Date(); return date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear(); };
+const timeLabel = (d) => { const date = new Date(d); return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); };
 
 /* Change Calculator */
 function ChangeCalculator({ total, open, onClose, autoHideMs = 20000 }) {
@@ -233,50 +234,51 @@ const Sales = () => {
 
   const handleOpenHistory = async (customer) => { setHistoryCustomer(customer); setShowHistory(true); await refetchHistory(); };
 
-  // Filtered Data
-  // Filtered Data
-  const filteredCustomers = useMemo(() => {
-    const s = customerSearch.toLowerCase();
-
-    // 1. Alle Kunden, die zur Suche passen
+  // Kundenliste: zwei klar beschriftete Abschnitte.
+  // „Heute an der Theke" = Käufe im laufenden Geschäftstag (06:00 → 06:00), zuletzt aktiv zuerst,
+  // damit der Gast, der gerade bestellt hat, ganz oben steht. Darunter alle Kunden alphabetisch.
+  // Bei aktiver Suche nur die Treffer, ohne Doppelungen.
+  const { alphabetical, todayCustomers } = useMemo(() => {
+    const s = customerSearch.trim().toLowerCase();
     const matches = customersData.customers.filter(c =>
-      c.active !== false && ( // Nur aktive Kunden anzeigen
+      c.active !== false && (
         c.name.toLowerCase().includes(s) || (c.nickname && c.nickname.toLowerCase().includes(s))
       )
     );
-
-    // 2. Sortiere alle alphabetisch
-    const alphabetical = [...matches].sort((a, b) => {
-      const nameA = (a.nickname || a.name).toLowerCase();
-      const nameB = (b.nickname || b.name).toLowerCase();
-      return nameA.localeCompare(nameB);
-    });
-
-    // 3. Finde aktive Kunden (Heute was gekauft)
-    // backend update sorgt dafür, dass lastActivity bei jedem Kauf gesetzt wird
-    const activeToday = alphabetical.filter(c => isToday(c.lastActivity));
-
-    // 4. Markiere diese als "Special Highlight" Kopien
-    const activeCopies = activeToday.map(c => ({ ...c, _specialActive: true }));
-
-    // 5. Array Zusammensetzen: Aktive (oben) + Alphabetisch (unten)
-    return [...activeCopies, ...alphabetical];
+    const alphabetical = [...matches].sort((a, b) =>
+      (a.nickname || a.name).toLowerCase().localeCompare((b.nickname || b.name).toLowerCase(), 'de')
+    );
+    const todayCustomers = s
+      ? []
+      : alphabetical
+        .filter(c => isCurrentBusinessDay(c.lastActivity))
+        .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity))
+        .map(c => ({ ...c, _specialActive: true }));
+    return { alphabetical, todayCustomers };
   }, [customersData.customers, customerSearch]);
 
-  // Alphabet Quick Nav
+  // Alphabet-Schnellnavigation: Buchstaben ohne Kunden werden abgeschwächt dargestellt
   const alphabet = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const letterOf = (c) => { const n = (c.nickname || c.name || '').toUpperCase(); return /^[A-Z]/.test(n) ? n[0] : '#'; };
+  const presentLetters = useMemo(() => new Set(alphabetical.map(letterOf)), [alphabetical]);
   const scrollToLetter = (letter) => {
-    const target = filteredCustomers.find(c => {
-      if (c._specialActive) return false; // Überspringe die "Doppelten" oben
-      const name = c.nickname || c.name;
-      if (letter === '#') return !/^[A-Z]/i.test(name);
-      return name.toUpperCase().startsWith(letter);
-    });
+    const target = alphabetical.find(c => letterOf(c) === letter);
     if (target) {
       const el = document.getElementById(`customer-${target.id}`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
+
+  const SectionLabel = ({ children }) => (
+    <Typography
+      variant="overline"
+      sx={{ position: 'sticky', top: -12, zIndex: 1, display: 'block', mx: -1.5, px: 1.5, py: 0.5, mb: 1, mt: 0.5,
+        bgcolor: 'background.paper', color: 'text.secondary', fontWeight: 800, letterSpacing: '0.08em', lineHeight: 1.6,
+        borderBottom: '1px solid', borderColor: 'divider' }}
+    >
+      {children}
+    </Typography>
+  );
 
   /* Sub-Components */
   const CustomerRow = ({ customer }) => {
@@ -287,6 +289,7 @@ const Sales = () => {
         onClick={() => setTargetCustomer(customer)}
         sx={{
           p: 1.5,
+          scrollMarginTop: 40,
           border: isSelected ? '2px solid' : '1px solid',
           borderColor: isSelected ? 'primary.main' : (customer._specialActive ? 'rgba(76, 175, 80, 0.3)' : 'divider'),
           cursor: 'pointer',
@@ -311,7 +314,9 @@ const Sales = () => {
           </Avatar>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography noWrap variant="body1" sx={{ fontWeight: 600, fontSize: '1rem' }}>{customer.nickname || customer.name}</Typography>
-            {customer.nickname && (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.name}</Typography>)}
+            {customer._specialActive
+              ? (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.nickname ? `${customer.name} · ` : ''}zuletzt {timeLabel(customer.lastActivity)}</Typography>)
+              : customer.nickname && (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.name}</Typography>)}
           </Box>
           <Typography variant="body1" fontWeight={800} color={customer.balance < 5 ? 'error' : 'success.main'} sx={{ flexShrink: 0 }}>
             {money(customer.balance)}
@@ -348,7 +353,8 @@ const Sales = () => {
           {alphabet.map(char => (
             <Box key={char} onClick={() => scrollToLetter(char)}
               sx={{
-                cursor: 'pointer', fontWeight: 900, fontSize: '0.9rem', color: 'text.secondary', width: '100%', textAlign: 'center', py: 0.75,
+                cursor: presentLetters.has(char) ? 'pointer' : 'default', fontWeight: 900, fontSize: '0.9rem', width: '100%', textAlign: 'center', py: 0.75,
+                color: presentLetters.has(char) ? 'text.secondary' : 'action.disabled',
                 '&:hover': { color: 'primary.main', bgcolor: 'action.hover' }
               }}>
               {char}
@@ -356,7 +362,19 @@ const Sales = () => {
           ))}
         </Stack>
         <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
-          {filteredCustomers.map(c => <CustomerRow key={c._specialActive ? `active-${c.id}` : c.id} customer={c} />)}
+          {todayCustomers.length > 0 && (
+            <>
+              <SectionLabel>Heute an der Theke ({todayCustomers.length})</SectionLabel>
+              {todayCustomers.map(c => <CustomerRow key={`active-${c.id}`} customer={c} />)}
+              <SectionLabel>Alle Kunden ({alphabetical.length})</SectionLabel>
+            </>
+          )}
+          {alphabetical.map(c => <CustomerRow key={c.id} customer={c} />)}
+          {alphabetical.length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
+              {customerSearch ? `Kein Kunde passt zu „${customerSearch}“` : 'Noch keine Kunden angelegt'}
+            </Typography>
+          )}
         </Box>
       </Box>
     </Card>
