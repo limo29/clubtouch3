@@ -58,8 +58,8 @@ class HighscoreController {
     try {
       const { type } = req.body;
       if (type !== 'YEARLY') return res.status(400).json({ error: 'Nur YEARLY kann zurückgesetzt werden' });
-      await highscoreService.resetHighscore(type, req.user.id);
-      res.json({ message: 'Highscore zurückgesetzt', type });
+      const result = await highscoreService.resetHighscore(type, req.user.id);
+      res.json({ message: 'Jahres-Clubscore zurückgesetzt', type, ...result });
     } catch (error) {
       console.error('Reset highscore error:', error);
       res.status(500).json({ error: error.message || 'Fehler beim Zurücksetzen' });

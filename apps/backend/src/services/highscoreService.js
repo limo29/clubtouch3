@@ -6,17 +6,40 @@ const { BUSINESS_DAY_START_HOUR, businessDayWindow, businessDayLabel } = require
 class HighscoreService {
   async getSettings() {
     // Kannst du später aus DB/ENV laden
+    const lastReset = await this._getLastYearlyReset();
     return {
       dailyResetHour: BUSINESS_DAY_START_HOUR, // derselbe Geschäftstag wie Tagesabschluss/Dashboard
       displayCount: 20,            // Top 20
       countInactiveArticles: false,
-      scoreMode: 'AMOUNT'
+      scoreMode: 'AMOUNT',
+      yearlyStart: this._yearlyStartFrom(lastReset),
+      lastYearlyReset: lastReset ? { at: lastReset.createdAt, byUserId: lastReset.userId } : null,
     };
   }
 
-  _getPeriodStart(type, resetHour = BUSINESS_DAY_START_HOUR) {
+  /** Letzter manueller Jahres-Reset (AuditLog-Marke, kein eigenes Schema). */
+  async _getLastYearlyReset() {
+    return prisma.auditLog.findFirst({
+      where: { entityType: 'Highscore', action: 'RESET_YEARLY_HIGHSCORE' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true, userId: true },
+    });
+  }
+
+  /**
+   * Start der Jahreswertung: Kalenderjahresanfang, es sei denn, es gab in diesem
+   * Kalenderjahr einen manuellen Reset – dann zählt ab dem Reset-Zeitpunkt.
+   * (Vorher wurde der Reset nur archiviert und die Wertung lief unverändert weiter.)
+   */
+  _yearlyStartFrom(lastReset) {
+    const jan1 = new Date(new Date().getFullYear(), 0, 1);
+    if (lastReset && lastReset.createdAt > jan1) return lastReset.createdAt;
+    return jan1;
+  }
+
+  async _getPeriodStart(type, resetHour = BUSINESS_DAY_START_HOUR) {
     if (type === 'YEARLY') {
-      return new Date(new Date().getFullYear(), 0, 1);
+      return this._yearlyStartFrom(await this._getLastYearlyReset());
     }
     return businessDayWindow(new Date(), resetHour).start;
   }
@@ -37,9 +60,12 @@ class HighscoreService {
     return articles.map(a => a.id);
   }
 
+  // Hinweis: "createdAt" ist timestamp ohne Zeitzone (Prisma speichert UTC). Ein JS-Date-Parameter
+  // kommt als timestamptz an; ohne "AT TIME ZONE 'UTC'" würde Postgres die Spalte in der
+  // Session-Zeitzone interpretieren und das Fenster um den UTC-Offset verschieben.
   async calculateHighscore(type = 'DAILY', mode = 'AMOUNT') {
     const settings = await this.getSettings();
-    const startDate = this._getPeriodStart(type, settings.dailyResetHour);
+    const startDate = await this._getPeriodStart(type, settings.dailyResetHour);
     const articleIds = await this._getCountingArticleIds(settings.countInactiveArticles);
 
     if (!articleIds.length) {
@@ -68,7 +94,7 @@ class HighscoreService {
         FROM "Customer" c
         JOIN "Transaction" t   ON t."customerId" = c.id
         JOIN "TransactionItem" ti ON ti."transactionId" = t.id
-        WHERE t."createdAt" >= ${startDate}
+        WHERE t."createdAt" >= (${startDate}::timestamptz AT TIME ZONE 'UTC')
           AND t.cancelled = false
           AND t.type = 'SALE'
           AND ti."articleId" IN (${Prisma.join(articleIds)})
@@ -95,7 +121,7 @@ class HighscoreService {
 
   async getCustomerPosition(customerId, type = 'DAILY', mode = 'AMOUNT') {
     const settings = await this.getSettings();
-    const startDate = this._getPeriodStart(type, settings.dailyResetHour);
+    const startDate = await this._getPeriodStart(type, settings.dailyResetHour);
     const articleIds = await this._getCountingArticleIds(settings.countInactiveArticles);
     if (!articleIds.length) return null;
 
@@ -116,7 +142,7 @@ class HighscoreService {
           FROM "Customer" c
           JOIN "Transaction" t    ON t."customerId" = c.id
           JOIN "TransactionItem" ti ON ti."transactionId" = t.id
-          WHERE t."createdAt" >= ${startDate}
+          WHERE t."createdAt" >= (${startDate}::timestamptz AT TIME ZONE 'UTC')
             AND t.cancelled = false
             AND t.type = 'SALE'
             AND ti."articleId" IN (${Prisma.join(articleIds)})
@@ -270,9 +296,21 @@ class HighscoreService {
     if (type !== 'YEARLY') {
       throw new Error('Nur der Jahres-Highscore kann manuell zurückgesetzt werden');
     }
-    const current = await this.calculateHighscore('YEARLY', 'AMOUNT');
-    await prisma.auditLog.create({
-      data: { userId, action: 'RESET_YEARLY_HIGHSCORE', entityType: 'Highscore', entityId: 'yearly', changes: { archivedHighscore: current } },
+    // Stand vor dem Reset in beiden Modi archivieren; der AuditLog-Eintrag ist
+    // zugleich die Startmarke der neuen Jahreswertung (siehe _yearlyStartFrom).
+    const [archivedAmount, archivedCount] = await Promise.all([
+      this.calculateHighscore('YEARLY', 'AMOUNT'),
+      this.calculateHighscore('YEARLY', 'COUNT'),
+    ]);
+    const created = await prisma.auditLog.create({
+      data: {
+        userId, action: 'RESET_YEARLY_HIGHSCORE', entityType: 'Highscore', entityId: 'yearly',
+        changes: {
+          periodStart: archivedAmount.startDate,
+          archivedHighscore: archivedAmount,
+          archivedHighscoreCount: archivedCount,
+        },
+      },
     });
 
     const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
@@ -287,6 +325,7 @@ class HighscoreService {
       yearly: { amount: yearlyAmount, count: yearlyCount },
       reset: true, resetType: 'YEARLY',
     });
+    return { resetAt: created.createdAt, archivedEntries: archivedAmount.entries.length };
   }
 
   /* Customer Achievements – unverändert zu deinem Stand, hier gekürzt */
@@ -297,14 +336,14 @@ class HighscoreService {
       totalSpent,
       favoriteArticle,
     ] = await Promise.all([
-      prisma.transaction.count({ where: { customerId, cancelled: false } }),
-      prisma.transaction.aggregate({ where: { customerId, cancelled: false }, _sum: { totalAmount: true } }),
+      prisma.transaction.count({ where: { customerId, cancelled: false, type: 'SALE' } }),
+      prisma.transaction.aggregate({ where: { customerId, cancelled: false, type: 'SALE' }, _sum: { totalAmount: true } }),
       prisma.$queryRaw`
         SELECT a.name, COUNT(*) as count
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
-        WHERE t."customerId" = ${customerId} AND t.cancelled = false
+        WHERE t."customerId" = ${customerId} AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY a.id, a.name
         ORDER BY count DESC
         LIMIT 1
