@@ -85,7 +85,8 @@ class PurchaseDocumentController {
         startDate: req.query.startDate,
         endDate: req.query.endDate,
         paid: req.query.paid,
-        search: req.query.search
+        search: req.query.search,
+        supplier: req.query.supplier
       };
 
       const documents = await purchaseDocumentService.listDocuments(filters);

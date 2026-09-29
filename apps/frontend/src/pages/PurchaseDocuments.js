@@ -23,6 +23,8 @@ import {
   Tooltip,
   Divider,
   useMediaQuery,
+  Autocomplete,
+  TextField,
 } from "@mui/material";
 import {
   CheckCircle as CheckIcon,
@@ -34,12 +36,14 @@ import {
   ExpandLess,
   MoneyOff,
   ReceiptLong,
+  LocalShipping,
 } from "@mui/icons-material";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { useTheme, alpha } from "@mui/material/styles";
 import KPICard from '../components/common/KPICard';
+import { summarizeItems } from "../utils/purchaseDocs";
 
 /* ---------------- helpers ---------------- */
 const num = (v) => {
@@ -158,7 +162,16 @@ export default function PurchaseDocuments() {
   const queryClient = useQueryClient();
   const theme = useTheme();
 
-  const [filters, setFilters] = useState({ startDate: null, endDate: null });
+  const EMPTY_FILTERS = { startDate: null, endDate: null, supplier: null };
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+
+  /* -------- Lieferanten für den Filter -------- */
+  const { data: suppliersData } = useQuery({
+    queryKey: ["purchase-suppliers"],
+    queryFn: () => api.get("/purchase-documents/suppliers").then((r) => r.data),
+    staleTime: 60_000,
+  });
+  const suppliers = suppliersData?.suppliers || [];
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [deletingId, setDeletingId] = useState(null);
   const [uploadDocId, setUploadDocId] = useState(null);
@@ -171,6 +184,7 @@ export default function PurchaseDocuments() {
       const params = {};
       if (filters.startDate) params.startDate = format(filters.startDate, "yyyy-MM-dd");
       if (filters.endDate) params.endDate = format(filters.endDate, "yyyy-MM-dd");
+      if (filters.supplier) params.supplier = filters.supplier;
       const res = await api.get("/purchase-documents", { params });
       const docs = Array.isArray(res.data?.documents) ? res.data.documents : [];
       // Sort: newest first
@@ -244,8 +258,9 @@ export default function PurchaseDocuments() {
   };
 
   const handleFilterChange = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
+  const hasActiveFilters = !!(filters.startDate || filters.endDate || filters.supplier);
   const resetFilters = () => {
-    setFilters({ startDate: null, endDate: null });
+    setFilters(EMPTY_FILTERS);
     queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
   };
 
@@ -344,6 +359,16 @@ export default function PurchaseDocuments() {
               <Typography variant="body2" fontWeight={500} color="text.primary">
                 {doc.supplier}
               </Typography>
+              {hasChildren && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="info"
+                  icon={<LocalShipping />}
+                  label={`${doc.lieferscheine.length} Lieferschein${doc.lieferscheine.length === 1 ? "" : "e"} · Bestand gebucht`}
+                  sx={{ mt: 0.5, height: 22, fontSize: 11 }}
+                />
+              )}
             </Box>
             <Stack alignItems="flex-end">
               <Typography variant="body2" fontWeight={600} color={isRechnung ? "text.primary" : "text.secondary"}>
@@ -397,7 +422,7 @@ export default function PurchaseDocuments() {
                         <Typography variant="caption">{fmtDate(ls.documentDate)}</Typography>
                       </Stack>
                       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary">{ls.supplier}</Typography>
+                        <Typography variant="caption" color="text.secondary">{summarizeItems(ls.items) || ls.supplier}</Typography>
                         <Stack direction="row" spacing={1}>
                           <NachweisIcon nachweisUrl={ls.nachweisUrl} onClickUpload={() => handleUploadTrigger(ls.id)} />
                           <IconButton size="small" sx={{ p: 0.5 }} onClick={() => edit(ls.id)}>
@@ -463,7 +488,7 @@ export default function PurchaseDocuments() {
 
       {/* Quick Stats & Actions Grid */}
       <Grid container spacing={2} sx={{ mb: 3 }} alignItems="stretch">
-        <Grid item xs={6} md={3}>
+        <Grid size={{ xs: 6, md: 3 }}>
           <KPICard
             title="Offen / Unbezahlt"
             value={stats.offeneRechnungen}
@@ -471,7 +496,7 @@ export default function PurchaseDocuments() {
             color="error"
           />
         </Grid>
-        <Grid item xs={6} md={3}>
+        <Grid size={{ xs: 6, md: 3 }}>
           <KPICard
             title="Ohne Nachweis"
             value={stats.ohneNachweis}
@@ -481,7 +506,7 @@ export default function PurchaseDocuments() {
         </Grid>
 
         {/* Desktop Action Buttons: Visible only on md+ */}
-        <Grid item xs={6} md={3} sx={{ display: { xs: "none", md: "block" } }}>
+        <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: "none", md: "block" } }}>
           <Button
             variant="contained"
             color="primary"
@@ -505,7 +530,7 @@ export default function PurchaseDocuments() {
             Neuer Einkauf
           </Button>
         </Grid>
-        <Grid item xs={6} md={3} sx={{ display: { xs: "none", md: "block" } }}>
+        <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: "none", md: "block" } }}>
           <Button
             variant="outlined"
             color="inherit"
@@ -552,8 +577,17 @@ export default function PurchaseDocuments() {
               onChange={(d) => handleFilterChange("endDate", d)}
               slotProps={{ textField: { size: "small", fullWidth: true, sx: { minWidth: 120, flex: 1 } } }}
             />
+            <Autocomplete
+              options={suppliers}
+              value={filters.supplier}
+              onChange={(e, v) => handleFilterChange("supplier", v || null)}
+              size="small"
+              sx={{ minWidth: 200, flex: 1 }}
+              noOptionsText="Kein Lieferant"
+              renderInput={(params) => <TextField {...params} label="Lieferant" placeholder="Alle Lieferanten" />}
+            />
           </Box>
-          <Button variant="text" size="small" onClick={resetFilters} sx={{ ml: "auto !important", width: { xs: "100%", sm: "auto" } }}>
+          <Button variant="text" size="small" onClick={resetFilters} disabled={!hasActiveFilters} sx={{ ml: "auto !important", width: { xs: "100%", sm: "auto" } }}>
             Filter zurücksetzen
           </Button>
         </Stack>
@@ -627,6 +661,19 @@ export default function PurchaseDocuments() {
                                 <Typography component="span" variant="body2" fontWeight={600}>
                                   {doc.documentNumber}
                                 </Typography>
+                                {hasChildren && (
+                                  <Tooltip title={`Wareneingang über ${doc.lieferscheine.length} Lieferschein${doc.lieferscheine.length === 1 ? "" : "e"} gebucht. Zum Anzeigen aufklappen.`}>
+                                    <Chip
+                                      size="small"
+                                      variant="outlined"
+                                      color="info"
+                                      icon={<LocalShipping />}
+                                      label={`${doc.lieferscheine.length} LS`}
+                                      onClick={() => toggleRow(doc.id)}
+                                      sx={{ ml: 1, height: 20, fontSize: 10 }}
+                                    />
+                                  </Tooltip>
+                                )}
                               </Box>
                             </Stack>
                           </TableCell>
@@ -662,10 +709,12 @@ export default function PurchaseDocuments() {
                           <TableRow key={ls.id} sx={{ bgcolor: alpha(theme.palette.action.hover, 0.05) }}>
                             <TableCell colSpan={7} sx={{ py: 1, px: 0 }}>
                               <Box sx={{ pl: 8, pr: 2, display: 'flex', alignItems: 'center', justifyContent: "space-between" }}>
-                                <Stack direction="row" spacing={2} alignItems="center">
+                                <Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 0, flexWrap: "wrap" }}>
                                   <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>↳ {ls.documentNumber}</Typography>
-                                  <Typography variant="body2" color="text.secondary">{ls.supplier}</Typography>
                                   <Typography variant="caption" color="text.secondary">{fmtDate(ls.documentDate)}</Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {summarizeItems(ls.items) ? `Bestand gebucht: ${summarizeItems(ls.items)}` : "keine Positionen"}
+                                  </Typography>
                                 </Stack>
                                 <Stack direction="row" spacing={1} alignItems="center">
                                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mr: 4 }}>

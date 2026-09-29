@@ -166,7 +166,7 @@ class PurchaseDocumentService {
    * Listet alle Belege auf, mit Filterung und Gruppierung
    */
   async listDocuments(filters) {
-    const { startDate, endDate } = filters;
+    const { startDate, endDate, supplier, paid, search } = filters;
     const where = {
       // Wir wollen nur "Top-Level" Belege:
       // - Alle Lieferscheine, die *keiner* Rechnung zugeordnet sind
@@ -188,14 +188,32 @@ class PurchaseDocumentService {
       if (endDate) where.documentDate.lte = new Date(endDate);
     }
 
-    // TODO: Filter für 'paid', 'search' etc. hinzufügen
+    // Lieferant (exakter Name, wie in /suppliers geliefert)
+    if (supplier) where.supplier = supplier;
+    // Zahlstatus (nur für Rechnungen sinnvoll; Lieferscheine haben paid=false)
+    if (paid === 'true') where.paid = true;
+    if (paid === 'false') where.AND = [{ paid: false }, { type: 'RECHNUNG' }];
+    // Freitextsuche über Belegnummer, Lieferant, Beschreibung
+    if (search && String(search).trim()) {
+      const q = String(search).trim();
+      where.AND = [
+        ...(where.AND || []),
+        { OR: [
+          { documentNumber: { contains: q, mode: 'insensitive' } },
+          { supplier: { contains: q, mode: 'insensitive' } },
+          { description: { contains: q, mode: 'insensitive' } },
+        ] },
+      ];
+    }
 
     return prisma.purchaseDocument.findMany({
       where,
       include: {
-        // Lade die zugehörigen Lieferscheine für Rechnungen
+        // Lade die zugehörigen Lieferscheine für Rechnungen (inkl. gebuchter Positionen,
+        // damit das UI zeigen kann, welcher Wareneingang bereits über den Lieferschein lief)
         lieferscheine: {
-          orderBy: { documentDate: 'asc' }
+          orderBy: { documentDate: 'asc' },
+          include: { items: { select: { quantity: true, unit: true, description: true } } }
         },
         // Zähle die Positionen (für Sofortkäufe)
         _count: {
@@ -256,8 +274,11 @@ class PurchaseDocumentService {
             article: true
           }
         },
-        lieferscheine: true,
-        rechnung: true
+        lieferscheine: {
+          orderBy: { documentDate: 'asc' },
+          include: { items: { select: { quantity: true, unit: true, description: true } } }
+        },
+        rechnung: { select: { id: true, documentNumber: true, documentDate: true, paid: true } }
       }
     });
   }
@@ -368,6 +389,7 @@ class PurchaseDocumentService {
         supplier: supplier,
         rechnungId: null // Der Schlüssel: Nur die, die noch frei sind
       },
+      include: { items: { select: { quantity: true, unit: true, description: true } } },
       orderBy: {
         documentDate: 'desc'
       }
