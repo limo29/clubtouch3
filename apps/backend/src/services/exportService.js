@@ -597,7 +597,7 @@ class ExportService {
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
-        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate}
+        WHERE t."createdAt" >= (${startDate}::timestamptz AT TIME ZONE 'UTC') AND t."createdAt" <= (${endDate}::timestamptz AT TIME ZONE 'UTC')
           AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY a.category
         ORDER BY revenue DESC
@@ -607,7 +607,7 @@ class ExportService {
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
-        WHERE t."createdAt" >= ${startDate} AND t."createdAt" <= ${endDate}
+        WHERE t."createdAt" >= (${startDate}::timestamptz AT TIME ZONE 'UTC') AND t."createdAt" <= (${endDate}::timestamptz AT TIME ZONE 'UTC')
           AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY a.id, a.name, a.unit
         ORDER BY revenue DESC

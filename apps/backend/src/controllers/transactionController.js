@@ -116,7 +116,8 @@ class TransactionController {
 
 async getDailySummary(req, res) {
   try {
-    const date = req.query.date ? new Date(req.query.date) : new Date();
+    // Datums-String roh durchreichen: businessDayWindow behandelt "YYYY-MM-DD" als diesen Geschäftstag (kein UTC-Versatz)
+    const date = req.query.date || new Date();
     const summary = await transactionService.getDailySummary(date);
 
     // Falls noch irgendwo BigInt drin ist (z.B. in topArticles oder hourlyDistribution),

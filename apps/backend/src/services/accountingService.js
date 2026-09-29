@@ -41,7 +41,7 @@ class AccountingService {
       FROM "TransactionItem" ti
       JOIN "Transaction" t ON ti."transactionId" = t.id
       JOIN "Article" a ON ti."articleId" = a.id
-      WHERE t."createdAt" >= ${start} AND t."createdAt" <= ${end}
+      WHERE t."createdAt" >= (${start}::timestamptz AT TIME ZONE 'UTC') AND t."createdAt" <= (${end}::timestamptz AT TIME ZONE 'UTC')
         AND t.cancelled = false AND t.type = ${type}::"TransactionType"
       GROUP BY a.id, a.name, a.category, a.unit
       ORDER BY amount DESC, quantity DESC
@@ -68,7 +68,7 @@ class AccountingService {
         FROM "TransactionItem" ti
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
-        WHERE t."createdAt" >= ${start} AND t."createdAt" <= ${end}
+        WHERE t."createdAt" >= (${start}::timestamptz AT TIME ZONE 'UTC') AND t."createdAt" <= (${end}::timestamptz AT TIME ZONE 'UTC')
           AND t.cancelled = false AND t.type = 'SALE'
         GROUP BY a.category
         ORDER BY amount DESC
@@ -84,7 +84,7 @@ class AccountingService {
         SELECT "supplier" AS supplier, COUNT(*) AS count, SUM("totalAmount") AS amount
         FROM "PurchaseDocument"
         WHERE type='RECHNUNG' AND paid = true
-          AND "documentDate" >= ${start} AND "documentDate" <= ${end}
+          AND "documentDate" >= (${start}::timestamptz AT TIME ZONE 'UTC') AND "documentDate" <= (${end}::timestamptz AT TIME ZONE 'UTC')
         GROUP BY supplier
         ORDER BY amount DESC
       `,

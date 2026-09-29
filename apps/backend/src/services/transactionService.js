@@ -432,8 +432,8 @@ class TransactionService {
       FROM "TransactionItem" ti
       JOIN "Transaction" t ON ti."transactionId" = t.id
       JOIN "Article" a ON ti."articleId" = a.id
-      WHERE t."createdAt" >= ${startOfDay}
-        AND t."createdAt" <= ${endOfDay}
+      WHERE t."createdAt" >= (${startOfDay}::timestamptz AT TIME ZONE 'UTC')
+        AND t."createdAt" <= (${endOfDay}::timestamptz AT TIME ZONE 'UTC')
         AND t.cancelled = false
         AND t.type = 'SALE'
       GROUP BY a.id, a.name, a.category
@@ -449,8 +449,8 @@ class TransactionService {
           COUNT(*) as transactions,
           SUM("totalAmount") as revenue
         FROM "Transaction"
-        WHERE "createdAt" >= ${startOfDay}
-          AND "createdAt" <= ${endOfDay}
+        WHERE "createdAt" >= (${startOfDay}::timestamptz AT TIME ZONE 'UTC')
+          AND "createdAt" <= (${endOfDay}::timestamptz AT TIME ZONE 'UTC')
           AND cancelled = false
           AND type = 'SALE'
         GROUP BY 1

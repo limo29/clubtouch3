@@ -43,39 +43,11 @@ app.use('/api/exports', exportRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/purchase-documents', purchaseDocumentRoutes)
 app.use('/api/accounting', accountingRoutes);
-app.use('/api/highscore', require('./routes/highscore'));
 app.use('/api/ads', adRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/cash-counts', cashCountRoutes);
 app.use('/api/cash-movements', cashMovementRoutes);
 
-// DEBUG ROUTE: List all files in uploads
-app.get('/api/public/debug/files', async (req, res) => {
-  const fs = require('fs');
-  const path = require('path');
-  const uploadsDir = path.join(process.cwd(), 'uploads');
-
-  const getFiles = (dir) => {
-    const subdirs = fs.readdirSync(dir);
-    const files = subdirs.map((subdir) => {
-      const res = path.resolve(dir, subdir);
-      return (fs.statSync(res).isDirectory()) ? getFiles(res) : res;
-    });
-    return files.reduce((a, f) => a.concat(f), []);
-  };
-
-  try {
-    if (!fs.existsSync(uploadsDir)) {
-      return res.json({ error: 'Uploads dir not found', path: uploadsDir });
-    }
-    const files = getFiles(uploadsDir);
-    // Make paths relative to cwd for readability
-    const relativeFiles = files.map(f => f.replace(process.cwd(), ''));
-    res.json({ count: relativeFiles.length, files: relativeFiles });
-  } catch (e) {
-    res.status(500).json({ error: e.message, stack: e.stack });
-  }
-});
 
 
 // Basis-Route
