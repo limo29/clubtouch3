@@ -22,6 +22,7 @@ import { crateFactor, hasCrate, fromBaseUnits, toBaseUnits } from '../../utils/u
 import { downloadFile, apiErrorMessage } from '../../utils/download';
 import QuantityStepper from '../common/QuantityStepper';
 import ReceiptReview from './ReceiptReview';
+import BankReconciliation from './BankReconciliation';
 
 const STEPS = ['Zeitraum & Kennzahlen', 'Kasse', 'Bank', 'Belege', 'Inventur', 'Prüfen & abschließen'];
 
@@ -182,11 +183,19 @@ function StepCash({ preview, candidates, selectedId, onSelect }) {
 
 /* ---------------------------------- Bank ---------------------------------- */
 
-function StepBank({ banks, setBanks }) {
+function StepBank({ banks, setBanks, recon, reconLoading }) {
   const change = (idx, key, val) => setBanks((b) => b.map((x, i) => (i === idx ? { ...x, [key]: val } : x)));
+  const validBanks = banks.filter((b) => b.name || b.iban || b.balance);
+  const actual = validBanks.length > 0 ? validBanks.reduce((a, b) => a + num(b.balance), 0) : null;
   return (
     <Stack spacing={2}>
-      <Typography variant="body2" color="text.secondary">Kontostände zum Stichtag. IBAN ist optional; leere Zeilen werden ignoriert.</Typography>
+      <Box>
+        <Typography variant="subtitle2" gutterBottom>Bank-Soll laut App</Typography>
+        <BankReconciliation data={recon} actual={actual} compact loading={reconLoading} />
+      </Box>
+      <Divider />
+      <Typography variant="subtitle2">Kontostände zum Stichtag</Typography>
+      <Typography variant="body2" color="text.secondary">Kontostand laut Kontoauszug je Konto. IBAN ist optional; leere Zeilen werden ignoriert. Die Differenz zum Soll wird oben live berechnet.</Typography>
       {banks.map((b, idx) => (
         <Grid container spacing={1.5} key={idx} alignItems="center">
           <Grid size={{ xs: 12, sm: 4 }}><TextField label="Name" value={b.name} onChange={(e) => change(idx, 'name', e.target.value)} fullWidth size="small" /></Grid>
@@ -314,6 +323,8 @@ function StepReview({ fy, preview, chosenCount, banks, articles, systemStockById
   const profit = num(s.profit);
   const validBanks = banks.filter((b) => b.name || b.iban || b.balance);
   const bankTotal = validBanks.reduce((a, b) => a + num(b.balance), 0);
+  const recon = preview?.bankReconciliation || null;
+  const bankDiff = recon ? bankTotal - num(recon.expected) : null;
   const inventoryRows = articles
     .filter((a) => counts[a.id])
     .map((a) => {
@@ -353,6 +364,10 @@ function StepReview({ fy, preview, chosenCount, banks, articles, systemStockById
             { label: 'Kassendifferenz', value: chosenCount ? signedMoney(chosenCount.difference) : '—', color: chosenCount && Math.abs(num(chosenCount.difference)) >= 0.005 ? 'error.main' : undefined },
             { label: `Bankkonten (${validBanks.length})`, value: money(bankTotal) },
             ...validBanks.map((b) => ({ label: `· ${b.name || b.iban || 'Konto'}`, value: money(b.balance) })),
+            ...(recon ? [
+              { label: 'Bank-Soll laut App', value: money(recon.expected) },
+              { label: 'Bankdifferenz (Ist − Soll)', value: signedMoney(bankDiff), color: Math.abs(bankDiff) >= 0.005 ? 'warning.main' : 'success.main' },
+            ] : []),
           ]} />
         </Grid>
         <Grid size={{ xs: 12 }}>
@@ -540,7 +555,7 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
           <>
             {activeStep === 0 && <StepOverview fy={fy} preview={preview} isLoading={previewLoading} error={previewError} onRefetch={() => refetch()} />}
             {activeStep === 1 && <StepCash preview={preview} candidates={candidates} selectedId={selectedCountId} onSelect={setSelectedCountId} />}
-            {activeStep === 2 && <StepBank banks={banks} setBanks={setBanks} />}
+            {activeStep === 2 && <StepBank banks={banks} setBanks={setBanks} recon={preview?.bankReconciliation || null} reconLoading={previewLoading} />}
             {activeStep === 3 && (
               <ReceiptReview
                 fetchUrl={`/accounting/fiscal-years/${fy.id}/receipts`}

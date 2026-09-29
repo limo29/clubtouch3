@@ -24,6 +24,7 @@ import KPICard from '../components/common/KPICard';
 import CloseYearStepper from '../components/finance/CloseYearStepper';
 import ReceiptReview from '../components/finance/ReceiptReview';
 import CashMovementList from '../components/finance/CashMovementList';
+import BankReconciliation from '../components/finance/BankReconciliation';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
 
@@ -322,6 +323,13 @@ function CashBankSection({ fiscalYears }) {
   });
   const movements = useMemo(() => movData?.cashMovements || [], [movData]);
 
+  // Bank-Abstimmung für denselben Zeitraum wie die Kassenbewegungen
+  const { data: reconData, isLoading: reconLoading } = useQuery({
+    queryKey: ['bank-reconciliation', movRange.from, movRange.to],
+    queryFn: async () => (await api.get('/accounting/bank-reconciliation', { params: { startDate: movRange.from, endDate: movRange.to } })).data.bankReconciliation,
+    staleTime: 0,
+  });
+
   // Summen je Typ (nur nicht stornierte)
   const movSums = useMemo(() => {
     const active = movements.filter((m) => !m.cancelled);
@@ -381,12 +389,12 @@ function CashBankSection({ fiscalYears }) {
         </SectionCard>
       </Grid>
 
-      {/* Kassenbewegungen */}
+      {/* Bank-Abstimmung + Kassenbewegungen (gemeinsamer Zeitraum) */}
       <Grid size={{ xs: 12 }}>
         <Card>
           <CardContent>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} sx={{ mb: 2 }}>
-              <Typography variant="h6" sx={{ flex: 1 }}>Kassenbewegungen</Typography>
+              <Typography variant="h6" sx={{ flex: 1 }}>Bank-Abstimmung</Typography>
               <DatePicker
                 label="Von"
                 value={movRange.from ? new Date(movRange.from) : null}
@@ -399,6 +407,22 @@ function CashBankSection({ fiscalYears }) {
                 onChange={(d) => d && setMovRange((r) => ({ ...r, to: format(d, 'yyyy-MM-dd') }))}
                 slotProps={{ textField: { size: 'small' } }}
               />
+            </Stack>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Was auf dem Konto angekommen sein müsste, wenn nur die App gebucht hätte. Der Ist-Stand wird beim Jahresabschluss je Konto eingetragen.
+            </Typography>
+            <BankReconciliation data={reconData} loading={reconLoading} />
+          </CardContent>
+        </Card>
+      </Grid>
+
+      {/* Kassenbewegungen */}
+      <Grid size={{ xs: 12 }}>
+        <Card>
+          <CardContent>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} sx={{ mb: 2 }}>
+              <Typography variant="h6" sx={{ flex: 1 }}>Kassenbewegungen</Typography>
+              <Typography variant="body2" color="text.secondary">Zeitraum wie bei der Bank-Abstimmung</Typography>
             </Stack>
 
             {/* Summen-Kacheln */}
