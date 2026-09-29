@@ -30,6 +30,8 @@ export const API_ENDPOINTS = {
   HIGHSCORE_GOALS_PROGRESS: '/highscore/goals-progress',
   HIGHSCORE_SETTINGS: '/highscore/settings',
   HIGHSCORE_RESET: '/highscore/reset',
+  HIGHSCORE_ARCHIVE: '/highscore/archive',
+  PUBLIC_HIGHSCORE_ARCHIVE: '/public/highscore/archive',
 
   // Exports
   EXPORTS: '/exports',

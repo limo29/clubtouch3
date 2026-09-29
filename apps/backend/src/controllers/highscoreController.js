@@ -17,13 +17,7 @@ class HighscoreController {
 
   async getAllHighscores(req, res) {
     try {
-      const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
-        highscoreService.calculateHighscore('DAILY', 'AMOUNT'),
-        highscoreService.calculateHighscore('DAILY', 'COUNT'),
-        highscoreService.calculateHighscore('YEARLY', 'AMOUNT'),
-        highscoreService.calculateHighscore('YEARLY', 'COUNT')
-      ]);
-      res.json({ daily: { amount: dailyAmount, count: dailyCount }, yearly: { amount: yearlyAmount, count: yearlyCount } });
+      res.json(await highscoreService.getAllBoards());
     } catch (error) {
       console.error('Get all highscores error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Highscores' });
@@ -51,6 +45,27 @@ class HighscoreController {
     } catch (error) {
       console.error('Get customer achievements error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Achievements' });
+    }
+  }
+
+  /** Archiv frueherer Jahreswertungen (auth: voller Stand; ?top=n kuerzt). */
+  async getArchive(req, res) {
+    try {
+      const top = req.query.top ? Math.max(1, Math.min(20, Number(req.query.top) || 0)) : null;
+      res.json({ archive: await highscoreService.getArchive({ top }) });
+    } catch (error) {
+      console.error('Get highscore archive error:', error);
+      res.status(500).json({ error: 'Fehler beim Abrufen des Archivs' });
+    }
+  }
+
+  /** Oeffentliche Variante: nur Platz 1-3 je Jahreswertung, hoechstens 10 Eintraege. */
+  async getPublicArchive(req, res) {
+    try {
+      res.json({ archive: await highscoreService.getArchive({ top: 3, limit: 10 }) });
+    } catch (error) {
+      console.error('Get public highscore archive error:', error);
+      res.status(500).json({ error: 'Fehler beim Abrufen des Archivs' });
     }
   }
 

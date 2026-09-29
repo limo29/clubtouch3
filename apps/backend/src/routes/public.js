@@ -8,6 +8,7 @@ const publicController = require('../controllers/publicController');
 router.get('/highscore', publicController.getHighscore);
 router.get('/highscore/all', publicController.getAllHighscores);
 router.get('/highscore/goals-progress', publicController.getGoalsProgress);
+router.get('/highscore/archive', publicController.getArchive);
 
 // Ads
 router.get('/ads', publicController.getAds);

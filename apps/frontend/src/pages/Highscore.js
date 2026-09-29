@@ -5,8 +5,10 @@ import {
   Typography, alpha, GlobalStyles, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Autocomplete, Grid, Tooltip, Switch, FormControlLabel, CssBaseline,
-  Snackbar, Alert, CircularProgress
+  Snackbar, Alert, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Divider
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import HistoryIcon from '@mui/icons-material/History';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
@@ -26,6 +28,8 @@ import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
 /* ---------- Helpers ---------- */
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 const dateDE = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
+const periodLabel = (a) => `${dateDE(a.periodStart)} – ${dateDE(a.periodEnd)}`;
+const MEDALS = ['🥇', '🥈', '🥉'];
 const RESET_WORD = 'RESET';
 const TOOLBAR_HIDE_MS = 3000; // im Vollbild: Leiste nach 3 s ohne Mausbewegung ausblenden
 
@@ -84,6 +88,13 @@ export default function Highscore() {
   const yearlyLabel = yearlyStart ? `seit ${dateDE(yearlyStart)}` : '';
   const yearlyEntries = boards.yearly?.amount?.entries || [];
 
+  // Archiv: jeder Jahres-Reset friert den Stand davor ein (AuditLog) → "Frühere Jahreswertungen"
+  const [archive, setArchive] = useState([]);
+  const loadArchive = React.useCallback(() => {
+    api.get(API_ENDPOINTS.HIGHSCORE_ARCHIVE).then(r => setArchive(r.data?.archive || [])).catch(() => setArchive([]));
+  }, []);
+  useEffect(() => { loadArchive(); }, [loadArchive]);
+
   const doReset = async () => {
     if (resetWord.trim().toUpperCase() !== RESET_WORD) return;
     setResetBusy(true);
@@ -94,6 +105,7 @@ export default function Highscore() {
       setResetOpen(false);
       setResetWord('');
       refresh();
+      loadArchive();
     } catch (e) {
       setSnack({ open: true, severity: 'error', msg: e.response?.data?.error || 'Zurücksetzen fehlgeschlagen' });
     } finally {
@@ -231,7 +243,8 @@ export default function Highscore() {
 
   return (
     <Box sx={{
-      height: '100vh', display: 'flex', flexDirection: 'column',
+      // im Layout bleiben AppBar (64px) und unterer Innenabstand (16px) frei, sonst ist der Fuß abgeschnitten
+      height: isFull ? '100vh' : 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column',
       bgcolor: 'background.default', color: 'text.primary',
       overflow: 'hidden',
       ...(isFull && {
@@ -340,7 +353,8 @@ export default function Highscore() {
         )}
 
         {/* Bottom: Boards Split */}
-        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
+        {/* unter md scrollt die Seite und die Boards behalten ihre feste Höhe (sonst ragen sie über den Container hinaus) */}
+        <Box sx={{ flex: { xs: 'none', md: 1 }, minHeight: { xs: 'auto', md: 0 }, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
           <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 520, md: 0 } }}>
             <Board
               title="Tages-Challenge"
@@ -358,6 +372,58 @@ export default function Highscore() {
             />
           </Box>
         </Box>
+
+        {/* Archiv früherer Jahreswertungen (nur wenn es Resets gab; im Vollbild ausgeblendet) */}
+        {archive.length > 0 && !isFull && (
+          <Accordion variant="outlined" disableGutters sx={{ flexShrink: 0, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <HistoryIcon fontSize="small" color="primary" />
+                <Typography variant="subtitle1" fontWeight={700}>Frühere Jahreswertungen</Typography>
+                <Chip size="small" label={archive.length} />
+                {archive[0]?.amount?.entries?.[0] && (
+                  <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
+                    · zuletzt {periodLabel(archive[0])}: {archive[0].amount.entries[0].customerNickname || archive[0].amount.entries[0].customerName}
+                  </Typography>
+                )}
+              </Stack>
+            </AccordionSummary>
+            <AccordionDetails sx={{ pt: 0, maxHeight: { md: '40vh' }, overflowY: 'auto' }}>
+              <Stack divider={<Divider flexItem />} spacing={1.5}>
+                {archive.map((a) => {
+                  const top = (a.amount?.entries || []).slice(0, 3);
+                  const countWinner = a.count?.entries?.[0];
+                  return (
+                    <Box key={a.id}>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.5, sm: 2 }} alignItems={{ sm: 'center' }} sx={{ mb: 0.5 }}>
+                        <Typography variant="subtitle2" fontWeight={700}>{periodLabel(a)}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          zurückgesetzt am {dateDE(a.resetAt)}{a.resetBy ? ` von ${a.resetBy}` : ''} · {a.entriesCount} {a.entriesCount === 1 ? 'Teilnehmer' : 'Teilnehmer'}
+                        </Typography>
+                      </Stack>
+                      {top.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary">Keine Einträge in dieser Wertung.</Typography>
+                      ) : (
+                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 0.5, md: 3 }} flexWrap="wrap">
+                          {top.map((e, i) => (
+                            <Typography key={e.customerId || i} variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {MEDALS[i]} <strong>{e.customerNickname || e.customerName}</strong> · {money(e.score)}
+                            </Typography>
+                          ))}
+                          {countWinner && (
+                            <Typography variant="body2" color="text.secondary">
+                              Meiste Getränke: {countWinner.customerNickname || countWinner.customerName} ({countWinner.score})
+                            </Typography>
+                          )}
+                        </Stack>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+        )}
       </Box>
 
       {/* Dialog */}

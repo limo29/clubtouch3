@@ -8,6 +8,8 @@ import FlagIcon from '@mui/icons-material/Flag';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 
+import api from '../services/api';
+import { API_ENDPOINTS } from '../config/api';
 import Podium from '../components/common/Podium';
 import GoalOverlay from '../components/common/GoalOverlay';
 import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
@@ -74,6 +76,18 @@ export default function PublicHighscore() {
     const [mode, setMode] = useState('AMOUNT'); // 'AMOUNT' | 'COUNT'
     const yearlyStart = boards.yearly?.amount?.startDate ? new Date(boards.yearly.amount.startDate) : null;
 
+    // Letzte abgeschlossene Jahreswertung (nur Platz 1–3, öffentlicher Endpoint); leer, wenn nie zurückgesetzt wurde
+    const [lastArchive, setLastArchive] = useState(null);
+    useEffect(() => {
+        const load = () => api.get(API_ENDPOINTS.PUBLIC_HIGHSCORE_ARCHIVE)
+            .then(r => setLastArchive((r.data?.archive || []).find(a => a.amount?.entries?.length) || null))
+            .catch(() => setLastArchive(null));
+        load();
+        const t = setInterval(load, 10 * 60 * 1000);
+        return () => clearInterval(t);
+    }, []);
+    const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
+
     // Auto-rotate mode every 15s
     useEffect(() => {
         const t = setInterval(() => setMode(p => p === 'AMOUNT' ? 'COUNT' : 'AMOUNT'), 15000);
@@ -129,7 +143,7 @@ export default function PublicHighscore() {
         );
     };
 
-    const Board = ({ title, subtitle, data }) => {
+    const Board = ({ title, subtitle, data, footer }) => {
         const topThree = (data?.entries || []).slice(0, 3);
         const rest = (data?.entries || []).slice(3, 20);
 
@@ -186,6 +200,7 @@ export default function PublicHighscore() {
                             </Box>
                         </>
                     )}
+                    {footer}
                 </CardContent>
             </Card>
         );
@@ -223,7 +238,7 @@ export default function PublicHighscore() {
             />
 
             {/* Header */}
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3, pr: 7 /* Platz für den Vollbild-Schalter */ }}>
                 <Stack direction="row" spacing={3} alignItems="center">
                     <Typography variant="h3" sx={{ fontWeight: 900, letterSpacing: -1, background: 'linear-gradient(45deg, #FFF, #999)', backgroundClip: 'text', textFillColor: 'transparent', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                         Clubscore
@@ -310,6 +325,16 @@ export default function PublicHighscore() {
                             title="Jahres-Charts"
                             subtitle={yearlyStart ? `seit ${yearlyStart.toLocaleDateString('de-DE')}` : ''}
                             data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
+                            footer={lastArchive && (
+                                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ pt: 2, mt: 'auto', borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
+                                    <TrophyIcon sx={{ color: '#FFD700' }} />
+                                    <Typography variant="h6" sx={{ fontWeight: 700 }} noWrap>
+                                        Sieger {fmtDate(lastArchive.periodStart)} – {fmtDate(lastArchive.periodEnd)}:{' '}
+                                        {lastArchive.amount.entries[0].customerNickname || lastArchive.amount.entries[0].customerName}
+                                        <Typography component="span" color="primary" sx={{ fontWeight: 900, ml: 1 }}>{money(lastArchive.amount.entries[0].score)}</Typography>
+                                    </Typography>
+                                </Stack>
+                            )}
                         />
                     </Box>
                 </Box>

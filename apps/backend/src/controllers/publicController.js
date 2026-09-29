@@ -31,6 +31,11 @@ class PublicController {
         return highscoreController.getGoalsProgress(req, res);
     }
 
+    // Fruehere Jahreswertungen, nur Platz 1-3 (Public-Display)
+    async getArchive(req, res) {
+        return highscoreController.getPublicArchive(req, res);
+    }
+
     // Public Ads
     async getAds(req, res) {
         try {

@@ -3,7 +3,15 @@ const { Prisma } = require('@prisma/client');
 const { emitHighscoreUpdate } = require('../utils/websocket');
 const { BUSINESS_DAY_START_HOUR, businessDayWindow, businessDayLabel } = require('../utils/businessDay');
 
+// Die vier Boards (Tag/Jahr x Umsatz/Anzahl) werden einmal berechnet und kurz gecacht:
+// Public-Display, Clubscore-Seite und jeder Verkauf fragten sonst je vier Full-Scans an.
+const BOARD_CACHE_TTL_MS = 5000;
+
 class HighscoreService {
+  constructor() {
+    this._boardsCache = { at: 0, data: null, promise: null };
+  }
+
   async getSettings() {
     // Kannst du später aus DB/ENV laden
     const lastReset = await this._getLastYearlyReset();
@@ -63,10 +71,25 @@ class HighscoreService {
   // Hinweis: "createdAt" ist timestamp ohne Zeitzone (Prisma speichert UTC). Ein JS-Date-Parameter
   // kommt als timestamptz an; ohne "AT TIME ZONE 'UTC'" würde Postgres die Spalte in der
   // Session-Zeitzone interpretieren und das Fenster um den UTC-Offset verschieben.
-  async calculateHighscore(type = 'DAILY', mode = 'AMOUNT') {
+  /** Einmal pro Board-Satz: Settings (inkl. Reset-Marke), zaehlende Artikel, Periodenstarts. */
+  async _buildContext() {
     const settings = await this.getSettings();
-    const startDate = await this._getPeriodStart(type, settings.dailyResetHour);
     const articleIds = await this._getCountingArticleIds(settings.countInactiveArticles);
+    return {
+      settings,
+      articleIds,
+      starts: {
+        DAILY: businessDayWindow(new Date(), settings.dailyResetHour).start,
+        YEARLY: settings.yearlyStart,
+      },
+    };
+  }
+
+  async calculateHighscore(type = 'DAILY', mode = 'AMOUNT', ctx = null) {
+    const c = ctx || await this._buildContext();
+    const settings = c.settings;
+    const startDate = c.starts[type];
+    const articleIds = c.articleIds;
 
     if (!articleIds.length) {
       return { type, mode, startDate, entries: [], lastUpdated: new Date() };
@@ -117,6 +140,71 @@ class HighscoreService {
     }));
 
     return { type, mode, startDate, entries, lastUpdated: new Date() };
+  }
+
+  /**
+   * Alle vier Boards aus einem Kontext; Ergebnis BOARD_CACHE_TTL_MS lang gecacht,
+   * parallele Aufrufer teilen sich eine laufende Berechnung. `fresh` erzwingt Neuberechnung
+   * (nach Verkauf/Reset) und aktualisiert den Cache.
+   */
+  async getAllBoards({ fresh = false } = {}) {
+    const now = Date.now();
+    if (!fresh) {
+      if (this._boardsCache.data && now - this._boardsCache.at < BOARD_CACHE_TTL_MS) return this._boardsCache.data;
+      if (this._boardsCache.promise) return this._boardsCache.promise;
+    }
+    const promise = (async () => {
+      const ctx = await this._buildContext();
+      const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
+        this.calculateHighscore('DAILY', 'AMOUNT', ctx),
+        this.calculateHighscore('DAILY', 'COUNT', ctx),
+        this.calculateHighscore('YEARLY', 'AMOUNT', ctx),
+        this.calculateHighscore('YEARLY', 'COUNT', ctx),
+      ]);
+      const data = { daily: { amount: dailyAmount, count: dailyCount }, yearly: { amount: yearlyAmount, count: yearlyCount } };
+      this._boardsCache = { at: Date.now(), data, promise: null };
+      return data;
+    })();
+    this._boardsCache.promise = promise;
+    try {
+      return await promise;
+    } catch (err) {
+      if (this._boardsCache.promise === promise) this._boardsCache.promise = null;
+      throw err;
+    }
+  }
+
+  invalidateBoards() {
+    this._boardsCache = { at: 0, data: null, promise: null };
+  }
+
+  /**
+   * Archiv der Jahreswertungen: jeder manuelle Reset hat den Stand davor im AuditLog
+   * (`changes.archivedHighscore` / `archivedHighscoreCount`) eingefroren. Neueste zuerst.
+   * `top` kuerzt die Eintraege (Public-Display: 3), sonst voller Top-20-Stand.
+   */
+  async getArchive({ top = null, limit = 24 } = {}) {
+    const rows = await prisma.auditLog.findMany({
+      where: { entityType: 'Highscore', action: 'RESET_YEARLY_HIGHSCORE' },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { user: { select: { name: true } } },
+    });
+    const cut = (arr) => (top ? (arr || []).slice(0, top) : (arr || []));
+    return rows.map((r) => {
+      const amount = r.changes?.archivedHighscore || {};
+      const count = r.changes?.archivedHighscoreCount || {};
+      return {
+        id: r.id,
+        periodStart: r.changes?.periodStart || amount.startDate || null,
+        periodEnd: r.createdAt,
+        resetAt: r.createdAt,
+        resetBy: r.user?.name || null,
+        entriesCount: (amount.entries || []).length,
+        amount: { entries: cut(amount.entries) },
+        count: { entries: cut(count.entries) },
+      };
+    });
   }
 
   async getCustomerPosition(customerId, type = 'DAILY', mode = 'AMOUNT') {
@@ -276,17 +364,8 @@ class HighscoreService {
       const hasRelevant = transaction.items.some(it => it.article?.countsForHighscore);
       if (!hasRelevant) return;
 
-      const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
-        this.calculateHighscore('DAILY', 'AMOUNT'),
-        this.calculateHighscore('DAILY', 'COUNT'),
-        this.calculateHighscore('YEARLY', 'AMOUNT'),
-        this.calculateHighscore('YEARLY', 'COUNT'),
-      ]);
-
-      emitHighscoreUpdate({
-        daily: { amount: dailyAmount, count: dailyCount },
-        yearly: { amount: yearlyAmount, count: yearlyCount }
-      });
+      const boards = await this.getAllBoards({ fresh: true });
+      emitHighscoreUpdate(boards);
     } catch (err) {
       console.error('Error updating highscore:', err);
     }
@@ -313,18 +392,8 @@ class HighscoreService {
       },
     });
 
-    const [dailyAmount, dailyCount, yearlyAmount, yearlyCount] = await Promise.all([
-      this.calculateHighscore('DAILY', 'AMOUNT'),
-      this.calculateHighscore('DAILY', 'COUNT'),
-      this.calculateHighscore('YEARLY', 'AMOUNT'),
-      this.calculateHighscore('YEARLY', 'COUNT'),
-    ]);
-
-    emitHighscoreUpdate({
-      daily: { amount: dailyAmount, count: dailyCount },
-      yearly: { amount: yearlyAmount, count: yearlyCount },
-      reset: true, resetType: 'YEARLY',
-    });
+    const boards = await this.getAllBoards({ fresh: true });
+    emitHighscoreUpdate({ ...boards, reset: true, resetType: 'YEARLY' });
     return { resetAt: created.createdAt, archivedEntries: archivedAmount.entries.length };
   }
 
