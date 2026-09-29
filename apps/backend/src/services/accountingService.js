@@ -278,7 +278,7 @@ class AccountingService {
     const [prevYear, cm, topUps, invoices, purchases] = await Promise.all([
       prisma.fiscalYear.findFirst({
         where: { closed: true, endDate: { lt: start }, report: { isNot: null } },
-        orderBy: { endDate: 'desc' },
+        orderBy: [{ endDate: 'desc' }, { createdAt: 'desc' }],
         include: { report: { select: { bankAccountsJson: true, createdAt: true } } }
       }),
       cashMovementService.summarize(window),

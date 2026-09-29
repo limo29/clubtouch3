@@ -1225,6 +1225,60 @@ class ExportService {
         cashRows.push({ label: 'Liquide Mittel gesamt (Kasse + Bank)', value: this._fmtEUR(cashTotal + banksTotal), bold: true, rule: true });
         this._kvList(doc, theme, cashRows, { headerInfo });
 
+        // ---------- BANK-ABSTIMMUNG ----------
+        // Snapshot v3; Altabschlüsse haben das Feld nicht → Abschnitt entfällt
+        const br = s.bankReconciliation || null;
+        if (br) {
+          this._section(doc, theme, 'Bank-Abstimmung', headerInfo);
+          const inf = br.inflows || {}, outf = br.outflows || {};
+          const cnt = (x) => Number((x && x.count) || 0);
+          const tot = (x) => Number((x && x.total) || 0);
+          const openingLabel = br.openingSource === 'VORJAHRESABSCHLUSS'
+            ? `Bankstand laut Abschluss "${br.openingFiscalYear?.name || 'Vorjahr'}" (${this._fmtDate(br.openingFiscalYear?.endDate)})`
+            : 'Bankstand Vorjahr (kein abgeschlossenes Vorjahr, Start bei 0,00 €)';
+          const brRows = [
+            { label: openingLabel, value: this._fmtEUR(br.opening), bold: true },
+            { label: `+ Einzahlungen aus der Kasse (${cnt(inf.bankDeposits)})`, value: this._fmtEUR(tot(inf.bankDeposits)), color: theme.color.success },
+            { label: `+ Aufladungen Kundenkonten per Überweisung (${cnt(inf.topUpsTransfer)})`, value: this._fmtEUR(tot(inf.topUpsTransfer)), color: theme.color.success },
+            { label: `+ Bezahlte Ausgangsrechnungen (${cnt(inf.invoicesPaid)})`, value: this._fmtEUR(tot(inf.invoicesPaid)), color: theme.color.success },
+            { label: `- Per Überweisung bezahlte Eingangsrechnungen (${cnt(outf.purchasesTransfer)})`, value: this._fmtEUR(-tot(outf.purchasesTransfer)), color: theme.color.danger },
+            { label: `- Abhebungen für die Kasse (${cnt(outf.bankWithdrawals)})`, value: this._fmtEUR(-tot(outf.bankWithdrawals)), color: theme.color.danger },
+            { label: 'Bank-Soll laut App', value: this._fmtEUR(br.expected), bold: true, rule: true }
+          ];
+          if (banks.length > 0) {
+            const actual = br.actual != null ? Number(br.actual) : banksTotal;
+            const bd = br.difference != null ? Number(br.difference) : (actual - Number(br.expected || 0));
+            brRows.push({ label: `Eingetragene Kontostände (${banks.length} ${banks.length === 1 ? 'Konto' : 'Konten'})`, value: this._fmtEUR(actual), bold: true });
+            brRows.push({
+              label: 'Differenz (Ist - Soll)', value: `${bd > 0 ? '+' : ''}${this._fmtEUR(bd)}`, bold: true,
+              color: Math.abs(bd) < 0.005 ? theme.color.success : theme.color.warning
+            });
+          } else {
+            brRows.push({ label: draft ? 'Kontostände werden beim Abschluss erfasst' : 'Keine Kontostände erfasst', value: '—' });
+          }
+          this._kvList(doc, theme, brRows, { headerInfo });
+          this._note(doc, theme, br.notCovered || 'Nicht enthalten: Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden und alles, was nicht über die App gebucht wurde.');
+
+          const brItems = Array.isArray(br.movements) ? br.movements : [];
+          const brNet = brItems.reduce((a, r) => a + Number(r.amount || 0), 0);
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Datum', width: 90, render: r => this._fmtDate(r.date) },
+              { header: 'Vorgang', width: 250, render: r => r.label || '—' },
+              { header: 'Referenz', width: 140, render: r => r.reference || '—' },
+              {
+                header: 'Betrag ±', width: 90, align: 'right',
+                render: r => `${Number(r.amount || 0) >= 0 ? '+' : ''}${this._fmtEUR(r.amount || 0)}`,
+                color: r => Number(r.amount || 0) < 0 ? theme.color.danger : theme.color.success
+              }
+            ],
+            rows: brItems,
+            sumRow: ['', '', 'Netto', `${brNet >= 0 ? '+' : ''}${this._fmtEUR(brNet)}`],
+            emptyHint: 'Keine Bankbewegungen über die App im Geschäftsjahr.',
+            headerInfo
+          });
+        }
+
         // ---------- KASSENBEWEGUNGEN ----------
         this._section(doc, theme, 'Kassenbewegungen im Geschäftsjahr', headerInfo);
         const cmItems = (cm && Array.isArray(cm.items)) ? cm.items : [];
