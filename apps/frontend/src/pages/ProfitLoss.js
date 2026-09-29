@@ -187,7 +187,7 @@ function EurSection() {
               rows={[
                 [`Barverkäufe (${details.transactionCounts?.cash ?? 0})`, money(incomeByType.cash)],
                 [`Kundenkonto (${details.transactionCounts?.account ?? 0})`, money(incomeByType.account)],
-                ['Bezahlte Ausgangsrechnungen', money(incomeByType.invoices)],
+                ['Bezahlte Kundenrechnungen', money(incomeByType.invoices)],
               ]}
               footer={['Gesamt', money(summary.totalIncome)]}
             />
@@ -263,26 +263,26 @@ function EurSection() {
           <MiniStat label="Gästeguthaben" value={money(liquidity.guestBalanceEnd)} sub="Stand Ende des Zeitraums (Verbindlichkeit)" />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <MiniStat label="Offene Eingangsrechnungen" value={money(unpaidPurchase.total)} sub={`${unpaidPurchase.count ?? 0} Belege (Verbindlichkeit)`} color={num(unpaidPurchase.total) > 0 ? 'error.main' : 'text.primary'} />
+          <MiniStat label="Offene Lieferantenrechnungen" value={money(unpaidPurchase.total)} sub={`${unpaidPurchase.count ?? 0} Belege (Verbindlichkeit)`} color={num(unpaidPurchase.total) > 0 ? 'error.main' : 'text.primary'} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <MiniStat label="Offene Ausgangsrechnungen" value={money(unpaidInvoices.total)} sub={`${unpaidInvoices.count ?? 0} Rechnungen (Forderung)`} color={num(unpaidInvoices.total) > 0 ? 'warning.main' : 'text.primary'} />
+          <MiniStat label="Offene Kundenrechnungen" value={money(unpaidInvoices.total)} sub={`${unpaidInvoices.count ?? 0} Rechnungen (Forderung)`} color={num(unpaidInvoices.total) > 0 ? 'warning.main' : 'text.primary'} />
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <SectionCard title="Offene Eingangsrechnungen">
+          <SectionCard title="Offene Lieferantenrechnungen">
             <SimpleTable
               head={['Beleg', 'Datum', 'Betrag']}
               rows={(unpaidPurchase.items || []).map((d) => [`${d.supplier || '—'}${d.documentNumber ? ` · ${d.documentNumber}` : ''}`, fmtDate(d.documentDate), money(d.totalAmount)])}
-              empty="Keine offenen Eingangsrechnungen"
+              empty="Keine offenen Lieferantenrechnungen"
             />
           </SectionCard>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <SectionCard title="Offene Ausgangsrechnungen">
+          <SectionCard title="Offene Kundenrechnungen">
             <SimpleTable
               head={['Rechnung', 'Fällig', 'Betrag']}
               rows={(unpaidInvoices.items || []).map((d) => [`${d.customerName || '—'}${d.invoiceNumber ? ` · ${d.invoiceNumber}` : ''}`, fmtDate(d.dueDate), money(d.totalAmount)])}
-              empty="Keine offenen Ausgangsrechnungen"
+              empty="Keine offenen Kundenrechnungen"
             />
           </SectionCard>
         </Grid>

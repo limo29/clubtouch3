@@ -105,8 +105,8 @@ function StepOverview({ fy, preview, isLoading, error, onRefetch }) {
           <KeyValueTable rows={[
             { label: `Aufladungen (${liq.topUps?.count ?? 0})`, value: money(liq.topUps?.total) },
             { label: 'Gästeguthaben (Stand Ende)', value: money(liq.guestBalanceEnd) },
-            { label: `Offene Eingangsrechnungen (${(preview.unpaidPurchaseDocs || []).length})`, value: money(unpaidPurchase) },
-            { label: `Offene Ausgangsrechnungen (${(preview.unpaidInvoices || []).length})`, value: money(unpaidInvoices) },
+            { label: `Offene Lieferantenrechnungen (${(preview.unpaidPurchaseDocs || []).length})`, value: money(unpaidPurchase) },
+            { label: `Offene Kundenrechnungen (${(preview.unpaidInvoices || []).length})`, value: money(unpaidInvoices) },
           ]} />
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>

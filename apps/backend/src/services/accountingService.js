@@ -13,9 +13,9 @@ class AccountingService {
    * EÜR für einen Zeitraum. EINE Funktion für UI, EÜR-PDF und Jahresabschluss.
    *
    * Einnahmen   = Verkäufe (Transaction SALE, cancelled=false; bar + Kundenkonto)
-   *             + bezahlte Ausgangsrechnungen (Invoice PAID, paidAt im Zeitraum)
+   *             + bezahlte Kundenrechnungen (Invoice PAID, paidAt im Zeitraum)
    *             + sonstige Bareinnahmen (CashMovement OTHER_INCOME, nicht storniert)
-   * Ausgaben    = bezahlte Eingangsrechnungen (PurchaseDocument RECHNUNG, paid=true, documentDate im Zeitraum)
+   * Ausgaben    = bezahlte Lieferantenrechnungen (PurchaseDocument RECHNUNG, paid=true, documentDate im Zeitraum)
    *             + sonstige Barausgaben (CashMovement OTHER_EXPENSE, nicht storniert)
    * nonRevenue  = Eigenverbrauch (OWNER_USE) und Abgelaufen (EXPIRED): KEINE Einnahmen,
    *               nur Menge und Warenwert (Verkaufspreis) je Artikel
@@ -23,7 +23,7 @@ class AccountingService {
    *               kein Ertrag), Gästeguthaben zum Stichtag
    *             + Kassenbewegungen (DEPOSIT_TO_BANK/WITHDRAWAL_FROM_BANK: ergebnisneutral, nur Liquidität)
    *               als liquidity.cashMovements und liquidity.cashMovementItems
-   * liabilities = offene Eingangsrechnungen, receivables = offene Ausgangsrechnungen
+   * liabilities = offene Lieferantenrechnungen, receivables = offene Kundenrechnungen
    *
    * Rückgabeform: `summary`/`details` bleiben abwärtskompatibel (ProfitLoss.js liest
    * summary.totalIncome/totalExpenses/profit, details.incomeByCategory/incomeByArticle/
@@ -101,13 +101,13 @@ class AccountingService {
         orderBy: { paidAt: 'asc' },
         select: { id: true, invoiceNumber: true, customerName: true, description: true, paidAt: true, totalAmount: true }
       }),
-      // Forderungen: offene Ausgangsrechnungen (SENT/DRAFT), Stichtag = Zeitraumende
+      // Forderungen: offene Kundenrechnungen (SENT/DRAFT), Stichtag = Zeitraumende
       prisma.invoice.findMany({
         where: { status: { in: ['DRAFT', 'SENT'] }, createdAt: { lte: end } },
         orderBy: { dueDate: 'asc' },
         select: { id: true, invoiceNumber: true, customerName: true, description: true, createdAt: true, dueDate: true, status: true, totalAmount: true }
       }),
-      // Verbindlichkeiten: offene Eingangsrechnungen, Stichtag = Zeitraumende
+      // Verbindlichkeiten: offene Lieferantenrechnungen, Stichtag = Zeitraumende
       prisma.purchaseDocument.findMany({
         where: { type: 'RECHNUNG', paid: false, documentDate: { lte: end } },
         orderBy: { documentDate: 'asc' },
@@ -260,8 +260,8 @@ class AccountingService {
    *                sonst 0 (KEIN_VORJAHR)
    *   + Einzahlungen aus der Kasse      (CashMovement DEPOSIT_TO_BANK, nicht storniert)
    *   + Aufladungen per Überweisung     (AccountTopUp.method = TRANSFER)
-   *   + bezahlte Ausgangsrechnungen     (Invoice PAID, paidAt im Zeitraum; es gibt keine Zahlungsart,
-   *                                      Ausgangsrechnungen gelten als Bankeingang)
+   *   + bezahlte Kundenrechnungen     (Invoice PAID, paidAt im Zeitraum; es gibt keine Zahlungsart,
+   *                                      Kundenrechnungen gelten als Bankeingang)
    *   - per Überweisung bezahlte Einkäufe (PurchaseDocument RECHNUNG, paid, paymentMethod TRANSFER,
    *                                      paidAt-Fallback documentDate wie in cashCountService)
    *   - Abhebungen für die Kasse        (CashMovement WITHDRAWAL_FROM_BANK, nicht storniert)

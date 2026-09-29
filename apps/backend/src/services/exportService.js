@@ -647,7 +647,7 @@ class ExportService {
           { label: `Gesamtumsatz (${count} Verkäufe)`, value: this._fmtEUR(total), bold: true, color: theme.color.success, rule: true },
           { label: 'Durchschnitt pro Verkauf', value: this._fmtEUR(count ? total / count : 0) },
           { spacer: true },
-          { label: `Bezahlte Eingangsrechnungen (${expenseAgg._count || 0} Belege)`, value: this._fmtEUR(expenseAgg._sum.totalAmount), color: theme.color.danger },
+          { label: `Bezahlte Lieferantenrechnungen (${expenseAgg._count || 0} Belege)`, value: this._fmtEUR(expenseAgg._sum.totalAmount), color: theme.color.danger },
           { spacer: true },
           { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(topUpCash) },
           { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(topUpTransfer) },
@@ -784,14 +784,14 @@ class ExportService {
         const eurKvRows = [
           { label: `Barverkäufe (${d.transactionCounts?.cash || 0} Verkäufe)`, value: this._fmtEUR(byType.cash) },
           { label: `Verkäufe über Kundenkonto (${d.transactionCounts?.account || 0} Verkäufe)`, value: this._fmtEUR(byType.account) },
-          { label: `Bezahlte Ausgangsrechnungen (${(d.paidInvoices || []).length})`, value: this._fmtEUR(byType.invoices) }
+          { label: `Bezahlte Kundenrechnungen (${(d.paidInvoices || []).length})`, value: this._fmtEUR(byType.invoices) }
         ];
         if ((byType.otherCash || 0) > 0 || (d.otherIncome && d.otherIncome.count > 0)) {
           eurKvRows.push({ label: `Sonstige Bareinnahmen (${d.otherIncome ? d.otherIncome.count : 0})`, value: this._fmtEUR(byType.otherCash || 0), color: theme.color.success });
         }
         eurKvRows.push({ label: 'Summe Betriebseinnahmen', value: this._fmtEUR(eur.summary.totalIncome), bold: true, color: theme.color.success });
         eurKvRows.push({ spacer: true });
-        eurKvRows.push({ label: `Bezahlte Eingangsrechnungen (${(d.expenseDocs || []).length} Belege)`, value: this._fmtEUR(byExpType.purchaseDocuments != null ? byExpType.purchaseDocuments : eur.summary.totalExpenses) });
+        eurKvRows.push({ label: `Bezahlte Lieferantenrechnungen (${(d.expenseDocs || []).length} Belege)`, value: this._fmtEUR(byExpType.purchaseDocuments != null ? byExpType.purchaseDocuments : eur.summary.totalExpenses) });
         if ((byExpType.otherCash || 0) > 0 || (d.otherExpense && d.otherExpense.count > 0)) {
           eurKvRows.push({ label: `Sonstige Barausgaben (${d.otherExpense ? d.otherExpense.count : 0})`, value: this._fmtEUR(byExpType.otherCash || 0), color: theme.color.danger });
         }
@@ -816,8 +816,8 @@ class ExportService {
           { label: 'Aufladungen gesamt (Zufluss, aber Verbindlichkeit gegenüber Gästen)', value: this._fmtEUR(eur.liquidity.topUps.total), bold: true },
           { label: 'Gästeguthaben zum Stichtag (Summe aller Kundenkonten)', value: this._fmtEUR(eur.liquidity.guestBalanceEnd) },
           { spacer: true },
-          { label: `Offene Eingangsrechnungen zum Stichtag (${eur.liabilities.unpaidPurchaseDocuments.count})`, value: this._fmtEUR(eur.liabilities.unpaidPurchaseDocuments.total), color: theme.color.danger },
-          { label: `Offene Ausgangsrechnungen zum Stichtag (${eur.receivables.unpaidInvoices.count})`, value: this._fmtEUR(eur.receivables.unpaidInvoices.total) }
+          { label: `Offene Lieferantenrechnungen zum Stichtag (${eur.liabilities.unpaidPurchaseDocuments.count})`, value: this._fmtEUR(eur.liabilities.unpaidPurchaseDocuments.total), color: theme.color.danger },
+          { label: `Offene Kundenrechnungen zum Stichtag (${eur.receivables.unpaidInvoices.count})`, value: this._fmtEUR(eur.receivables.unpaidInvoices.total) }
         ], { headerInfo });
 
         this._section(doc, theme, 'Einnahmen nach Kategorie', headerInfo);
@@ -878,7 +878,7 @@ class ExportService {
           headerInfo
         });
 
-        this._section(doc, theme, 'Bezahlte Ausgangsrechnungen', headerInfo);
+        this._section(doc, theme, 'Bezahlte Kundenrechnungen', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
@@ -889,11 +889,11 @@ class ExportService {
           ],
           rows: d.paidInvoices || [],
           sumRow: ['Summe', '', '', '', this._fmtEUR(sum(d.paidInvoices, r => r.totalAmount))],
-          emptyHint: 'Keine bezahlten Ausgangsrechnungen.',
+          emptyHint: 'Keine bezahlten Kundenrechnungen.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Ausgabenbelege (bezahlte Eingangsrechnungen)', headerInfo);
+        this._section(doc, theme, 'Ausgabenbelege (bezahlte Lieferantenrechnungen)', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Datum', width: 75, render: r => this._fmtDate(r.documentDate) },
@@ -909,7 +909,7 @@ class ExportService {
           headerInfo
         });
 
-        this._section(doc, theme, 'Offene Eingangsrechnungen zum Stichtag (Verbindlichkeiten)', headerInfo);
+        this._section(doc, theme, 'Offene Lieferantenrechnungen zum Stichtag (Verbindlichkeiten)', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Belegdatum', width: 80, render: r => this._fmtDate(r.documentDate) },
@@ -920,11 +920,11 @@ class ExportService {
           ],
           rows: eur.liabilities.unpaidPurchaseDocuments.items || [],
           sumRow: ['Summe', '', '', '', this._fmtEUR(eur.liabilities.unpaidPurchaseDocuments.total)],
-          emptyHint: 'Keine offenen Eingangsrechnungen.',
+          emptyHint: 'Keine offenen Lieferantenrechnungen.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Offene Ausgangsrechnungen zum Stichtag (Forderungen)', headerInfo);
+        this._section(doc, theme, 'Offene Kundenrechnungen zum Stichtag (Forderungen)', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
@@ -936,7 +936,7 @@ class ExportService {
           ],
           rows: eur.receivables.unpaidInvoices.items || [],
           sumRow: ['Summe', '', '', '', '', this._fmtEUR(eur.receivables.unpaidInvoices.total)],
-          emptyHint: 'Keine offenen Ausgangsrechnungen.',
+          emptyHint: 'Keine offenen Kundenrechnungen.',
           headerInfo
         });
 
@@ -1013,7 +1013,7 @@ class ExportService {
         ], { headerInfo });
 
         if (Array.isArray(b.expenseDocs) && b.expenseDocs.length) {
-          this._section(doc, theme, 'Bar bezahlte Eingangsrechnungen im Zählzeitraum', headerInfo);
+          this._section(doc, theme, 'Bar bezahlte Lieferantenrechnungen im Zählzeitraum', headerInfo);
           this._table(doc, theme, {
             columns: [
               { header: 'Bezahlt am', width: 110, render: r => this._fmtDateTime(r.paidAt) },
@@ -1163,16 +1163,16 @@ class ExportService {
         if (s.incomeByType) {
           eurRows.push({ label: 'Barverkäufe', value: this._fmtEUR(byType.cash) });
           eurRows.push({ label: 'Verkäufe über Kundenkonto', value: this._fmtEUR(byType.account) });
-          eurRows.push({ label: 'Bezahlte Ausgangsrechnungen', value: this._fmtEUR(byType.invoices) });
+          eurRows.push({ label: 'Bezahlte Kundenrechnungen', value: this._fmtEUR(byType.invoices) });
           if (cm && cm.otherIncome && (Number(cm.otherIncome.total || 0) > 0 || Number(cm.otherIncome.count || 0) > 0)) {
             eurRows.push({ label: `Sonstige Bareinnahmen (${cm.otherIncome.count || 0})`, value: this._fmtEUR(cm.otherIncome.total || 0), color: theme.color.success });
           }
         }
         eurRows.push({ label: 'Summe Betriebseinnahmen', value: this._fmtEUR(income.totalIncome), bold: true, color: theme.color.success });
         eurRows.push({ spacer: true });
-        // Eingangsrechnungen zeigt den Belegbetrag (ohne sonstige Barausgaben)
+        // Lieferantenrechnungen zeigt den Belegbetrag (ohne sonstige Barausgaben)
         const expDocsAmount = byExpType.purchaseDocuments != null ? byExpType.purchaseDocuments : income.totalExpenses;
-        eurRows.push({ label: `Bezahlte Eingangsrechnungen${expenseCount ? ` (${expenseCount} Belege)` : ''}`, value: this._fmtEUR(expDocsAmount) });
+        eurRows.push({ label: `Bezahlte Lieferantenrechnungen${expenseCount ? ` (${expenseCount} Belege)` : ''}`, value: this._fmtEUR(expDocsAmount) });
         if (cm && cm.otherExpense && (Number(cm.otherExpense.total || 0) > 0 || Number(cm.otherExpense.count || 0) > 0)) {
           eurRows.push({ label: `Sonstige Barausgaben (${cm.otherExpense.count || 0})`, value: this._fmtEUR(cm.otherExpense.total || 0), color: theme.color.danger });
         }
@@ -1318,7 +1318,7 @@ class ExportService {
           headerInfo
         });
 
-        this._section(doc, theme, 'Offene Eingangsrechnungen (Verbindlichkeiten)', headerInfo);
+        this._section(doc, theme, 'Offene Lieferantenrechnungen (Verbindlichkeiten)', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Belegdatum', width: 80, render: r => this._fmtDate(r.documentDate) },
@@ -1329,11 +1329,11 @@ class ExportService {
           ],
           rows: s.unpaidPurchaseDocs || [],
           sumRow: ['Summe', '', '', '', this._fmtEUR(unpaidPurchSum)],
-          emptyHint: 'Keine offenen Eingangsrechnungen.',
+          emptyHint: 'Keine offenen Lieferantenrechnungen.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Offene Ausgangsrechnungen (Forderungen)', headerInfo);
+        this._section(doc, theme, 'Offene Kundenrechnungen (Forderungen)', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
@@ -1345,7 +1345,7 @@ class ExportService {
           ],
           rows: s.unpaidInvoices || [],
           sumRow: ['Summe', '', '', '', '', this._fmtEUR(unpaidInvSum)],
-          emptyHint: 'Keine offenen Ausgangsrechnungen.',
+          emptyHint: 'Keine offenen Kundenrechnungen.',
           headerInfo
         });
 
@@ -1413,7 +1413,7 @@ class ExportService {
           headerInfo
         });
 
-        this._section(doc, theme, 'Bezahlte Ausgangsrechnungen', headerInfo);
+        this._section(doc, theme, 'Bezahlte Kundenrechnungen', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Rechnung', width: 100, render: r => r.invoiceNumber || '-' },
@@ -1424,11 +1424,11 @@ class ExportService {
           ],
           rows: s.paidInvoices || [],
           sumRow: ['Summe', '', '', '', this._fmtEUR(sum(s.paidInvoices, r => r.totalAmount))],
-          emptyHint: 'Keine bezahlten Ausgangsrechnungen.',
+          emptyHint: 'Keine bezahlten Kundenrechnungen.',
           headerInfo
         });
 
-        this._section(doc, theme, 'Ausgabenbelege (bezahlte Eingangsrechnungen)', headerInfo);
+        this._section(doc, theme, 'Ausgabenbelege (bezahlte Lieferantenrechnungen)', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Datum', width: 75, render: r => this._fmtDate(r.documentDate) },
