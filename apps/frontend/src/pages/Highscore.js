@@ -4,7 +4,8 @@ import {
   Box, Card, CardContent, Chip, IconButton, Stack,
   Typography, alpha, GlobalStyles, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Autocomplete, Grid, Tooltip, Switch, FormControlLabel, CssBaseline
+  Autocomplete, Grid, Tooltip, Switch, FormControlLabel, CssBaseline,
+  Snackbar, Alert, CircularProgress
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
@@ -12,6 +13,8 @@ import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import FlagIcon from '@mui/icons-material/Flag';
 import CloseIcon from '@mui/icons-material/Close';
 import MonitorIcon from '@mui/icons-material/Monitor';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import { useAuth } from '../context/AuthContext';
 
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
@@ -23,6 +26,8 @@ import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
 
 /* ---------- Helpers ---------- */
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
+const dateDE = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
+const RESET_WORD = 'RESET';
 const KIOSK_PARAM = new URLSearchParams(window.location.search).get('kiosk') === '1';
 
 const useLocalBool = (key, initial) => {
@@ -72,6 +77,7 @@ export default function Highscore() {
   } = useHighscoreLogic();
 
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [autoRotate] = useLocalBool('hs_autoRotate', true);
   const [forceKiosk, setForceKiosk] = useLocalBool('hs_forceKiosk', false);
   const [mode, setMode] = useState('AMOUNT');
@@ -81,6 +87,33 @@ export default function Highscore() {
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [goalDraft, setGoalDraft] = useState([]);
   const [movingTargetsDraft, setMovingTargetsDraft] = useState(false);
+
+  // Jahres-Reset (nur Admin)
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetWord, setResetWord] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
+  const yearlyStart = boards.yearly?.amount?.startDate ? new Date(boards.yearly.amount.startDate) : null;
+  const yearlyIsReset = !!yearlyStart && (yearlyStart.getMonth() !== 0 || yearlyStart.getDate() !== 1 || yearlyStart.getHours() !== 0);
+  const yearlyLabel = yearlyStart ? `seit ${dateDE(yearlyStart)}` : '';
+  const yearlyEntries = boards.yearly?.amount?.entries || [];
+
+  const doReset = async () => {
+    if (resetWord.trim().toUpperCase() !== RESET_WORD) return;
+    setResetBusy(true);
+    try {
+      const r = await api.post(API_ENDPOINTS.HIGHSCORE_RESET, { type: 'YEARLY' });
+      const n = Number(r.data?.archivedEntries || 0);
+      setSnack({ open: true, severity: 'success', msg: `Jahres-Clubscore zurückgesetzt (${n} ${n === 1 ? 'Eintrag' : 'Einträge'} archiviert). Die Wertung zählt ab jetzt neu.` });
+      setResetOpen(false);
+      setResetWord('');
+      refresh();
+    } catch (e) {
+      setSnack({ open: true, severity: 'error', msg: e.response?.data?.error || 'Zurücksetzen fehlgeschlagen' });
+    } finally {
+      setResetBusy(false);
+    }
+  };
 
   const [isFull, setIsFull] = useState(!!document.fullscreenElement);
   const toggleFull = async () => { try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch { } };
@@ -163,7 +196,7 @@ export default function Highscore() {
     </Stack>
   );
 
-  const Board = ({ title, data, icon }) => (
+  const Board = ({ title, subtitle, data, icon }) => (
     <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', overflow: 'hidden' }}>
       <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
@@ -172,7 +205,7 @@ export default function Highscore() {
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" fontWeight={800} noWrap>{title}</Typography>
-            <Typography variant="caption" color="text.secondary">Top 20 • {mode === 'AMOUNT' ? 'Umsatz' : 'Anzahl'}</Typography>
+            <Typography variant="caption" color="text.secondary">Top 20 • {mode === 'AMOUNT' ? 'Umsatz' : 'Anzahl'}{subtitle ? ` • ${subtitle}` : ''}</Typography>
           </Box>
         </Stack>
 
@@ -254,7 +287,7 @@ export default function Highscore() {
       {(!forceKiosk && !KIOSK_PARAM && !isFull) && (
         <Box sx={{
           p: 1.5, borderBottom: '1px solid', borderColor: 'divider',
-          bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 2
+          bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 }, flexWrap: 'wrap'
         }}>
           <Button startIcon={<CloseIcon />} onClick={() => navigate('/dashboard')}>
             Dashboard
@@ -266,10 +299,14 @@ export default function Highscore() {
               label={live ? "LIVE" : "OFFLINE"}
               variant="outlined" size="small"
             />
-            <Chip
-              label={startDate ? startDate.toLocaleDateString() : 'Heute'}
-              size="small"
-            />
+            <Tooltip title="Tages-Challenge: Geschäftstag ab 06:00 Uhr">
+              <Chip label={`Tag: ${startDate ? startDate.toLocaleDateString('de-DE') : 'Heute'}`} size="small" />
+            </Tooltip>
+            {yearlyStart && (
+              <Tooltip title={yearlyIsReset ? 'Jahreswertung wurde manuell zurückgesetzt' : 'Jahreswertung seit Jahresbeginn'}>
+                <Chip label={`Jahr: ${yearlyLabel}`} size="small" color={yearlyIsReset ? 'warning' : 'default'} variant="outlined" />
+              </Tooltip>
+            )}
           </Stack>
           <Button
             variant={goalProgress.goals.length ? 'contained' : 'outlined'}
@@ -288,16 +325,23 @@ export default function Highscore() {
               {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
             </IconButton>
           </Tooltip>
-          <Tooltip title="Kiosk Mode (Locked)">
-            <IconButton onClick={() => { if (window.confirm('Kiosk Modus aktivieren? (Double Click oben rechts zum Beenden)')) setForceKiosk(true); }}>
+          <Tooltip title="Kiosk-Modus (gesperrt)">
+            <IconButton onClick={() => { if (window.confirm('Kiosk-Modus aktivieren? (Doppelklick oben rechts zum Beenden)')) setForceKiosk(true); }}>
               <MonitorIcon />
             </IconButton>
           </Tooltip>
+          {isAdmin && (
+            <Tooltip title="Jahres-Clubscore zurücksetzen (nur Admin)">
+              <Button color="warning" variant="outlined" size="small" startIcon={<RestartAltIcon />} onClick={() => { setResetWord(''); setResetOpen(true); }}>
+                Jahr zurücksetzen
+              </Button>
+            </Tooltip>
+          )}
         </Box>
       )}
 
       {/* Main Content */}
-      <Box sx={{ flex: 1, p: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box sx={{ flex: 1, p: 2, overflow: { xs: 'auto', md: 'hidden' }, display: 'flex', flexDirection: 'column', gap: 2 }}>
 
         {/* Top: Goals (if any) */}
         {/* Top: Goals (if any) */}
@@ -335,17 +379,19 @@ export default function Highscore() {
         )}
 
         {/* Bottom: Boards Split */}
-        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', gap: 2 }}>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
+          <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 520, md: 0 } }}>
             <Board
               title="Tages-Challenge"
+              subtitle="ab 06:00 Uhr"
               icon={<TrophyIcon />}
               data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count}
             />
           </Box>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 520, md: 0 } }}>
             <Board
               title="Jahres-Ranking"
+              subtitle={yearlyLabel}
               icon={<TrophyIcon />}
               data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
             />
@@ -402,6 +448,53 @@ export default function Highscore() {
           <Button variant="contained" onClick={saveGoals}>Speichern</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Jahres-Reset (Admin) */}
+      <Dialog open={resetOpen} onClose={() => !resetBusy && setResetOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Jahres-Clubscore zurücksetzen</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 0.5 }}>
+            <Alert severity="warning">
+              Das Jahres-Ranking startet danach bei null. Diese Aktion lässt sich nicht rückgängig machen.
+            </Alert>
+            <Typography variant="body2"><strong>Was passiert:</strong></Typography>
+            <Typography variant="body2" component="ul" sx={{ pl: 2.5, m: 0 }}>
+              <li>Der aktuelle Stand ({yearlyEntries.length} {yearlyEntries.length === 1 ? 'Eintrag' : 'Einträge'}{yearlyEntries[0] ? `, Platz 1: ${yearlyEntries[0].customerNickname || yearlyEntries[0].customerName} mit ${money(yearlyEntries[0].score)}` : ''}) wird im Protokoll archiviert (Umsatz und Anzahl).</li>
+              <li>Die Jahreswertung zählt ab dem Zeitpunkt des Zurücksetzens neu; ältere Verkäufe fließen nicht mehr ein.</li>
+              <li>Tages-Challenge, Tagesziele, Buchungen und Kundenguthaben bleiben unverändert.</li>
+              <li>Am 1. Januar beginnt die Wertung ohnehin automatisch neu.</li>
+            </Typography>
+            {yearlyIsReset && (
+              <Typography variant="body2" color="text.secondary">
+                Letzter Reset: {dateDE(yearlyStart)} um {yearlyStart.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr.
+              </Typography>
+            )}
+            <TextField
+              label={`Zur Bestätigung „${RESET_WORD}“ eingeben`}
+              value={resetWord}
+              onChange={(e) => setResetWord(e.target.value)}
+              autoFocus
+              fullWidth
+              inputProps={{ 'aria-label': 'Bestätigungswort' }}
+              onKeyDown={(e) => { if (e.key === 'Enter') doReset(); }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResetOpen(false)} disabled={resetBusy}>Abbrechen</Button>
+          <Button
+            variant="contained" color="warning" onClick={doReset}
+            disabled={resetBusy || resetWord.trim().toUpperCase() !== RESET_WORD}
+            startIcon={resetBusy ? <CircularProgress size={16} color="inherit" /> : <RestartAltIcon />}
+          >
+            {resetBusy ? 'Setze zurück…' : 'Jetzt zurücksetzen'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar open={snack.open} autoHideDuration={6000} onClose={() => setSnack((x) => ({ ...x, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={snack.severity} onClose={() => setSnack((x) => ({ ...x, open: false }))} variant="filled">{snack.msg}</Alert>
+      </Snackbar>
     </Box>
   );
 }

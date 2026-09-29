@@ -28,6 +28,7 @@ export default function PublicHighscore() {
     } = useHighscoreLogic();
 
     const [mode, setMode] = useState('AMOUNT'); // 'AMOUNT' | 'COUNT'
+    const yearlyStart = boards.yearly?.amount?.startDate ? new Date(boards.yearly.amount.startDate) : null;
 
     // Auto-rotate mode every 15s
     useEffect(() => {
@@ -84,7 +85,7 @@ export default function PublicHighscore() {
         );
     };
 
-    const Board = ({ title, data }) => {
+    const Board = ({ title, subtitle, data }) => {
         const topThree = (data?.entries || []).slice(0, 3);
         const rest = (data?.entries || []).slice(3, 20);
 
@@ -99,7 +100,7 @@ export default function PublicHighscore() {
                             <Box>
                                 <Typography variant="h4" fontWeight={900}>{title}</Typography>
                                 <Typography variant="subtitle1" color="text.secondary">
-                                    {mode === 'AMOUNT' ? 'Nach Umsatz' : 'Nach Anzahl'} &bull; Top 20
+                                    {mode === 'AMOUNT' ? 'Nach Umsatz' : 'Nach Anzahl'} &bull; Top 20{subtitle ? <> &bull; {subtitle}</> : null}
                                 </Typography>
                             </Box>
                         </Stack>
@@ -252,6 +253,7 @@ export default function PublicHighscore() {
                     <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
                         <Board
                             title="Tages-Ranking"
+                            subtitle="ab 06:00 Uhr"
                             data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count}
                         />
                     </Box>
@@ -260,6 +262,7 @@ export default function PublicHighscore() {
                     <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
                         <Board
                             title="Jahres-Charts"
+                            subtitle={yearlyStart ? `seit ${yearlyStart.toLocaleDateString('de-DE')}` : ''}
                             data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
                         />
                     </Box>

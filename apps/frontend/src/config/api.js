@@ -28,6 +28,8 @@ export const API_ENDPOINTS = {
   HIGHSCORE: '/highscore',
   HIGHSCORE_ALL: '/highscore/all',
   HIGHSCORE_GOALS_PROGRESS: '/highscore/goals-progress',
+  HIGHSCORE_SETTINGS: '/highscore/settings',
+  HIGHSCORE_RESET: '/highscore/reset',
 
   // Exports
   EXPORTS: '/exports',

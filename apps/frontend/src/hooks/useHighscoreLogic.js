@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import api from '../services/api';
 import { API_ENDPOINTS, WS_URL } from '../config/api';
@@ -28,6 +28,8 @@ export const useHighscoreLogic = () => {
     });
 
     const [goalProgress, setGoalProgress] = useState({ goals: [], meta: null });
+    // erst nach dem ersten echten Datensatz Rangwechsel erkennen (sonst Overlay bei jedem Seitenaufruf)
+    const initializedRef = useRef(false);
     const [overlay, setOverlay] = useState({ active: false, type: 'GOAL', message: '' });
 
     // 1. Data Fetching
@@ -74,8 +76,11 @@ export const useHighscoreLogic = () => {
         socket.on('connect', () => setLive(true));
         socket.on('disconnect', () => setLive(false));
 
-        socket.on('highscore_update', (data) => {
+        // Das Backend emittiert 'highscore:update' (websocket.js). Der alte Listener hieß
+        // 'highscore_update' und hat nie gefeuert – Live-Updates kamen nur per 60s-Polling.
+        socket.on('highscore:update', (data) => {
             if (data) {
+                if (data.reset) initializedRef.current = false; // nach Reset kein "Neuer Spitzenreiter"-Overlay
                 // Optimistic / Direct update from socket
                 setBoards(prev => ({
                     daily: { amount: data.daily?.amount || prev.daily.amount, count: data.daily?.count || prev.daily.count },
@@ -99,6 +104,11 @@ export const useHighscoreLogic = () => {
 
     useEffect(() => {
         if (loading) return;
+        if (!initializedRef.current) {
+            // erster Datensatz nach Laden/Reset: nur merken, kein Overlay
+            if (boards.daily.amount.lastUpdated || boards.yearly.amount.lastUpdated) initializedRef.current = true;
+            return;
+        }
 
         const checkChanges = (prev, curr, context) => {
             if (!prev || !curr) return;
