@@ -50,6 +50,9 @@ import {
 import { useOffline } from '../../context/OfflineContext';
 import { useAuth } from '../../context/AuthContext';
 import { useColorMode } from '../../theme';
+import { Snackbar, Alert } from '@mui/material';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
+import ChangePasswordDialog from '../common/ChangePasswordDialog';
 
 import LogoNeon from '../../logo_neon_v2.png';
 
@@ -64,6 +67,8 @@ const Layout = () => {
   const { user, logout, isAdmin } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pwSnack, setPwSnack] = useState(false);
   const [anchorThemeEl, setAnchorThemeEl] = useState(null);
 
   const { mode, resolvedMode, setMode, toggleMode } = useColorMode();
@@ -326,10 +331,14 @@ const Layout = () => {
             <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleUserMenuClose}>
               <MenuItem disabled>
                 <Typography variant="body2">
-                  {user?.name} ({user?.role})
+                  {user?.name}{user?.username ? ` · ${user.username}` : ''} ({user?.role})
                 </Typography>
               </MenuItem>
               <Divider />
+              <MenuItem onClick={() => { handleUserMenuClose(); setPwOpen(true); }}>
+                <ListItemIcon><VpnKeyIcon fontSize="small" /></ListItemIcon>
+                Passwort ändern
+              </MenuItem>
               <MenuItem onClick={() => { handleUserMenuClose(); handleLogout(); }}>
                 <ListItemIcon><Logout fontSize="small" /></ListItemIcon>
                 Abmelden
@@ -337,6 +346,10 @@ const Layout = () => {
             </Menu>
           </Toolbar>
         </AppBar>
+        <ChangePasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} onSuccess={() => setPwSnack(true)} />
+        <Snackbar open={pwSnack} autoHideDuration={5000} onClose={() => setPwSnack(false)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+          <Alert severity="success" variant="filled" onClose={() => setPwSnack(false)}>Passwort geändert</Alert>
+        </Snackbar>
 
         <Box component="nav" sx={{ width: { lg: location.pathname.startsWith('/sales') ? 0 : drawerWidth }, flexShrink: { lg: 0 } }}>
           <Drawer

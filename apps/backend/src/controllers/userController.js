@@ -37,7 +37,7 @@ class UserController {
   // Neuen User erstellen
   async createUser(req, res) {
     try {
-      const { email, password, name, role } = req.body;
+      const { email, username, password, name, role } = req.body;
       
       // Nur Admins dürfen andere Admins erstellen
       if (role === 'ADMIN' && req.user.role !== 'ADMIN') {
@@ -48,6 +48,7 @@ class UserController {
       
       const user = await userService.createUser({
         email,
+        username,
         password,
         name,
         role
@@ -62,6 +63,7 @@ class UserController {
           entityId: user.id,
           changes: {
             email: user.email,
+            username: user.username,
             name: user.name,
             role: user.role
           }
@@ -75,8 +77,11 @@ class UserController {
     } catch (error) {
       console.error('Create user error:', error);
       
-      if (error.message.includes('existiert bereits')) {
-        return res.status(400).json({ error: error.message });
+      if (error.status) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      if (error.code === 'P2002') {
+        return res.status(400).json({ error: 'E-Mail oder Benutzername bereits vergeben' });
       }
       
       res.status(500).json({ error: 'Fehler beim Erstellen des Benutzers' });
@@ -87,7 +92,11 @@ class UserController {
   async updateUser(req, res) {
     try {
       const { id } = req.params;
-      const updateData = req.body;
+      // Nur bekannte Felder übernehmen (kein active/id/… über diesen Weg)
+      const updateData = {};
+      for (const key of ['name', 'email', 'username', 'role', 'password']) {
+        if (req.body[key] !== undefined) updateData[key] = req.body[key];
+      }
       
       // Prüfe ob User existiert
       const existingUser = await userService.findById(id);
@@ -101,7 +110,7 @@ class UserController {
       }
       
       // Verhindere dass der letzte Admin sich selbst die Admin-Rolle entziehen kann
-      if (existingUser.role === 'ADMIN' && updateData.role !== 'ADMIN') {
+      if (existingUser.role === 'ADMIN' && updateData.role && updateData.role !== 'ADMIN') {
         const adminCount = await prisma.user.count({
           where: { role: 'ADMIN', active: true }
         });
@@ -122,16 +131,23 @@ class UserController {
           action: 'UPDATE_USER',
           entityType: 'User',
           entityId: id,
-          changes: updateData
+          changes: { ...updateData, ...(updateData.password ? { password: '(geändert)' } : {}) }
         }
       });
       
       res.json({
-        message: 'Benutzer erfolgreich aktualisiert',
+        message: updateData.password ? 'Benutzer aktualisiert, neues Passwort gesetzt' : 'Benutzer erfolgreich aktualisiert',
+        passwordChanged: Boolean(updateData.password),
         user
       });
     } catch (error) {
       console.error('Update user error:', error);
+      if (error.status) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      if (error.code === 'P2002') {
+        return res.status(400).json({ error: 'E-Mail oder Benutzername bereits vergeben' });
+      }
       res.status(500).json({ error: 'Fehler beim Aktualisieren des Benutzers' });
     }
   }

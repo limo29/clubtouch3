@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt'); 
 const jwt = require('jsonwebtoken'); 
+const crypto = require('crypto'); 
  
 // Passwort hashen 
 async function hashPassword(password) { 
@@ -14,7 +15,9 @@ async function comparePassword(password, hash) {
  
 // JWT Token generieren 
 function generateTokens(userId) { 
-  const payload = { userId }; 
+  // jti: zwei Logins desselben Benutzers in derselben Sekunde ergäben sonst identische Tokens
+  // (Session.token ist unique → P2002 → 500 beim Login)
+  const payload = { userId, jti: crypto.randomUUID() }; 
    
   const accessToken = jwt.sign( 
     payload,  

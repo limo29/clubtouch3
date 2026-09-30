@@ -33,7 +33,7 @@ const validateRegister = [
     .isIn(['ADMIN', 'CASHIER', 'ACCOUNTANT'])
     .withMessage('Ungültige Rolle'),
   body('username')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 3 })
     .withMessage('Benutzername muss mindestens 3 Zeichen lang sein')
@@ -75,12 +75,24 @@ const validateUserUpdate = [
     .isIn(['ADMIN', 'CASHIER', 'ACCOUNTANT'])
     .withMessage('Ungültige Rolle'),
   body('username')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 3 })
     .withMessage('Benutzername muss mindestens 3 Zeichen lang sein')
     .matches(/^[a-zA-Z0-9_]+$/)
     .withMessage('Benutzername darf nur Buchstaben, Zahlen und Unterstrich enthalten')
+];
+
+const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;
+const validateChangePassword = [
+  body('currentPassword')
+    .notEmpty()
+    .withMessage('Aktuelles Passwort erforderlich'),
+  body('newPassword')
+    .isLength({ min: 8 })
+    .withMessage('Passwort muss mindestens 8 Zeichen lang sein')
+    .matches(PASSWORD_RULE)
+    .withMessage('Passwort muss Groß-/Kleinbuchstaben und Zahlen enthalten')
 ];
 
 const validateArticle = [
@@ -317,6 +329,7 @@ module.exports = {
   validateLogin,
   validateRegister,
   validateUserUpdate,
+  validateChangePassword,
   validateArticle,
   validateArticleUpdate,
   validateDelivery,

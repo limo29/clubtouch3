@@ -41,7 +41,7 @@ const Login = () => {
     e.preventDefault();
     setLoading(true);
 
-    const result = await login(formData.identifier, formData.password);
+    const result = await login(formData.identifier.trim(), formData.password);
 
     if (result.success) {
       navigate('/dashboard');
@@ -98,6 +98,8 @@ const Login = () => {
               required
               autoFocus
               autoComplete="username"
+              inputProps={{ autoCapitalize: 'none', autoCorrect: 'off', spellCheck: 'false' }}
+              helperText="Groß- und Kleinschreibung spielt keine Rolle"
             />
 
             <TextField
@@ -131,7 +133,7 @@ const Login = () => {
               sx={{ mt: 3 }}
               disabled={loading}
             >
-              {loading ? 'Anmelden...' : 'Anmelden'}
+              {loading ? 'Anmelden…' : 'Anmelden'}
             </Button>
           </form>
 
