@@ -1,4 +1,5 @@
 const prisma = require('../utils/prisma');
+const { CUSTOMER_BASIC_SELECT } = require('../utils/customerSelect');
 const {
   BUSINESS_DAY_START_HOUR,
   businessDayWindow,
@@ -130,7 +131,7 @@ class TransactionService {
         },
         include: {
           items: { include: { article: true } },
-          customer: true,
+          customer: { select: CUSTOMER_BASIC_SELECT },
           user: { select: { id: true, name: true } }
         }
       });
@@ -185,7 +186,7 @@ class TransactionService {
         where: { id: transactionId },
         include: {
           items: true,
-          customer: true
+          customer: { select: CUSTOMER_BASIC_SELECT }
         }
       });
 
@@ -289,7 +290,7 @@ class TransactionService {
     if (paymentMethod) where.paymentMethod = paymentMethod;
 
     const include = {
-      customer: true,
+      customer: { select: CUSTOMER_BASIC_SELECT },
       user: {
         select: {
           id: true,
@@ -323,7 +324,7 @@ class TransactionService {
             article: true
           }
         },
-        customer: true,
+        customer: { select: CUSTOMER_BASIC_SELECT },
         user: {
           select: {
             id: true,

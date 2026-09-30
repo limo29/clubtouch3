@@ -32,6 +32,7 @@ import {
   Tooltip,
   Switch,
   FormControlLabel,
+  Divider,
 } from '@mui/material';
 import {
   Add,
@@ -43,6 +44,7 @@ import {
   TrendingUp,
   AccountBalanceWallet,
   Warning,
+  ContactMail,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
@@ -50,9 +52,12 @@ import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
 import { invalidate } from '../utils/invalidate';
+import { useAuth } from '../context/AuthContext';
 
 const Customers = () => {
   const queryClient = useQueryClient();
+  const { isAdmin, isAccountant } = useAuth();
+  const canSeeContact = isAdmin || isAccountant;
   const [openDialog, setOpenDialog] = useState(false);
   const [openTopUpDialog, setOpenTopUpDialog] = useState(false);
   const [openDetailDialog, setOpenDetailDialog] = useState(false);
@@ -156,15 +161,27 @@ const Customers = () => {
       reset({
         name: customer.name,
         nickname: customer.nickname || '',
-        gender: customer.gender || 'OTHER', // NEU
+        gender: customer.gender || 'OTHER',
         active: customer.active !== false,
+        company: customer.company || '',
+        street: customer.street || '',
+        zip: customer.zip || '',
+        city: customer.city || '',
+        phone: customer.phone || '',
+        email: customer.email || '',
       });
     } else {
       reset({
         name: '',
         nickname: '',
-        gender: 'OTHER', // NEU
+        gender: 'OTHER',
         active: true,
+        company: '',
+        street: '',
+        zip: '',
+        city: '',
+        phone: '',
+        email: '',
       });
     }
     setOpenDialog(true);
@@ -460,6 +477,74 @@ const Customers = () => {
                 />
               </Grid>
 
+              {canSeeContact && (
+                <>
+                  <Grid size={{ xs: 12 }}>
+                    <Divider><Typography variant="caption" color="text.secondary">Kontaktdaten (optional)</Typography></Divider>
+                  </Grid>
+                  <Grid size={{ xs: 12 }}>
+                    <Controller
+                      name="company"
+                      control={control}
+                      defaultValue=""
+                      render={({ field }) => (
+                        <TextField fullWidth {...field} label="Firma / Anschriftzusatz" />
+                      )}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12 }}>
+                    <Controller
+                      name="street"
+                      control={control}
+                      defaultValue=""
+                      render={({ field }) => (
+                        <TextField fullWidth {...field} label="Straße" />
+                      )}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 4 }}>
+                    <Controller
+                      name="zip"
+                      control={control}
+                      defaultValue=""
+                      render={({ field }) => (
+                        <TextField fullWidth {...field} label="PLZ" />
+                      )}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 8 }}>
+                    <Controller
+                      name="city"
+                      control={control}
+                      defaultValue=""
+                      render={({ field }) => (
+                        <TextField fullWidth {...field} label="Ort" />
+                      )}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <Controller
+                      name="phone"
+                      control={control}
+                      defaultValue=""
+                      render={({ field }) => (
+                        <TextField fullWidth {...field} label="Telefon" type="tel" />
+                      )}
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <Controller
+                      name="email"
+                      control={control}
+                      defaultValue=""
+                      render={({ field }) => (
+                        <TextField fullWidth {...field} label="E-Mail" type="email" />
+                      )}
+                    />
+                  </Grid>
+                </>
+              )}
+
             </Grid>
           </DialogContent>
           <DialogActions>
@@ -689,7 +774,7 @@ const Customers = () => {
                     <ListItem key={topUp.id} dense>
                       <ListItemText
                         primary={formatCurrency(topUp.amount)}
-                        secondary={`${new Date(topUp.createdAt).toLocaleString('de-DE')} - ${topUp.method === 'CASH' ? 'Bar' : 'Überweisung'}`}
+                        secondary={`${new Date(topUp.createdAt).toLocaleString('de-DE')} - ${topUp.method === 'CASH' ? 'Bar' : topUp.method === 'REIMBURSEMENT' ? 'Auslage (Einkauf)' : 'Überweisung'}`}
                       />
                       {topUp.reference && (
                         <Chip label={topUp.reference} size="small" />
@@ -697,6 +782,38 @@ const Customers = () => {
                     </ListItem>
                   ))}
                 </List>
+              </Grid>
+            )}
+          {canSeeContact && customerDetails && (customerDetails.company || customerDetails.street || customerDetails.zip || customerDetails.city || customerDetails.phone || customerDetails.email) && (
+              <Grid size={{ xs: 12 }}>
+                <Divider sx={{ mb: 1 }} />
+                <Typography variant="h6" gutterBottom>
+                  <ContactMail sx={{ verticalAlign: 'middle', mr: 1 }} />
+                  Kontaktdaten
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                  {(customerDetails.company || customerDetails.street || customerDetails.zip || customerDetails.city) && (
+                    <Box>
+                      {customerDetails.company && <Typography variant="body2">{customerDetails.company}</Typography>}
+                      {customerDetails.street && <Typography variant="body2">{customerDetails.street}</Typography>}
+                      {(customerDetails.zip || customerDetails.city) && (
+                        <Typography variant="body2">{[customerDetails.zip, customerDetails.city].filter(Boolean).join(' ')}</Typography>
+                      )}
+                    </Box>
+                  )}
+                  {customerDetails.phone && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Telefon</Typography>
+                      <Typography variant="body2">{customerDetails.phone}</Typography>
+                    </Box>
+                  )}
+                  {customerDetails.email && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">E-Mail</Typography>
+                      <Typography variant="body2">{customerDetails.email}</Typography>
+                    </Box>
+                  )}
+                </Box>
               </Grid>
             )}
           </Grid>

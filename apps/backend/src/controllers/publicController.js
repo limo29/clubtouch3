@@ -86,7 +86,10 @@ class PublicController {
                         mode: 'insensitive'
                     }
                 },
-                include: {
+                select: {
+                    id: true,
+                    name: true,
+                    balance: true,
                     transactions: {
                         take: 5,
                         orderBy: { createdAt: 'desc' },

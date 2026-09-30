@@ -5,7 +5,8 @@ import {
   DialogContent, MenuItem, Chip, Drawer, useMediaQuery,
   Tooltip, Divider, ListItemButton, ListItemIcon,
   TableBody, TableCell, TableRow, CircularProgress, Alert,
-  ToggleButtonGroup, ToggleButton
+  ToggleButtonGroup, ToggleButton,
+  Checkbox, FormControlLabel
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import {
@@ -181,7 +182,8 @@ export default function Invoices() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));   // Anlegen: Vollbild-Dialog statt Drawer
   const isCompact = useMediaQuery(theme.breakpoints.down('md'));  // Liste: Karten statt Tabelle
-  const { isAdmin } = useAuth();
+  const { isAdmin, isAccountant } = useAuth();
+  const canSeeContact = isAdmin || isAccountant;
 
   // Tabelle / Filter
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -262,6 +264,9 @@ export default function Invoices() {
   const { lines, setLines, reset: resetLines, totalAmount: total } = useArticleLines([]);
   const [dueDate, setDueDate] = useState(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
   const [description, setDescription] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  // Anschrift beim Kunden speichern (nur für ADMIN/ACCOUNTANT sichtbar)
+  const [saveAddressToCustomer, setSaveAddressToCustomer] = useState(false);
 
   // Statuswechsel: Dialog (Desktop) / Bottom Sheet (kompakt)
   const [statusSheet, setStatusSheet] = useState({ open: false, inv: null });
@@ -293,6 +298,8 @@ export default function Invoices() {
     setEditInvoice(null);
     setRecipientName('');
     setRecipientAddress('');
+    setSelectedCustomerId(null);
+    setSaveAddressToCustomer(false);
     resetLines([]);
     setDescription('');
     setDueDate(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
@@ -305,6 +312,8 @@ export default function Invoices() {
     setEditInvoice(inv);
     setRecipientName(inv.customerName || '');
     setRecipientAddress(inv.customerAddress || '');
+    setSelectedCustomerId(inv.customerId || null);
+    setSaveAddressToCustomer(false);
     setDueDate(new Date(inv.dueDate));
     setDescription(inv.description || '');
     // Menge in Basiseinheiten → Anzeige als Kisten + Stück
@@ -314,7 +323,7 @@ export default function Invoices() {
 
   const submitDisabled = !lines.length || !recipientName.trim();
 
-  const submitInvoice = () => {
+  const submitInvoice = async () => {
     if (submitDisabled) return;
     const payload = {
       description: description || null,
@@ -324,8 +333,26 @@ export default function Invoices() {
       items: toInvoicePayload(lines),
       totalAmount: num(total),
       customerName: recipientName.trim(),
-      customerAddress: recipientAddress || null
+      customerAddress: recipientAddress || null,
+      customerId: selectedCustomerId || null,
     };
+    // Anschrift beim Kunden speichern (nur für ADMIN/ACCOUNTANT, wenn Checkbox aktiviert und Kunde gewählt)
+    if (saveAddressToCustomer && selectedCustomerId && recipientAddress && canSeeContact) {
+      const addrLines = recipientAddress.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      let zip = null, city = null, street = null, company = null;
+      for (let i = addrLines.length - 1; i >= 0; i--) {
+        const m = addrLines[i].match(/^(\d{4,5})\s+(.+)$/);
+        if (m && !zip) { zip = m[1]; city = m[2]; }
+        else if (zip && !street) { street = addrLines[i]; }
+        else if (street && !company) { company = addrLines[i]; }
+      }
+      if (zip && city) {
+        try {
+          await api.put('/customers/' + selectedCustomerId, { zip, city, street: street || undefined, company: company || undefined });
+          invalidate(queryClient, 'customers');
+        } catch (_e) { /* Speichern fehlgeschlagen – Rechnung trotzdem erstellen */ }
+      }
+    }
     if (editInvoice) updateInvoiceMutation.mutate({ id: editInvoice.id, payload }); else createInvoiceMutation.mutate(payload);
   };
 
@@ -603,8 +630,11 @@ export default function Invoices() {
                 isMobile={false}
                 customers={filteredCustomers}
                 onPickCustomer={(c) => {
-                  setRecipientName(c.nickname || c.name || '');
-                  if (c.address) setRecipientAddress(c.address);
+                  setRecipientName(c.name || '');
+                  setSelectedCustomerId(c.id);
+                  // Anschrift aus Kontaktdaten zusammensetzen (nur wenn der Nutzer die Felder sehen darf)
+                  const addrParts = [c.company, c.street, [c.zip, c.city].filter(Boolean).join(' ')].filter(Boolean);
+                  if (addrParts.length > 0) setRecipientAddress(addrParts.join('\n'));
                 }}
                 customerSearch={customerSearch}
                 setCustomerSearch={setCustomerSearch}
@@ -623,6 +653,10 @@ export default function Invoices() {
                 submitInvoice={submitInvoice}
                 onClose={() => setShowCreate(false)}
                 editInvoice={editInvoice}
+                selectedCustomerId={selectedCustomerId}
+                saveAddressToCustomer={saveAddressToCustomer}
+                setSaveAddressToCustomer={setSaveAddressToCustomer}
+                canSeeContact={canSeeContact}
               />
             </DialogContent>
           </Box>
@@ -643,8 +677,10 @@ export default function Invoices() {
               isMobile
               customers={filteredCustomers}
               onPickCustomer={(c) => {
-                setRecipientName(c.nickname || c.name || '');
-                if (c.address) setRecipientAddress(c.address);
+                setRecipientName(c.name || '');
+                setSelectedCustomerId(c.id);
+                const addrParts = [c.company, c.street, [c.zip, c.city].filter(Boolean).join(' ')].filter(Boolean);
+                if (addrParts.length > 0) setRecipientAddress(addrParts.join('\n'));
               }}
               customerSearch={customerSearch}
               setCustomerSearch={setCustomerSearch}
@@ -663,6 +699,10 @@ export default function Invoices() {
               submitInvoice={submitInvoice}
               onClose={() => setShowCreate(false)}
               editInvoice={editInvoice}
+              selectedCustomerId={selectedCustomerId}
+              saveAddressToCustomer={saveAddressToCustomer}
+              setSaveAddressToCustomer={setSaveAddressToCustomer}
+              canSeeContact={canSeeContact}
             />
           </DialogContent>
         </Dialog>
@@ -774,7 +814,8 @@ function ThreeColumnPOS(props) {
     recipientName, setRecipientName, recipientAddress, setRecipientAddress,
     lines, setLines,
     dueDate, setDueDate, description, setDescription,
-    total, submitDisabled, submitInvoice, onClose, editInvoice
+    total, submitDisabled, submitInvoice, onClose, editInvoice,
+    selectedCustomerId, saveAddressToCustomer, setSaveAddressToCustomer, canSeeContact
   } = props;
 
   const DuePicker = isMobile ? MobileDatePicker : DesktopDatePicker;
@@ -847,6 +888,19 @@ function ThreeColumnPOS(props) {
 
   const linesFooter = (
     <>
+      {canSeeContact && selectedCustomerId && (
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={saveAddressToCustomer}
+              onChange={(e) => setSaveAddressToCustomer(e.target.checked)}
+              size="small"
+            />
+          }
+          label={<Typography variant="caption">Anschrift beim Kunden speichern</Typography>}
+          sx={{ mb: 0.5, display: 'flex' }}
+        />
+      )}
       <Typography variant="h5" align="right" sx={{ fontWeight: 900, color: 'primary.main' }} aria-live="polite">Gesamt: {money(total)}</Typography>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
         <Button variant="contained" size="large" fullWidth onClick={submitInvoice} disabled={submitDisabled} sx={{ fontWeight: 800 }}>

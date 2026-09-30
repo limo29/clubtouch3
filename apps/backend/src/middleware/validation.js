@@ -172,7 +172,40 @@ const validateCustomer = [
     .withMessage('Name muss mindestens 2 Zeichen lang sein'),
   body('nickname')
     .optional()
+    .trim(),
+  // Kontaktdaten (optional; CASHIER-Eingaben werden im Controller ignoriert)
+  body('company')
+    .optional({ values: 'falsy' })
     .trim()
+    .isLength({ max: 150 })
+    .withMessage('Firma/Zusatz darf höchstens 150 Zeichen lang sein'),
+  body('street')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 150 })
+    .withMessage('Straße darf höchstens 150 Zeichen lang sein'),
+  body('zip')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 20 })
+    .withMessage('PLZ darf höchstens 20 Zeichen lang sein'),
+  body('city')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('Ort darf höchstens 100 Zeichen lang sein'),
+  body('phone')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Telefon darf höchstens 50 Zeichen lang sein'),
+  body('email')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isEmail()
+    .withMessage('E-Mail-Adresse ist ungültig')
+    .isLength({ max: 200 })
+    .withMessage('E-Mail darf höchstens 200 Zeichen lang sein'),
 ];
 
 const validateCustomerUpdate = [
@@ -183,7 +216,40 @@ const validateCustomerUpdate = [
     .withMessage('Name muss mindestens 2 Zeichen lang sein'),
   body('nickname')
     .optional()
+    .trim(),
+  // Kontaktdaten (optional; CASHIER-Eingaben werden im Controller ignoriert)
+  body('company')
+    .optional({ values: 'falsy' })
     .trim()
+    .isLength({ max: 150 })
+    .withMessage('Firma/Zusatz darf höchstens 150 Zeichen lang sein'),
+  body('street')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 150 })
+    .withMessage('Straße darf höchstens 150 Zeichen lang sein'),
+  body('zip')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 20 })
+    .withMessage('PLZ darf höchstens 20 Zeichen lang sein'),
+  body('city')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('Ort darf höchstens 100 Zeichen lang sein'),
+  body('phone')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Telefon darf höchstens 50 Zeichen lang sein'),
+  body('email')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isEmail()
+    .withMessage('E-Mail-Adresse ist ungültig')
+    .isLength({ max: 200 })
+    .withMessage('E-Mail darf höchstens 200 Zeichen lang sein'),
 ];
 
 const validateTopUp = [

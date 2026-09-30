@@ -45,6 +45,18 @@ class CustomerService {
     });
   }
 
+  // Kontaktfelder aus rohen Daten extrahieren; leere Strings als null speichern
+  _pickContact(data) {
+    const fields = ['company', 'street', 'zip', 'city', 'phone', 'email'];
+    const result = {};
+    for (const f of fields) {
+      if (Object.prototype.hasOwnProperty.call(data, f)) {
+        result[f] = data[f] || null;
+      }
+    }
+    return result;
+  }
+
   // Erstelle neuen Kunden
   async createCustomer(data) {
     // Prüfe ob Name bereits existiert
@@ -66,7 +78,8 @@ class CustomerService {
         gender: data.gender || 'OTHER',
         active: data.active !== undefined ? data.active : true, // Default true
         balance: 0,
-        lastActivity: new Date()
+        lastActivity: new Date(),
+        ...this._pickContact(data)
       }
     });
   }
@@ -95,7 +108,8 @@ class CustomerService {
         nickname: data.nickname,
         gender: data.gender,
         active: data.active,
-        lastActivity: new Date()
+        lastActivity: new Date(),
+        ...this._pickContact(data)
       }
     });
   }
