@@ -43,6 +43,7 @@ import { API_ENDPOINTS } from '../config/api';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import KPICard from '../components/common/KPICard';
+import { invalidate } from '../utils/invalidate';
 
 // Stornierbar sind Verkäufe und die geldlosen Buchungen (Eigenverbrauch, Abgelaufen).
 // Ein REFUND ist selbst schon der Storno und wird nie storniert.
@@ -105,8 +106,7 @@ const Transactions = () => {
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['daily-summary'] });
+      invalidate(queryClient, 'sales', 'customers', 'stock', 'finance');
       setCancelDialog(false);
       setSelectedTransaction(null);
     },

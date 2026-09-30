@@ -33,8 +33,9 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 
 import ArticleLinePicker from "../components/articles/ArticleLinePicker";
 import { useArticleLines, toPurchasePayload } from "../hooks/useArticleLines";
-import { useArticles, ARTICLES_QUERY_KEY } from "../hooks/useArticles";
+import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
+import { invalidate } from '../utils/invalidate';
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentCreate             */
@@ -89,8 +90,7 @@ export default function PurchaseDocumentCreate() {
         headers: { "Content-Type": "multipart/form-data" },
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["purchaseDocuments"] });
-      queryClient.invalidateQueries({ queryKey: ARTICLES_QUERY_KEY });
+      invalidate(queryClient, "purchases", "stock", "finance");
       navigate("/purchases");
     },
     onError: (err) => console.error("Fehler beim Erstellen:", err),

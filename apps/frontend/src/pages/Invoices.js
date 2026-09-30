@@ -28,6 +28,7 @@ import ArticleLinePicker from '../components/articles/ArticleLinePicker';
 import { useArticleLines, toInvoicePayload, linesFromInvoiceItems } from '../hooks/useArticleLines';
 import { useArticles } from '../hooks/useArticles';
 import { num, money, fmtNumber } from '../utils/format';
+import { invalidate } from '../utils/invalidate';
 
 /* ----------------------- kleine Helfer ----------------------- */
 
@@ -209,13 +210,12 @@ export default function Invoices() {
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (payload) => (await api.post('/invoices', payload)).data,
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['invoices'] }); setShowCreate(false); }
+    onSuccess: () => { invalidate(queryClient, 'invoices', 'finance'); setShowCreate(false); }
   });
   const updateInvoiceMutation = useMutation({
     mutationFn: async ({ id, payload }) => (await api.put(`/invoices/${id}`, payload)).data,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
-      queryClient.invalidateQueries({ queryKey: ['invoice'] });
+      invalidate(queryClient, 'invoices', 'finance');
       setShowCreate(false);
     }
   });
@@ -223,10 +223,8 @@ export default function Invoices() {
     mutationFn: async ({ id, status, paymentMethod, paidAt }) =>
       (await api.patch(`/invoices/${id}/status`, { status, paymentMethod, paidAt })).data,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
       // Bar bezahlte Kundenrechnungen verändern das Kassen-Soll, überwiesene die Bank-Abstimmung
-      queryClient.invalidateQueries({ queryKey: ['cash-counts'] });
-      queryClient.invalidateQueries({ queryKey: ['bank-reconciliation'] });
+      invalidate(queryClient, 'invoices', 'finance');
     }
   });
   const setStatus = (inv, status, extra = {}) => {

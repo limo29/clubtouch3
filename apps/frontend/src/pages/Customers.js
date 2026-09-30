@@ -49,6 +49,7 @@ import { useForm, Controller } from 'react-hook-form';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
+import { invalidate } from '../utils/invalidate';
 
 const Customers = () => {
   const queryClient = useQueryClient();
@@ -118,7 +119,7 @@ const Customers = () => {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      invalidate(queryClient, 'customers', 'finance');
       handleCloseDialog();
     },
   });
@@ -130,7 +131,7 @@ const Customers = () => {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      invalidate(queryClient, 'customers', 'finance');
     }
   });
 
@@ -141,8 +142,7 @@ const Customers = () => {
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
-      queryClient.invalidateQueries({ queryKey: ['customer'] });
+      invalidate(queryClient, 'customers', 'finance');
       handleCloseTopUpDialog();
     },
   });

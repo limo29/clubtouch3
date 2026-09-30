@@ -43,6 +43,7 @@ import FilterBar from '../components/common/FilterBar';
 import { DocumentTable, DocumentTableHead, documentRowSx, documentChildRowSx } from '../components/common/DocumentTable';
 import MobileDocumentCard from '../components/common/MobileDocumentCard';
 import { summarizeItems } from "../utils/purchaseDocs";
+import { invalidate } from '../utils/invalidate';
 
 /* ---------------- helpers ---------------- */
 const num = (v) => {
@@ -194,7 +195,7 @@ export default function PurchaseDocuments() {
       );
       return { documents: docs };
     },
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   });
 
   const documents = useMemo(() => data?.documents || [], [data]);
@@ -203,19 +204,19 @@ export default function PurchaseDocuments() {
   const markPaid = useMutation({
     mutationFn: ({ id, paymentMethod }) =>
       api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
+    onSuccess: () => invalidate(queryClient, "purchases", "finance"),
   });
 
   const markUnpaid = useMutation({
     mutationFn: (id) => api.post(`/purchase-documents/${id}/mark-unpaid`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
+    onSuccess: () => invalidate(queryClient, "purchases", "finance"),
   });
 
   const del = useMutation({
     mutationFn: (id) => api.delete(`/purchase-documents/${id}`),
     onSuccess: () => {
       setDeletingId(null);
-      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
+      invalidate(queryClient, "purchases", "stock", "finance");
     },
     onError: () => setDeletingId(null),
   });
@@ -293,7 +294,7 @@ export default function PurchaseDocuments() {
       await api.patch(`/purchase-documents/${uploadDocId}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
+      invalidate(queryClient, "purchases");
     } catch (err) {
       console.error("Upload error:", err);
       window.alert("Fehler beim Hochladen des Nachweises.");

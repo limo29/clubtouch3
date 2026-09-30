@@ -15,11 +15,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import { useOffline } from '../context/OfflineContext';
-import { ARTICLES_QUERY_KEY } from '../hooks/useArticles';
 import { useArticleLines, toSalePayload } from '../hooks/useArticleLines';
 import ArticleLinePicker from '../components/articles/ArticleLinePicker';
 import { isCurrentBusinessDay } from '../utils/businessDay';
 import { num, money } from '../utils/format';
+import { invalidate } from '../utils/invalidate';
 
 /* Helpers */
 const withinHours = (date, h) => { const d = new Date(date); if (Number.isNaN(d.getTime())) return false; return Date.now() - d.getTime() <= h * 60 * 60 * 1000; };
@@ -122,22 +122,22 @@ const Sales = () => {
   /* Mutations */
   const cancelTransactionMutation = useMutation({
     mutationFn: async (id) => api.post(`/transactions/${id}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); refetchHistory(); }
   });
 
   const cancelTopUpMutation = useMutation({
     mutationFn: async (topUpId) => api.post(`/customers/${historyCustomer.id}/topup/${topUpId}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); refetchHistory(); }
   });
 
   const topUpMutation = useMutation({
     mutationFn: async (data) => api.post(`/customers/${data.customerId}/topup`, { amount: num(data.amount), method: data.method, reference: data.reference }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); setShowTopUp(false); setTopUpAmount(''); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); setShowTopUp(false); setTopUpAmount(''); }
   });
 
   const quickSaleMutation = useMutation({
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); queryClient.invalidateQueries({ queryKey: ARTICLES_QUERY_KEY }); clearCart(); setShowChangeCalc(false); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'stock', 'sales', 'finance'); clearCart(); setShowChangeCalc(false); }
   });
 
   /* Logic & Actions */

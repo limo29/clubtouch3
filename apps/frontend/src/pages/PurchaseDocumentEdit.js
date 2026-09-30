@@ -42,8 +42,9 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 
 import ArticleLinePicker from "../components/articles/ArticleLinePicker";
 import { useArticleLines, toPurchasePayload, linesFromPurchaseItems } from "../hooks/useArticleLines";
-import { useArticles, ARTICLES_QUERY_KEY } from "../hooks/useArticles";
+import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
+import { invalidate } from '../utils/invalidate';
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentEdit               */
@@ -187,9 +188,7 @@ export default function PurchaseDocumentEdit() {
     if (toUnlink.length) promises.push(unlinkMutation.mutateAsync(toUnlink));
 
     Promise.all(promises).finally(() => {
-      queryClient.invalidateQueries({ queryKey: ["purchaseDocuments"] });
-      queryClient.invalidateQueries({ queryKey: ["purchaseDocument", id] });
-      queryClient.invalidateQueries({ queryKey: ARTICLES_QUERY_KEY });
+      invalidate(queryClient, "purchases", "stock", "finance");
       navigate("/purchases");
     });
   };
