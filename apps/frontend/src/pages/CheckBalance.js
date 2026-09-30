@@ -119,7 +119,7 @@ export default function CheckBalance() {
                                         >
                                             <Box>
                                                 <Typography variant="body2" fontWeight="bold">
-                                                    {item.type === 'TOPUP' ? 'Aufladung' : item.cancelled ? 'Storno' : 'Einkauf'}
+                                                    {item.type === 'TOPUP' ? (item.method === 'REIMBURSEMENT' ? 'Auslage' : 'Aufladung') : item.cancelled ? 'Storno' : 'Einkauf'}
                                                 </Typography>
                                                 <Typography variant="caption" color="text.secondary">
                                                     {new Date(item.date).toLocaleDateString()} • {item.items || item.method}

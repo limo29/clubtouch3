@@ -22,6 +22,7 @@ import {
   Alert,
   Tooltip,
   InputAdornment,
+  Snackbar,
 } from '@mui/material';
 import {
   Add,
@@ -39,6 +40,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
+import { PASSWORD_HINT, passwordProblem, apiError } from '../components/common/ChangePasswordDialog';
 
 const Users = () => {
   const queryClient = useQueryClient();
@@ -46,6 +48,7 @@ const Users = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [snack, setSnack] = useState(null); // { severity, message }
 
   const { control, handleSubmit, reset, formState: { errors } } = useForm();
 
@@ -69,8 +72,13 @@ const Users = () => {
         return response.data;
       }
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
+      const name = data?.user?.name || variables?.name || 'Benutzer';
+      let message = editingUser ? `${name} gespeichert` : `${name} angelegt`;
+      if (editingUser && variables?.password) message = `${name} gespeichert, neues Passwort gesetzt`;
+      if (!editingUser && variables?.username) message += ` (Anmeldung mit „${variables.username}“ oder E-Mail)`;
+      setSnack({ severity: 'success', message });
       handleCloseDialog();
     },
   });
@@ -81,9 +89,11 @@ const Users = () => {
       const response = await api.patch(`${API_ENDPOINTS.USERS}/${userId}/toggle-status`);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
+      setSnack({ severity: 'success', message: data?.message || 'Status geändert' });
     },
+    onError: (err) => setSnack({ severity: 'error', message: apiError(err, 'Status konnte nicht geändert werden') }),
   });
 
   const users = usersData?.users || [];
@@ -111,6 +121,7 @@ const Users = () => {
   };
 
   const handleCloseDialog = () => {
+    userMutation.reset();
     setOpenDialog(false);
     setEditingUser(null);
     reset();
@@ -122,6 +133,9 @@ const Users = () => {
     if (editingUser && !data.password) {
       delete data.password;
     }
+    data.username = (data.username || '').trim();
+    data.name = (data.name || '').trim();
+    data.email = (data.email || '').trim();
 
     userMutation.mutate(data);
   };
@@ -167,8 +181,8 @@ const Users = () => {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Benutzerverwaltung
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Anmeldung mit E-Mail oder Benutzername, Groß-/Kleinschreibung egal. Das eigene Passwort ändert jeder selbst über das Benutzermenü oben rechts.
       </Typography>
 
       {/* Actions Bar */}
@@ -190,8 +204,8 @@ const Users = () => {
       )}
 
       {/* Users Table */}
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+        <Table sx={{ minWidth: 720 }}>
           <TableHead>
             <TableRow>
               <TableCell>Name</TableCell>
@@ -273,6 +287,11 @@ const Users = () => {
             {editingUser ? 'Benutzer bearbeiten' : 'Neuer Benutzer'}
           </DialogTitle>
           <DialogContent>
+            {userMutation.isError && (
+              <Alert severity="error" sx={{ mt: 1 }}>
+                {apiError(userMutation.error, 'Speichern fehlgeschlagen')}
+              </Alert>
+            )}
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid size={{ xs: 12 }}>
                 <Controller
@@ -317,13 +336,23 @@ const Users = () => {
                 <Controller
                   name="username"
                   control={control}
+                  rules={{
+                    validate: (v) => {
+                      const val = (v || '').trim();
+                      if (!val) return true;
+                      if (val.length < 3) return 'Mindestens 3 Zeichen';
+                      if (!/^[a-zA-Z0-9_]+$/.test(val)) return 'Nur Buchstaben, Zahlen und Unterstrich';
+                      return true;
+                    }
+                  }}
                   render={({ field }) => (
                     <TextField
                       fullWidth
                       {...field}
-                      label="Benutzername (Optional)"
+                      label="Benutzername (optional)"
                       error={!!errors.username}
-                      helperText={errors.username?.message}
+                      helperText={errors.username?.message || 'Kurzer Anmeldename für die Kasse, Groß-/Kleinschreibung egal. Ohne Benutzername meldet man sich mit der E-Mail an.'}
+                      inputProps={{ autoCapitalize: 'none', autoCorrect: 'off', spellCheck: 'false' }}
                     />
                   )}
                 />
@@ -368,19 +397,17 @@ const Users = () => {
                   control={control}
                   rules={{
                     required: editingUser ? false : 'Passwort ist erforderlich',
-                    minLength: {
-                      value: 8,
-                      message: 'Passwort muss mindestens 8 Zeichen lang sein'
-                    }
+                    validate: (v) => (!v && editingUser) ? true : (passwordProblem(v) || true)
                   }}
                   render={({ field }) => (
                     <TextField
                       fullWidth
                       {...field}
-                      label={editingUser ? 'Neues Passwort (optional)' : 'Passwort'}
+                      label={editingUser ? 'Neues Passwort setzen (optional)' : 'Passwort'}
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
                       error={!!errors.password}
-                      helperText={errors.password?.message || (editingUser && 'Leer lassen, um Passwort nicht zu ändern')}
+                      helperText={errors.password?.message || (editingUser ? `Leer lassen, um das Passwort nicht zu ändern. ${PASSWORD_HINT}.` : PASSWORD_HINT)}
                       InputProps={{
                         endAdornment: (
                           <InputAdornment position="end">
@@ -411,6 +438,10 @@ const Users = () => {
           </DialogActions>
         </form>
       </Dialog>
+
+      <Snackbar open={Boolean(snack)} autoHideDuration={5000} onClose={() => setSnack(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={snack?.severity || 'success'} variant="filled" onClose={() => setSnack(null)}>{snack?.message}</Alert>
+      </Snackbar>
     </Box>
   );
 };

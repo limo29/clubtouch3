@@ -43,6 +43,9 @@ import FilterBar from '../components/common/FilterBar';
 import { DocumentTable, DocumentTableHead, documentRowSx, documentChildRowSx } from '../components/common/DocumentTable';
 import MobileDocumentCard from '../components/common/MobileDocumentCard';
 import { summarizeItems } from "../utils/purchaseDocs";
+import { invalidate } from '../utils/invalidate';
+import MarkPaidDialog from '../components/purchases/MarkPaidDialog';
+import { paymentMethodShort } from '../components/purchases/ReimbursementCustomerField';
 
 /* ---------------- helpers ---------------- */
 const num = (v) => {
@@ -63,13 +66,17 @@ const formatCurrency = (amount) =>
 function StatusChip({ document, onToggle, disabled }) {
   if (document.type === "LIEFERSCHEIN") return <span>–</span>;
   const isPaid = !!document.paid;
+  // Auslage: „Auslage · Name“, sonst nur „bezahlt“
+  const paidLabel = document.paymentMethod === "ACCOUNT"
+    ? `${paymentMethodShort("ACCOUNT")}${document.reimbursedCustomer ? ` · ${document.reimbursedCustomer.nickname || document.reimbursedCustomer.name}` : ""}`
+    : "bezahlt";
   return (
     <Tooltip
       title={
         disabled
           ? ""
           : isPaid
-            ? "Klicken, um als »nicht bezahlt« zu markieren"
+            ? `${document.paymentMethod ? `Bezahlt: ${paymentMethodShort(document.paymentMethod)}. ` : ""}Klicken, um als »nicht bezahlt« zu markieren`
             : "Klicken, um als »bezahlt« zu markieren"
       }
     >
@@ -79,7 +86,7 @@ function StatusChip({ document, onToggle, disabled }) {
           clickable
           onClick={disabled ? undefined : onToggle}
           color={isPaid ? "success" : "error"}
-          label={isPaid ? "bezahlt" : "nicht bezahlt"}
+          label={isPaid ? paidLabel : "nicht bezahlt"}
           sx={{ cursor: disabled ? "default" : "pointer" }}
         />
       </span>
@@ -174,6 +181,7 @@ export default function PurchaseDocuments() {
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [deletingId, setDeletingId] = useState(null);
   const [uploadDocId, setUploadDocId] = useState(null);
+  const [payingDoc, setPayingDoc] = useState(null);
   const fileInputRef = React.useRef(null);
 
   /* -------- Query -------- */
@@ -194,28 +202,33 @@ export default function PurchaseDocuments() {
       );
       return { documents: docs };
     },
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   });
 
   const documents = useMemo(() => data?.documents || [], [data]);
 
   /* -------- Mutations -------- */
   const markPaid = useMutation({
-    mutationFn: ({ id, paymentMethod }) =>
-      api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
+    mutationFn: ({ id, paymentMethod, reimbursedCustomerId }) =>
+      api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod, reimbursedCustomerId }),
+    onSuccess: () => {
+      setPayingDoc(null);
+      invalidate(queryClient, "purchases", "finance", "customers");
+    },
   });
 
+  // mark-unpaid bucht eine Auslage zurück → Kundensalden mit aktualisieren
   const markUnpaid = useMutation({
     mutationFn: (id) => api.post(`/purchase-documents/${id}/mark-unpaid`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["purchase-documents"] }),
+    onSuccess: () => invalidate(queryClient, "purchases", "finance", "customers"),
+    onError: (err) => alert(err.response?.data?.error || err.message),
   });
 
   const del = useMutation({
     mutationFn: (id) => api.delete(`/purchase-documents/${id}`),
     onSuccess: () => {
       setDeletingId(null);
-      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
+      invalidate(queryClient, "purchases", "stock", "finance", "customers");
     },
     onError: () => setDeletingId(null),
   });
@@ -226,10 +239,13 @@ export default function PurchaseDocuments() {
   const togglePaidStatus = (doc) => {
     if (doc.type !== "RECHNUNG" || isAnyMutating || deletingId) return;
     if (doc.paid) {
-      if (window.confirm("Als »nicht bezahlt« markieren?")) markUnpaid.mutate(doc.id);
+      const hint = doc.paymentMethod === "ACCOUNT" && doc.reimbursedCustomerId
+        ? "\n\nDie Auslage wird dem Kundenkonto wieder abgezogen (Storno Auslage)."
+        : "";
+      if (window.confirm(`Als »nicht bezahlt« markieren?${hint}`)) markUnpaid.mutate(doc.id);
     } else {
-      // Standard: Überweisung – passe an, wenn Barzahlung möglich sein soll
-      markPaid.mutate({ id: doc.id, paymentMethod: "TRANSFER" });
+      markPaid.reset();
+      setPayingDoc(doc);
     }
   };
 
@@ -244,6 +260,7 @@ export default function PurchaseDocuments() {
     let text = `Beleg „${doc.documentNumber}“ wirklich endgültig löschen?\n\n`;
     if (linkedLs > 0) text += `Es sind ${linkedLs} Lieferscheine verknüpft (Verknüpfungen werden aufgehoben).\n`;
     if (hasStock) text += `ACHTUNG: Zugehörige Wareneingänge werden aus dem Lagerbestand storniert!\n`;
+    if (doc.paid && doc.paymentMethod === "ACCOUNT" && doc.reimbursedCustomerId) text += `Die Auslage wird dem Kundenkonto wieder abgezogen (Storno Auslage).\n`;
     if (window.confirm(text)) {
       setDeletingId(doc.id);
       del.mutate(doc.id);
@@ -293,7 +310,7 @@ export default function PurchaseDocuments() {
       await api.patch(`/purchase-documents/${uploadDocId}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      queryClient.invalidateQueries({ queryKey: ["purchase-documents"] });
+      invalidate(queryClient, "purchases");
     } catch (err) {
       console.error("Upload error:", err);
       window.alert("Fehler beim Hochladen des Nachweises.");
@@ -426,10 +443,7 @@ export default function PurchaseDocuments() {
       <Box sx={{ mb: 4 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
           <Box>
-            <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: "-0.02em", fontSize: { xs: "1.6rem", sm: "2.125rem" } }}>
-              Einkauf
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            <Typography variant="body2" color="text.secondary">
               Lieferantenrechnungen und Lieferscheine
             </Typography>
           </Box>
@@ -699,6 +713,14 @@ export default function PurchaseDocuments() {
           )}
         </>
       )}
+
+      <MarkPaidDialog
+        document={payingDoc}
+        onClose={() => setPayingDoc(null)}
+        pending={markPaid.isPending}
+        error={markPaid.error ? markPaid.error.response?.data?.error || markPaid.error.message : null}
+        onConfirm={(payload) => markPaid.mutate({ id: payingDoc.id, ...payload })}
+      />
 
       {/* Hidden File Input for Direct Upload */}
       <input

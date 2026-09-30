@@ -15,11 +15,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import { useOffline } from '../context/OfflineContext';
-import { ARTICLES_QUERY_KEY } from '../hooks/useArticles';
 import { useArticleLines, toSalePayload } from '../hooks/useArticleLines';
 import ArticleLinePicker from '../components/articles/ArticleLinePicker';
 import { isCurrentBusinessDay } from '../utils/businessDay';
 import { num, money } from '../utils/format';
+import { invalidate } from '../utils/invalidate';
+import GroupBadge from '../components/customers/GroupBadge';
 
 /* Helpers */
 const withinHours = (date, h) => { const d = new Date(date); if (Number.isNaN(d.getTime())) return false; return Date.now() - d.getTime() <= h * 60 * 60 * 1000; };
@@ -122,22 +123,22 @@ const Sales = () => {
   /* Mutations */
   const cancelTransactionMutation = useMutation({
     mutationFn: async (id) => api.post(`/transactions/${id}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); refetchHistory(); }
   });
 
   const cancelTopUpMutation = useMutation({
     mutationFn: async (topUpId) => api.post(`/customers/${historyCustomer.id}/topup/${topUpId}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); refetchHistory(); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); refetchHistory(); }
   });
 
   const topUpMutation = useMutation({
     mutationFn: async (data) => api.post(`/customers/${data.customerId}/topup`, { amount: num(data.amount), method: data.method, reference: data.reference }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); setShowTopUp(false); setTopUpAmount(''); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); setShowTopUp(false); setTopUpAmount(''); }
   });
 
   const quickSaleMutation = useMutation({
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['customers-sales'] }); queryClient.invalidateQueries({ queryKey: ARTICLES_QUERY_KEY }); clearCart(); setShowChangeCalc(false); }
+    onSuccess: () => { invalidate(queryClient, 'customers', 'stock', 'sales', 'finance'); clearCart(); setShowChangeCalc(false); }
   });
 
   /* Logic & Actions */
@@ -313,7 +314,10 @@ const Sales = () => {
             {(customer.nickname?.[0] || customer.name?.[0] || '?').toUpperCase()}
           </Avatar>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography noWrap variant="body1" sx={{ fontWeight: 600, fontSize: '1rem' }}>{customer.nickname || customer.name}</Typography>
+            <Stack direction="row" alignItems="center" spacing={0.5}>
+              {customer.group && <GroupBadge group={customer.group} size={18} tooltip={false} />}
+              <Typography noWrap variant="body1" sx={{ fontWeight: 600, fontSize: '1rem' }}>{customer.nickname || customer.name}</Typography>
+            </Stack>
             {customer._specialActive
               ? (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.nickname ? `${customer.name} · ` : ''}zuletzt {timeLabel(customer.lastActivity)}</Typography>)
               : customer.nickname && (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.name}</Typography>)}
@@ -612,7 +616,11 @@ const Sales = () => {
             <List sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               {historyData.map(t => {
                 const isTopUp = t.type === 'TOPUP';
-                const isPositive = isTopUp;
+                const isAuslage = t.method === 'REIMBURSEMENT';
+                // Gegenbuchungen (Storno einer Aufladung/Auslage) sind negative TopUps
+                const isPositive = isTopUp && Number(t.amount) >= 0;
+                // Auslagen werden nur über die Lieferantenrechnung zurückgebucht, Gegenbuchungen nicht erneut storniert
+                const canCancel = !t.cancelled && !isAuslage && !(isTopUp && Number(t.amount) < 0);
                 return (
                   <Card key={t.id} elevation={0} sx={{
                     border: '1px solid', borderColor: 'divider',
@@ -632,7 +640,7 @@ const Sales = () => {
 
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="body1" fontWeight={700} noWrap sx={{ textDecoration: t.cancelled ? 'line-through' : 'none' }}>
-                          {isTopUp ? 'Guthaben' : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}
+                          {isAuslage ? (t.reference || 'Auslage') : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}
                         </Typography>
 
                         {/* Sold Items List */}
@@ -666,7 +674,7 @@ const Sales = () => {
                         <Typography variant="h6" fontWeight={800} color={t.cancelled ? 'text.disabled' : (isPositive ? 'success.main' : 'error.main')} sx={{ textDecoration: t.cancelled ? 'line-through' : 'none' }}>
                           {isPositive ? '+' : '-'} {money(Math.abs(t.cancelled && t.originalAmount ? t.originalAmount : t.amount))}
                         </Typography>
-                        {!t.cancelled && (
+                        {canCancel && (
                           <Button
                             variant="outlined"
                             color="error"

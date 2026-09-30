@@ -1,23 +1,57 @@
 const prisma = require('../utils/prisma');
 
+// Gruppen-Select für Kunden-Antworten
+const GROUP_SELECT = {
+  select: {
+    id: true,
+    name: true,
+    color: true,
+    emoji: true,
+    imageUrl: true,
+  },
+};
+
+// Standard-Include für Listen und Einzel-Abfragen
+const CUSTOMER_INCLUDE_BASE = {
+  group: GROUP_SELECT,
+};
+
+function triggerRefreshBoards() {
+  try {
+    const hs = require('./highscoreService');
+    Promise.resolve(hs.refreshBoards?.()).catch((err) =>
+      console.error('[CustomerService] refreshBoards Fehler:', err)
+    );
+  } catch (err) {
+    console.error('[CustomerService] highscoreService laden fehlgeschlagen:', err);
+  }
+}
+
 class CustomerService {
   // Liste alle Kunden
-  async listCustomers(search = '') {
-    const where = search ? {
-      OR: [
+  async listCustomers(search = '', groupId = null) {
+    const where = {};
+
+    if (search) {
+      where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
-        { nickname: { contains: search, mode: 'insensitive' } }
-      ]
-    } : {};
+        { nickname: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (groupId) {
+      where.groupId = groupId;
+    }
 
     return await prisma.customer.findMany({
       where,
       orderBy: { name: 'asc' },
       include: {
+        ...CUSTOMER_INCLUDE_BASE,
         _count: {
-          select: { transactions: true }
-        }
-      }
+          select: { transactions: true },
+        },
+      },
     });
   }
 
@@ -26,9 +60,10 @@ class CustomerService {
     return await prisma.customer.findUnique({
       where: { id },
       include: {
+        ...CUSTOMER_INCLUDE_BASE,
         accountTopUps: {
           take: 10,
-          orderBy: { createdAt: 'desc' }
+          orderBy: { createdAt: 'desc' },
         },
         transactions: {
           take: 10,
@@ -36,13 +71,25 @@ class CustomerService {
           include: {
             items: {
               include: {
-                article: true
-              }
-            }
-          }
-        }
-      }
+                article: true,
+              },
+            },
+          },
+        },
+      },
     });
+  }
+
+  // Kontaktfelder aus rohen Daten extrahieren; leere Strings als null speichern
+  _pickContact(data) {
+    const fields = ['company', 'street', 'zip', 'city', 'phone', 'email'];
+    const result = {};
+    for (const f of fields) {
+      if (Object.prototype.hasOwnProperty.call(data, f)) {
+        result[f] = data[f] || null;
+      }
+    }
+    return result;
   }
 
   // Erstelle neuen Kunden
@@ -50,25 +97,40 @@ class CustomerService {
     // Prüfe ob Name bereits existiert
     const existing = await prisma.customer.findFirst({
       where: {
-        name: data.name
-      }
+        name: data.name,
+      },
     });
 
     if (existing) {
       throw new Error('Ein Kunde mit diesem Namen existiert bereits');
     }
 
+    // groupId validieren
+    let groupId = null;
+    if (data.groupId) {
+      const group = await prisma.customerGroup.findUnique({ where: { id: data.groupId } });
+      if (!group) throw Object.assign(new Error('Gruppe nicht gefunden'), { userError: true, status: 400 });
+      groupId = data.groupId;
+    }
+
     // Aktualisiere lastActivity beim Erstellen
-    return await prisma.customer.create({
+    const customer = await prisma.customer.create({
       data: {
         name: data.name,
         nickname: data.nickname,
         gender: data.gender || 'OTHER',
-        active: data.active !== undefined ? data.active : true, // Default true
+        active: data.active !== undefined ? data.active : true,
         balance: 0,
-        lastActivity: new Date()
-      }
+        lastActivity: new Date(),
+        groupId,
+        isGroupAccount: data.isGroupAccount ? true : false,
+        ...this._pickContact(data),
+      },
+      include: { group: GROUP_SELECT },
     });
+
+    triggerRefreshBoards();
+    return customer;
   }
 
 
@@ -79,8 +141,8 @@ class CustomerService {
       const existing = await prisma.customer.findFirst({
         where: {
           name: data.name,
-          NOT: { id }
-        }
+          NOT: { id },
+        },
       });
 
       if (existing) {
@@ -88,16 +150,44 @@ class CustomerService {
       }
     }
 
-    return await prisma.customer.update({
-      where: { id },
-      data: {
-        name: data.name,
-        nickname: data.nickname,
-        gender: data.gender,
-        active: data.active,
-        lastActivity: new Date()
+    // groupId: '' oder null → null; UUID → prüfen
+    let groupId = undefined; // undefined = nicht ändern
+    if (Object.prototype.hasOwnProperty.call(data, 'groupId')) {
+      if (!data.groupId) {
+        groupId = null;
+      } else {
+        const group = await prisma.customerGroup.findUnique({ where: { id: data.groupId } });
+        if (!group) throw Object.assign(new Error('Gruppe nicht gefunden'), { userError: true, status: 400 });
+        groupId = data.groupId;
       }
+    }
+
+    const updateData = {
+      name: data.name,
+      nickname: data.nickname,
+      gender: data.gender,
+      active: data.active,
+      lastActivity: new Date(),
+      ...this._pickContact(data),
+    };
+
+    if (groupId !== undefined) updateData.groupId = groupId;
+    if (Object.prototype.hasOwnProperty.call(data, 'isGroupAccount')) {
+      updateData.isGroupAccount = Boolean(data.isGroupAccount);
+    }
+
+    const customer = await prisma.customer.update({
+      where: { id },
+      data: updateData,
+      include: { group: GROUP_SELECT },
     });
+
+    // refreshBoards wenn relevante Felder geändert wurden
+    const relevantFields = ['name', 'nickname', 'groupId', 'isGroupAccount', 'active'];
+    const hasRelevant = relevantFields.some((f) => Object.prototype.hasOwnProperty.call(data, f));
+    if (hasRelevant) triggerRefreshBoards();
+
+    return customer;
   }
 
 
@@ -115,8 +205,8 @@ class CustomerService {
           customerId,
           amount,
           method,
-          reference
-        }
+          reference,
+        },
       });
 
       // Update Guthaben
@@ -124,9 +214,10 @@ class CustomerService {
         where: { id: customerId },
         data: {
           balance: {
-            increment: amount
-          }
-        }
+            increment: amount,
+          },
+        },
+        include: { group: GROUP_SELECT },
       });
 
       return { topUp, customer };
@@ -143,7 +234,7 @@ class CustomerService {
 
     // Hole aktuellen Kunden
     const customer = await prisma.customer.findUnique({
-      where: { id: customerId }
+      where: { id: customerId },
     });
 
     if (!customer) {
@@ -160,9 +251,9 @@ class CustomerService {
       where: { id: customerId },
       data: {
         balance: {
-          decrement: amount
-        }
-      }
+          decrement: amount,
+        },
+      },
     });
   }
 
@@ -176,9 +267,9 @@ class CustomerService {
       where: { id: customerId },
       data: {
         balance: {
-          increment: amount
-        }
-      }
+          increment: amount,
+        },
+      },
     });
   }
 
@@ -186,30 +277,33 @@ class CustomerService {
   async getCustomerStats(customerId) {
     const [customer, totalSpent, transactionCount, favoriteArticles] = await Promise.all([
       // Basis-Kundendaten
-      prisma.customer.findUnique({ where: { id: customerId } }),
+      prisma.customer.findUnique({
+        where: { id: customerId },
+        include: { group: GROUP_SELECT },
+      }),
 
       // Gesamtausgaben
       prisma.transaction.aggregate({
         where: {
           customerId,
-          cancelled: false
+          cancelled: false,
         },
         _sum: {
-          totalAmount: true
-        }
+          totalAmount: true,
+        },
       }),
 
       // Anzahl Transaktionen
       prisma.transaction.count({
         where: {
           customerId,
-          cancelled: false
-        }
+          cancelled: false,
+        },
       }),
 
       // Lieblingsartikel (Top 5)
       prisma.$queryRaw`
-        SELECT 
+        SELECT
           a.id,
           a.name,
           a.category,
@@ -223,14 +317,14 @@ class CustomerService {
         GROUP BY a.id, a.name, a.category
         ORDER BY total_quantity DESC
         LIMIT 5
-      `
+      `,
     ]);
 
     return {
       customer,
       totalSpent: totalSpent._sum.totalAmount || 0,
       transactionCount,
-      favoriteArticles
+      favoriteArticles,
     };
   }
 
@@ -240,10 +334,11 @@ class CustomerService {
       where: {
         balance: {
           lt: threshold,
-          gt: 0
-        }
+          gt: 0,
+        },
       },
-      orderBy: { balance: 'asc' }
+      orderBy: { balance: 'asc' },
+      include: { group: GROUP_SELECT },
     });
   }
 
@@ -252,10 +347,11 @@ class CustomerService {
     return await prisma.customer.findMany({
       where: {
         balance: {
-          lt: 0
-        }
+          lt: 0,
+        },
       },
-      orderBy: { balance: 'asc' }
+      orderBy: { balance: 'asc' },
+      include: { group: GROUP_SELECT },
     });
   }
 
@@ -273,10 +369,10 @@ class CustomerService {
           customerId,
           createdAt: {
             gte: startDate,
-            lte: endDate
-          }
+            lte: endDate,
+          },
         },
-        orderBy: { createdAt: 'asc' }
+        orderBy: { createdAt: 'asc' },
       }),
 
       prisma.transaction.findMany({
@@ -284,36 +380,39 @@ class CustomerService {
           customerId,
           createdAt: {
             gte: startDate,
-            lte: endDate
-          }
+            lte: endDate,
+          },
         },
         include: {
           items: {
             include: {
-              article: true
-            }
-          }
+              article: true,
+            },
+          },
         },
-        orderBy: { createdAt: 'asc' }
-      })
+        orderBy: { createdAt: 'asc' },
+      }),
     ]);
 
     // Kombiniere und sortiere alle Bewegungen
     const movements = [];
 
     // Aufladungen
-    topUps.forEach(topUp => {
+    topUps.forEach((topUp) => {
       movements.push({
         date: topUp.createdAt,
         type: 'TOPUP',
-        description: `Aufladung (${topUp.method})`,
+        description:
+          topUp.method === 'REIMBURSEMENT'
+            ? topUp.reference || 'Auslage'
+            : `Aufladung (${topUp.method === 'CASH' ? 'Bar' : 'Überweisung'})`,
         amount: topUp.amount,
-        balance: 0 // Wird später berechnet
+        balance: 0, // Wird später berechnet
       });
     });
 
     // Transaktionen
-    transactions.forEach(transaction => {
+    transactions.forEach((transaction) => {
       const description = transaction.cancelled ? '[STORNIERT] ' : '';
       const amount = transaction.cancelled ? 0 : -transaction.totalAmount;
 
@@ -322,7 +421,7 @@ class CustomerService {
         type: transaction.cancelled ? 'CANCELLED' : 'PURCHASE',
         description: description + `Einkauf (${transaction.items.length} Artikel)`,
         amount: amount,
-        balance: 0 // Wird später berechnet
+        balance: 0, // Wird später berechnet
       });
     });
 
@@ -341,7 +440,7 @@ class CustomerService {
         id: customer.id,
         name: customer.name,
         nickname: customer.nickname,
-        currentBalance: customer.balance
+        currentBalance: customer.balance,
       },
       startDate,
       endDate,
@@ -349,10 +448,10 @@ class CustomerService {
       summary: {
         totalTopUps: topUps.reduce((sum, t) => sum + Number(t.amount), 0),
         totalSpent: transactions
-          .filter(t => !t.cancelled)
+          .filter((t) => !t.cancelled)
           .reduce((sum, t) => sum + Number(t.totalAmount), 0),
-        transactionCount: transactions.filter(t => !t.cancelled).length
-      }
+        transactionCount: transactions.filter((t) => !t.cancelled).length,
+      },
     };
   }
   // Kombinierte Historie (Transaktionen + Aufladungen)
@@ -362,18 +461,18 @@ class CustomerService {
         where: { customerId },
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { items: { include: { article: true } } }
+        include: { items: { include: { article: true } } },
       }),
       prisma.accountTopUp.findMany({
         where: { customerId },
         take: limit,
-        orderBy: { createdAt: 'desc' }
-      })
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     // Kombinieren und Sortieren
     const combined = [
-      ...transactions.map(t => ({
+      ...transactions.map((t) => ({
         type: 'TRANSACTION',
         id: t.id,
         date: t.createdAt,
@@ -382,16 +481,16 @@ class CustomerService {
         method: t.paymentMethod,
         items: t.items,
         cancelled: t.cancelled,
-        cancelledAt: t.cancelledAt
+        cancelledAt: t.cancelledAt,
       })),
-      ...topUps.map(t => ({
+      ...topUps.map((t) => ({
         type: 'TOPUP',
         id: t.id,
         date: t.createdAt,
         amount: Number(t.amount), // Einzahlungen sind positiv
         method: t.method,
-        reference: t.reference
-      }))
+        reference: t.reference,
+      })),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
     return combined.slice(0, limit);
@@ -402,13 +501,16 @@ class CustomerService {
     return await prisma.$transaction(async (tx) => {
       const original = await tx.accountTopUp.findUnique({ where: { id: topUpId } });
       if (!original) throw new Error('Aufladung nicht gefunden');
+      if (original.method === 'REIMBURSEMENT') {
+        throw new Error('Auslagen werden über die Lieferantenrechnung zurückgebucht (im Einkauf auf „offen" setzen).');
+      }
 
       // Prüfen ob schon storniert (indem wir schauen ob es eine Gegenbuchung mit dieser Referenz gibt)
       // Wir nutzen das "reference" Feld um die ID der Originalbuchung zu speichern
       const alreadyReversed = await tx.accountTopUp.findFirst({
         where: {
-          reference: `STORNO:${topUpId}`
-        }
+          reference: `STORNO:${topUpId}`,
+        },
       });
 
       if (alreadyReversed) throw new Error('Diese Aufladung wurde bereits storniert');
@@ -419,14 +521,14 @@ class CustomerService {
           customerId: original.customerId,
           amount: -Number(original.amount),
           method: original.method,
-          reference: `STORNO:${topUpId}`
-        }
+          reference: `STORNO:${topUpId}`,
+        },
       });
 
       // Guthaben aktualisieren
       await tx.customer.update({
         where: { id: original.customerId },
-        data: { balance: { decrement: original.amount } }
+        data: { balance: { decrement: original.amount } },
       });
 
       return reversal;

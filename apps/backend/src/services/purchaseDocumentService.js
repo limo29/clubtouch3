@@ -1,7 +1,66 @@
 const prisma = require('../utils/prisma');
 const { Prisma } = require('@prisma/client');
 
+// Fachlicher Fehler (Controller antwortet mit 400 und dieser Meldung)
+function userError(message) {
+  const err = new Error(message);
+  err.userFacing = true;
+  return err;
+}
+
+/**
+ * Auslage: Ein Kunde hat eine Lieferantenrechnung aus eigener Tasche bezahlt (paymentMethod = ACCOUNT).
+ * Der volle Rechnungsbetrag wird seinem Kundenkonto als AccountTopUp mit method = REIMBURSEMENT
+ * gutgeschrieben (purchaseDocumentId verknüpft, reimbursedCustomerId am Beleg). Das ist kein Geldeingang:
+ * Kassen-, Bank- und Aufladungssummen filtern auf CASH/TRANSFER und sehen die Gutschrift nicht; die
+ * EÜR-Ausgabe (bezahlte RECHNUNG) bleibt unverändert. Offen setzen oder Löschen bucht „Storno Auslage“
+ * (negativer REIMBURSEMENT-TopUp). Solange die Gutschrift besteht, sind Betrag, Kunde und Zahlungsart gesperrt.
+ */
+const hasReimbursement = (doc) => !!(doc && doc.paid && doc.paymentMethod === 'ACCOUNT' && doc.reimbursedCustomerId);
+
 class PurchaseDocumentService {
+
+  /**
+   * Bucht die Auslage-Gutschrift für eine bezahlte Lieferantenrechnung (innerhalb von tx).
+   */
+  async _bookReimbursement(tx, doc, customerId) {
+    if (doc.type !== 'RECHNUNG') throw userError('Nur Lieferantenrechnungen können als Auslage gutgeschrieben werden.');
+    if (!customerId) throw userError('Bitte den Kunden wählen, der die Rechnung ausgelegt hat.');
+    const amount = Number(doc.totalAmount || 0);
+    if (!(amount > 0)) throw userError('Für eine Auslage muss der Rechnungsbetrag größer als 0 sein.');
+    const customer = await tx.customer.findUnique({ where: { id: customerId } });
+    if (!customer) throw userError('Kunde für die Auslage nicht gefunden.');
+
+    await tx.accountTopUp.create({
+      data: {
+        customerId,
+        amount: new Prisma.Decimal(amount),
+        method: 'REIMBURSEMENT',
+        reference: `Auslage ${doc.documentNumber} · ${doc.supplier}`,
+        purchaseDocumentId: doc.id,
+      }
+    });
+    await tx.customer.update({ where: { id: customerId }, data: { balance: { increment: amount } } });
+    return tx.purchaseDocument.update({ where: { id: doc.id }, data: { reimbursedCustomerId: customerId } });
+  }
+
+  /**
+   * Bucht die Gutschrift zurück („Storno Auslage“), falls eine besteht (innerhalb von tx).
+   */
+  async _reverseReimbursement(tx, doc) {
+    if (!hasReimbursement(doc)) return;
+    const amount = Number(doc.totalAmount || 0);
+    await tx.accountTopUp.create({
+      data: {
+        customerId: doc.reimbursedCustomerId,
+        amount: new Prisma.Decimal(-amount),
+        method: 'REIMBURSEMENT',
+        reference: `Storno Auslage ${doc.documentNumber} · ${doc.supplier}`,
+        purchaseDocumentId: doc.id,
+      }
+    });
+    await tx.customer.update({ where: { id: doc.reimbursedCustomerId }, data: { balance: { decrement: amount } } });
+  }
 
   /**
    * Generiert eine neue Belegnummer (z.B. RE-2025-0001)
@@ -46,6 +105,7 @@ class PurchaseDocumentService {
       paid,
       dueDate,
       paymentMethod,
+      reimbursedCustomerId, // nur bei paymentMethod = ACCOUNT (Auslage)
       items, // Erwartet: [{ articleId, kisten, flaschen, ... }]
       lieferscheinIds // Optional: IDs von Lieferscheinen zum Verknüpfen
     } = data;
@@ -70,6 +130,11 @@ class PurchaseDocumentService {
           userId: userId,
         }
       });
+
+      // 1a. Auslage dem Kundenkonto gutschreiben
+      if (paid && paymentMethod === 'ACCOUNT') {
+        await this._bookReimbursement(tx, document, reimbursedCustomerId);
+      }
 
       // 1b. Lieferscheine verknüpfen (falls vorhanden)
       if (type === 'RECHNUNG' && lieferscheinIds && Array.isArray(lieferscheinIds) && lieferscheinIds.length > 0) {
@@ -215,6 +280,7 @@ class PurchaseDocumentService {
           orderBy: { documentDate: 'asc' },
           include: { items: { select: { quantity: true, unit: true, description: true } } }
         },
+        reimbursedCustomer: { select: { id: true, name: true, nickname: true } },
         // Zähle die Positionen (für Sofortkäufe)
         _count: {
           select: { items: true }
@@ -278,7 +344,8 @@ class PurchaseDocumentService {
           orderBy: { documentDate: 'asc' },
           include: { items: { select: { quantity: true, unit: true, description: true } } }
         },
-        rechnung: { select: { id: true, documentNumber: true, documentDate: true, paid: true } }
+        rechnung: { select: { id: true, documentNumber: true, documentDate: true, paid: true } },
+        reimbursedCustomer: { select: { id: true, name: true, nickname: true } }
       }
     });
   }
@@ -305,79 +372,90 @@ class PurchaseDocumentService {
   /**
    * Markiert eine Rechnung als bezahlt.
    */
-  async markAsPaid(documentId, paymentMethod, userId) {
-    const document = await prisma.purchaseDocument.findUnique({
-      where: { id: documentId }
-    });
+  async markAsPaid(documentId, paymentMethod, userId, reimbursedCustomerId = null) {
+    return prisma.$transaction(async (tx) => {
+      const document = await tx.purchaseDocument.findUnique({ where: { id: documentId } });
 
-    if (!document) {
-      throw new Error('Beleg nicht gefunden.');
-    }
-    if (document.type !== 'RECHNUNG') {
-      throw new Error('Nur Rechnungen können als bezahlt markiert werden.');
-    }
-
-    const updatedDocument = await prisma.purchaseDocument.update({
-      where: { id: documentId },
-      data: {
-        paid: true,
-        paidAt: new Date(),
-        paymentMethod: paymentMethod
+      if (!document) {
+        throw userError('Beleg nicht gefunden.');
       }
-    });
+      if (document.type !== 'RECHNUNG') {
+        throw userError('Nur Rechnungen können als bezahlt markiert werden.');
+      }
+      if (hasReimbursement(document)) {
+        throw userError('Die Rechnung ist bereits als Auslage gutgeschrieben.');
+      }
 
-    // Audit-Log
-    await prisma.auditLog.create({
-      data: {
-        userId: userId,
-        action: 'MARK_AS_PAID',
-        entityType: 'PurchaseDocument',
-        entityId: documentId,
-        changes: {
-          paymentMethod: paymentMethod,
-          amount: updatedDocument.totalAmount
+      let updatedDocument = await tx.purchaseDocument.update({
+        where: { id: documentId },
+        data: {
+          paid: true,
+          paidAt: new Date(),
+          paymentMethod: paymentMethod
         }
+      });
+      if (paymentMethod === 'ACCOUNT') {
+        updatedDocument = await this._bookReimbursement(tx, updatedDocument, reimbursedCustomerId);
       }
-    });
 
-    return updatedDocument;
+      // Audit-Log
+      await tx.auditLog.create({
+        data: {
+          userId: userId,
+          action: 'MARK_AS_PAID',
+          entityType: 'PurchaseDocument',
+          entityId: documentId,
+          changes: {
+            paymentMethod: paymentMethod,
+            amount: updatedDocument.totalAmount,
+            reimbursedCustomerId: updatedDocument.reimbursedCustomerId || undefined
+          }
+        }
+      });
+
+      return updatedDocument;
+    });
   }
   async markAsUnpaid(documentId, userId) {
-    const document = await prisma.purchaseDocument.findUnique({
-      where: { id: documentId }
-    });
+    return prisma.$transaction(async (tx) => {
+      const document = await tx.purchaseDocument.findUnique({ where: { id: documentId } });
 
-    if (!document) {
-      throw new Error('Beleg nicht gefunden.');
-    }
-    if (document.type !== 'RECHNUNG') {
-      throw new Error('Nur Rechnungen können bearbeitet werden.');
-    }
-
-    const updatedDocument = await prisma.purchaseDocument.update({
-      where: { id: documentId },
-      data: {
-        paid: false,
-        paidAt: null,
-        paymentMethod: null
+      if (!document) {
+        throw userError('Beleg nicht gefunden.');
       }
-    });
+      if (document.type !== 'RECHNUNG') {
+        throw userError('Nur Rechnungen können bearbeitet werden.');
+      }
 
-    // Audit-Log
-    await prisma.auditLog.create({
-      data: {
-        userId: userId,
-        action: 'MARK_AS_UNPAID',
-        entityType: 'PurchaseDocument',
-        entityId: documentId,
-        changes: {
-          oldStatus: 'PAID',
-          newStatus: 'UNPAID'
+      await this._reverseReimbursement(tx, document);
+
+      const updatedDocument = await tx.purchaseDocument.update({
+        where: { id: documentId },
+        data: {
+          paid: false,
+          paidAt: null,
+          paymentMethod: null,
+          reimbursedCustomerId: null
         }
-      }
-    });
+      });
 
-    return updatedDocument;
+      // Audit-Log
+      await tx.auditLog.create({
+        data: {
+          userId: userId,
+          action: 'MARK_AS_UNPAID',
+          entityType: 'PurchaseDocument',
+          entityId: documentId,
+          changes: {
+            oldStatus: 'PAID',
+            newStatus: 'UNPAID',
+            reimbursementReversed: hasReimbursement(document) || undefined
+          }
+        }
+      });
+
+      return updatedDocument;
+    });
   }
   /**
    * Holt alle Lieferscheine eines Lieferanten, die noch KEINER Rechnung zugeordnet sind.
@@ -439,6 +517,7 @@ class PurchaseDocumentService {
       paid,
       dueDate,
       paymentMethod,
+      reimbursedCustomerId, // nur bei paymentMethod = ACCOUNT (Auslage)
       items // Erwartet: [{ articleId, kisten, flaschen }] oder undefined
     } = data;
 
@@ -452,6 +531,22 @@ class PurchaseDocumentService {
 
       if (!oldDocument) {
         throw new Error('Beleg nicht gefunden.');
+      }
+
+      // Auslage: solange gutgeschrieben, sind Betrag, Kunde und Zahlungsart gesperrt (nur „offen“ setzen hebt sie auf)
+      const credited = hasReimbursement(oldDocument);
+      const unpaying = paid === false;
+      if (credited && !unpaying) {
+        const amountChanged = totalAmount !== undefined && totalAmount !== null
+          && Number(totalAmount) !== Number(oldDocument.totalAmount);
+        const methodChanged = paymentMethod !== undefined && paymentMethod !== 'ACCOUNT';
+        const customerChanged = reimbursedCustomerId !== undefined && reimbursedCustomerId !== oldDocument.reimbursedCustomerId;
+        if (amountChanged || methodChanged || customerChanged) {
+          throw userError('Betrag, Kunde und Zahlungsart sind gesperrt, solange die Auslage dem Kundenkonto gutgeschrieben ist. Erst auf „offen“ setzen (bucht die Gutschrift zurück).');
+        }
+      }
+      if (credited && unpaying) {
+        await this._reverseReimbursement(tx, oldDocument);
       }
 
       // --- ITEMS & LAGERBESTAND LOGIK (Nur wenn 'items' übergeben wurde) ---
@@ -575,6 +670,7 @@ class PurchaseDocumentService {
           } else {
             updateData.paymentMethod = null;
             updateData.paidAt = null;
+            updateData.reimbursedCustomerId = null;
           }
         }
         if (dueDate !== undefined) updateData.dueDate = new Date(dueDate);
@@ -584,10 +680,18 @@ class PurchaseDocumentService {
         updateData.nachweisUrl = nachweisUrl;
       }
 
-      const updatedDocument = await tx.purchaseDocument.update({
+      let updatedDocument = await tx.purchaseDocument.update({
         where: { id: documentId },
         data: updateData
       });
+
+      // Neu als Auslage bezahlt → gutschreiben (mit dem jetzt gespeicherten Betrag)
+      // (Altbelege, die schon vor der Auslage-Funktion mit ACCOUNT bezahlt waren, bleiben ohne Kunde unberührt)
+      const legacyAccount = oldDocument.paid && oldDocument.paymentMethod === 'ACCOUNT' && !oldDocument.reimbursedCustomerId;
+      if (updatedDocument.type === 'RECHNUNG' && updatedDocument.paid && updatedDocument.paymentMethod === 'ACCOUNT'
+        && !updatedDocument.reimbursedCustomerId && (reimbursedCustomerId || !legacyAccount)) {
+        updatedDocument = await this._bookReimbursement(tx, updatedDocument, reimbursedCustomerId);
+      }
 
       // Audit-Log
       await tx.auditLog.create({
@@ -622,6 +726,9 @@ class PurchaseDocumentService {
       if (!document) {
         throw new Error('Beleg nicht gefunden.');
       }
+
+      // 1b. Auslage-Gutschrift zurückbuchen (die TopUps bleiben, purchaseDocumentId wird null, reference behält die Nummer)
+      await this._reverseReimbursement(tx, document);
 
       // 2. Lagerbestand-KORREKTUR (Storno)
       //    Dies gilt für Lieferscheine und Sofortkauf-Rechnungen

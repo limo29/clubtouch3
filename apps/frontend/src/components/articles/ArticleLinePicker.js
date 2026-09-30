@@ -11,15 +11,22 @@
  * `lines`/`onChange`: Zeilenmodell aus hooks/useArticleLines. `onChange` MUSS eine
  * Updater-Funktion akzeptieren (wie setState), damit Doppeltipps nichts verlieren –
  * `setLines` aus useArticleLines passt direkt.
+ *
+ * Verkaufsmodus (mode="sale") erweitert:
+ *   • Wisch nach links auf einer Warenkorb-Zeile → „Entfernen" (via SwipeableLine).
+ *   • Rückgängig-Snackbar nach jeder Zeilenlöschung (5 s, nur letzte Löschung).
+ *   • Langer Touch (~500 ms) auf Artikel-Kachel → Mengenauswahl-Dialog.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
-  Box, Card, CardContent, TextField, InputAdornment, Tabs, Tab, Typography,
-  Stack, IconButton, Button, Chip, useMediaQuery,
+  Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
+  DialogTitle, IconButton, InputAdornment, Snackbar, Stack, Tab, Tabs, TextField,
+  Typography, useMediaQuery,
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
-import { Search, LocalBar, Add, DeleteOutline, ShoppingCart, Inventory2Outlined } from '@mui/icons-material';
+import { Add, DeleteOutline, Inventory2Outlined, LocalBar, Search, ShoppingCart } from '@mui/icons-material';
 import QuantityStepper from '../common/QuantityStepper';
+import SwipeableLine from './SwipeableLine';
 import { useArticles } from '../../hooks/useArticles';
 import {
   addArticle, adjustLine, setLineQty, setLinePrice, setLineName, removeLine, addFreeLine,
@@ -35,12 +42,50 @@ const paneSx = { height: '100%', display: 'flex', flexDirection: 'column', overf
 
 /* ------------------------------- Kachel ------------------------------- */
 
-function ArticleTile({ article, qtyInLines, showPrice, showStock, showCrates, onTap, onCrate }) {
+/**
+ * Artikel-Kachel mit optionalem Long-Press (nur Verkauf).
+ * Long-Press-Erkennung läuft über Pointer Events (Touch only, 500 ms).
+ * Nach ausgelöstem Long-Press wird der nachfolgende click-Event unterdrückt,
+ * damit nicht zusätzlich 1 Stück gebucht wird.
+ */
+function ArticleTile({ article, qtyInLines, showPrice, showStock, showCrates, onTap, onCrate, onLongPress }) {
   const theme = useTheme();
   const crate = showCrates && hasCrate(article);
+
+  // Refs für Long-Press-Erkennung (kein Re-Render nötig)
+  const lpTimerRef = useRef(null);
+  const lpFiredRef = useRef(false); // wurde Long-Press ausgelöst?
+  const lpStartRef = useRef(null);  // Startpunkt, damit Finger-Zittern den Long-Press nicht abbricht
+
+  const startLongPress = (e) => {
+    if (e.pointerType !== 'touch' || !onLongPress) return;
+    lpFiredRef.current = false;
+    lpStartRef.current = { x: e.clientX, y: e.clientY };
+    lpTimerRef.current = setTimeout(() => {
+      lpFiredRef.current = true;
+      onLongPress(article);
+    }, 500);
+  };
+
+  const cancelLongPress = () => {
+    clearTimeout(lpTimerRef.current);
+  };
+
   return (
     <Card
-      onClick={() => onTap(article)}
+      onClick={() => {
+        // Nach Long-Press den regulären Tap unterdrücken
+        if (lpFiredRef.current) { lpFiredRef.current = false; return; }
+        onTap(article);
+      }}
+      onPointerDown={startLongPress}
+      onPointerUp={cancelLongPress}
+      onPointerMove={(e) => {
+        const st = lpStartRef.current;
+        if (st && Math.hypot(e.clientX - st.x, e.clientY - st.y) > 8) cancelLongPress();
+      }}
+      onPointerCancel={cancelLongPress}
+      onContextMenu={(e) => e.preventDefault()} // Browser-Kontextmenü bei Long-Touch unterdrücken
       sx={{
         height: '100%', display: 'flex', flexDirection: 'column', cursor: 'pointer', position: 'relative',
         border: '2px solid', borderColor: qtyInLines > 0 ? 'primary.main' : 'divider',
@@ -165,7 +210,7 @@ function LineRow({ line, showCrates, showPrice, editablePrice, allowFreeLines, u
 
 /* ---------------------------- Artikel-Pane ---------------------------- */
 
-export function ArticlePane({ articles, lines, showPrice, showStock, showCrates, onTap, onCrate }) {
+export function ArticlePane({ articles, lines, showPrice, showStock, showCrates, onTap, onCrate, onLongPress }) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const categories = useMemo(() => ['all', ...new Set(articles.map((a) => a.category).filter(Boolean))], [articles]);
@@ -199,7 +244,8 @@ export function ArticlePane({ articles, lines, showPrice, showStock, showCrates,
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: { xs: 1.5, sm: 2 }, pb: 2 }}>
             {filtered.map((a) => (
               <ArticleTile key={a.id} article={a} qtyInLines={qtyByArticle.get(a.id) || 0}
-                showPrice={showPrice} showStock={showStock} showCrates={showCrates} onTap={onTap} onCrate={onCrate} />
+                showPrice={showPrice} showStock={showStock} showCrates={showCrates}
+                onTap={onTap} onCrate={onCrate} onLongPress={onLongPress} />
             ))}
           </Box>
         )}
@@ -210,7 +256,11 @@ export function ArticlePane({ articles, lines, showPrice, showStock, showCrates,
 
 /* --------------------------- Positionen-Pane -------------------------- */
 
-export function LinesPane({ lines, update, title, showCrates, showPrice, editablePrice, allowFreeLines, header, footer, emptyText, showSummary }) {
+/**
+ * Zeigt die Positionsliste. Im Verkaufsmodus (mode="sale") werden die Zeilen
+ * mit SwipeableLine umschlossen; onSwipeRemove(key) wird beim Herauswischen aufgerufen.
+ */
+export function LinesPane({ lines, update, title, mode, showCrates, showPrice, editablePrice, allowFreeLines, header, footer, emptyText, showSummary, onSwipeRemove }) {
   return (
     <Card sx={paneSx}>
       <CardContent sx={{ p: 2, flex: 1, overflowY: 'auto', '&:last-child': { pb: 2 } }}>
@@ -224,7 +274,18 @@ export function LinesPane({ lines, update, title, showCrates, showPrice, editabl
             <Typography variant="h6">{emptyText}</Typography>
           </Box>
         ) : (
-          lines.map((l) => <LineRow key={l.key} line={l} showCrates={showCrates} showPrice={showPrice} editablePrice={editablePrice} allowFreeLines={allowFreeLines} update={update} />)
+          lines.map((l) => {
+            const row = (
+              <LineRow key={l.key} line={l} showCrates={showCrates} showPrice={showPrice}
+                editablePrice={editablePrice} allowFreeLines={allowFreeLines} update={update} />
+            );
+            // Verkauf: Zeile in wischbaren Wrapper hüllen
+            return mode === 'sale' ? (
+              <SwipeableLine key={l.key} onRemove={() => onSwipeRemove(l.key)}>
+                {row}
+              </SwipeableLine>
+            ) : row;
+          })
         )}
         {allowFreeLines && (
           <Button variant="outlined" startIcon={<Add />} onClick={() => update((prev) => addFreeLine(prev))} sx={{ mt: 2 }}>
@@ -278,7 +339,75 @@ export default function ArticleLinePicker({
   const mobileTab = mobileTabProp ?? innerTab;
   const setMobileTab = (v) => { setInnerTab(v); onMobileTabChange?.(v); };
 
-  const update = (updater) => onChange(updater);
+  /* ---- Undo-Zustand für Zeilenlöschungen im Verkauf ---- */
+  // undoRef speichert die zuletzt gelöschte Zeile außerhalb von React-State,
+  // damit handleUndo immer die aktuellsten Daten liest.
+  const undoRef = useRef(null); // { line, index } | null
+  const [undoName, setUndoName] = useState(null); // Artikelname für Snackbar-Text
+
+  /**
+   * Wrapper um onChange: erkennt im Verkaufsmodus, wenn eine Zeile entfernt
+   * wurde, und speichert sie für die Rückgängig-Aktion.
+   */
+  const update = (updater) => {
+    if (mode !== 'sale') {
+      onChange(updater);
+      return;
+    }
+    // Updater-Funktion umhüllen, um Vorher-/Nachher-Vergleich zu ermöglichen
+    onChange((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (Array.isArray(next) && next.length < prev.length) {
+        // Genau eine Zeile entfernt → für Rückgängig merken
+        const removed = prev.find((l) => !next.some((n) => n.key === l.key));
+        if (removed) {
+          const idx = prev.indexOf(removed);
+          undoRef.current = { line: removed, index: idx };
+          // State-Update außerhalb des laufenden Renders planen
+          setTimeout(() => setUndoName(removed.name), 0);
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleSwipeRemove = (key) => update((prev) => removeLine(prev, key));
+
+  /** Rückgängig: letzte gelöschte Zeile an ursprünglicher Position wiederherstellen */
+  const handleUndo = () => {
+    const u = undoRef.current;
+    if (!u) return;
+    onChange((prev) => {
+      const next = [...prev];
+      // An ursprünglicher Position einfügen (ggf. am Ende, wenn Liste kürzer)
+      next.splice(Math.min(u.index, next.length), 0, u.line);
+      return next;
+    });
+    undoRef.current = null;
+    setUndoName(null);
+  };
+
+  const handleUndoClose = () => {
+    undoRef.current = null;
+    setUndoName(null);
+  };
+
+  /* ---- Long-Press-Dialog (Verkauf) ---- */
+  const [lpDialog, setLpDialog] = useState(null); // { article } | null
+  const [lpQty, setLpQty] = useState(1);
+
+  // onLongPress nur im Verkauf übergeben
+  const onLongPress = mode === 'sale'
+    ? (article) => { setLpQty(1); setLpDialog({ article }); }
+    : undefined;
+
+  const confirmLongPress = () => {
+    if (!lpDialog) return;
+    update((prev) => addArticle(prev, lpDialog.article, { units: lpQty }));
+    setLpDialog(null);
+  };
+
+  /* ---- Artikel-Interaktionen ---- */
   const onTap = (a) => update((prev) => addArticle(prev, a, { units: 1 }));
   const onCrate = (a) => update((prev) => addArticle(prev, a, { units: 0, crates: 1 }));
 
@@ -290,31 +419,88 @@ export default function ArticleLinePicker({
   const gridCols = hasSidebar ? columns : { md: `1fr ${columns.md.split(' ').pop()}`, lg: `1fr ${columns.lg.split(' ').pop()}` };
 
   return (
-    <Box sx={{ height, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      {isMobile && (
-        <Tabs value={mobileTab} onChange={(e, v) => setMobileTab(v)} variant="fullWidth" indicatorColor="primary" textColor="primary"
-          sx={{ mb: 1.5, bgcolor: 'background.paper', borderRadius: 2, boxShadow: 1, flexShrink: 0, '& .MuiTab-root': { fontWeight: 700 } }}>
-          {hasSidebar && <Tab label={sidebarLabel} />}
-          <Tab label="Artikel" />
-          <Tab label={`${linesLabel} (${badge})`} />
-        </Tabs>
-      )}
-      <Box sx={{ flex: 1, minHeight: 0, display: isMobile ? 'block' : 'grid', gap: 2, gridTemplateColumns: gridCols, overflow: 'hidden' }}>
-        {hasSidebar && (
-          <Box sx={{ display: show(0) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>{sidebar}</Box>
+    <>
+      <Box sx={{ height, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {isMobile && (
+          <Tabs value={mobileTab} onChange={(e, v) => setMobileTab(v)} variant="fullWidth" indicatorColor="primary" textColor="primary"
+            sx={{ mb: 1.5, bgcolor: 'background.paper', borderRadius: 2, boxShadow: 1, flexShrink: 0, '& .MuiTab-root': { fontWeight: 700 } }}>
+            {hasSidebar && <Tab label={sidebarLabel} />}
+            <Tab label="Artikel" />
+            <Tab label={`${linesLabel} (${badge})`} />
+          </Tabs>
         )}
-        <Box sx={{ display: show(1) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-          <ArticlePane articles={articles} lines={lines} showPrice={showPrice} showStock={showStock} showCrates={showCrates} onTap={onTap} onCrate={onCrate} />
-        </Box>
-        <Box sx={{ display: show(2) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-          <LinesPane
-            lines={lines} update={update} title={linesLabel}
-            showCrates={showCrates} showPrice={showPrice} editablePrice={editablePrice} allowFreeLines={allowFreeLines}
-            header={linesHeader} footer={linesFooter} emptyText={emptyText}
-            showSummary={mode !== 'sale'}
-          />
+        <Box sx={{ flex: 1, minHeight: 0, display: isMobile ? 'block' : 'grid', gap: 2, gridTemplateColumns: gridCols, overflow: 'hidden' }}>
+          {hasSidebar && (
+            <Box sx={{ display: show(0) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>{sidebar}</Box>
+          )}
+          <Box sx={{ display: show(1) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+            <ArticlePane articles={articles} lines={lines} showPrice={showPrice} showStock={showStock}
+              showCrates={showCrates} onTap={onTap} onCrate={onCrate} onLongPress={onLongPress} />
+          </Box>
+          <Box sx={{ display: show(2) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+            <LinesPane
+              lines={lines} update={update} title={linesLabel} mode={mode}
+              showCrates={showCrates} showPrice={showPrice} editablePrice={editablePrice} allowFreeLines={allowFreeLines}
+              header={linesHeader} footer={linesFooter} emptyText={emptyText}
+              showSummary={mode !== 'sale'}
+              onSwipeRemove={handleSwipeRemove}
+            />
+          </Box>
         </Box>
       </Box>
-    </Box>
+
+      {/* Rückgängig-Snackbar – oben mittig, damit der Kassenbereich unten frei bleibt */}
+      <Snackbar
+        open={Boolean(undoName)}
+        autoHideDuration={5000}
+        onClose={handleUndoClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        message={undoName ? `${undoName} entfernt` : ''}
+        action={
+          <Button color="inherit" size="small" onClick={handleUndo} sx={{ fontWeight: 800 }}>
+            RÜCKGÄNGIG
+          </Button>
+        }
+        sx={{ top: { xs: 72, sm: 80 } }} // unter der mobilen Tab-Leiste platzieren
+      />
+
+      {/* Long-Press-Mengenauswahl (Verkauf, Touch) */}
+      <Dialog
+        open={Boolean(lpDialog)}
+        onClose={() => setLpDialog(null)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3, p: 1 } }}
+      >
+        <DialogTitle sx={{ textAlign: 'center', fontWeight: 800, pb: 0 }}>
+          {lpDialog?.article.name}
+        </DialogTitle>
+        <DialogContent sx={{ textAlign: 'center', py: 3 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Menge wählen
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+            <QuantityStepper
+              value={lpQty}
+              unit={lpDialog?.article.unit}
+              min={1}
+              onDelta={(d) => setLpQty((v) => Math.max(1, v + d))}
+              onSet={(v) => setLpQty(Math.max(1, v))}
+            />
+          </Box>
+          {lpDialog?.article.price > 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+              Gesamt: {money(lpQty * num(lpDialog.article.price))}
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2, px: 2, gap: 1 }}>
+          <Button onClick={() => setLpDialog(null)} color="inherit" fullWidth>Abbrechen</Button>
+          <Button variant="contained" onClick={confirmLongPress} fullWidth sx={{ fontWeight: 800 }}>
+            In den Warenkorb
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }

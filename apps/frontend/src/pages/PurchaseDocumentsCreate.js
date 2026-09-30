@@ -33,8 +33,10 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 
 import ArticleLinePicker from "../components/articles/ArticleLinePicker";
 import { useArticleLines, toPurchasePayload } from "../hooks/useArticleLines";
-import { useArticles, ARTICLES_QUERY_KEY } from "../hooks/useArticles";
+import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
+import { invalidate } from '../utils/invalidate';
+import ReimbursementCustomerField, { PAYMENT_METHOD_LABELS } from "../components/purchases/ReimbursementCustomerField";
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentCreate             */
@@ -62,9 +64,11 @@ export default function PurchaseDocumentCreate() {
       totalAmount: "",
       paid: false,
       paymentMethod: "TRANSFER",
+      reimbursedCustomerId: "",
     },
   });
   const watchedPaid = watch("paid");
+  const watchedMethod = watch("paymentMethod");
 
   /* ------------------------------ Positionen ------------------------------ */
   const { lines, setLines } = useArticleLines([]);
@@ -89,8 +93,8 @@ export default function PurchaseDocumentCreate() {
         headers: { "Content-Type": "multipart/form-data" },
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["purchaseDocuments"] });
-      queryClient.invalidateQueries({ queryKey: ARTICLES_QUERY_KEY });
+      // Auslage bucht aufs Kundenkonto → Kundensalden neu laden
+      invalidate(queryClient, "purchases", "stock", "finance", "customers");
       navigate("/purchases");
     },
     onError: (err) => console.error("Fehler beim Erstellen:", err),
@@ -123,6 +127,16 @@ export default function PurchaseDocumentCreate() {
       setFormError("Bitte einen Lieferanten auswählen oder eintippen.");
       return;
     }
+    if (isRechnung && data.paid && data.paymentMethod === "ACCOUNT") {
+      if (!data.reimbursedCustomerId) {
+        setFormError("Bitte wählen, wer die Rechnung ausgelegt hat.");
+        return;
+      }
+      if (!(Number(data.totalAmount) > 0)) {
+        setFormError("Für eine Auslage muss der Gesamtbetrag größer als 0 sein.");
+        return;
+      }
+    }
     setFormError(null);
 
     const formData = new FormData();
@@ -135,6 +149,7 @@ export default function PurchaseDocumentCreate() {
       formData.append("totalAmount", data.totalAmount || "0");
       formData.append("paid", data.paid);
       if (data.paid) formData.append("paymentMethod", data.paymentMethod);
+      if (data.paid && data.paymentMethod === "ACCOUNT") formData.append("reimbursedCustomerId", data.reimbursedCustomerId);
       if (data.dueDate) formData.append("dueDate", data.dueDate.toISOString());
 
       // Lieferscheine hinzufügen
@@ -327,10 +342,19 @@ export default function PurchaseDocumentCreate() {
                 control={control}
                 render={({ field }) => (
                   <TextField {...field} label="Zahlungsart" select size="small" fullWidth>
-                    <MenuItem value="CASH">Bar</MenuItem>
-                    <MenuItem value="TRANSFER">Überweisung</MenuItem>
-                    <MenuItem value="ACCOUNT">Kundenkonto</MenuItem>
+                    {Object.entries(PAYMENT_METHOD_LABELS).map(([v, label]) => (
+                      <MenuItem key={v} value={v}>{label}</MenuItem>
+                    ))}
                   </TextField>
+                )}
+              />
+            )}
+            {watchedPaid && watchedMethod === "ACCOUNT" && (
+              <Controller
+                name="reimbursedCustomerId"
+                control={control}
+                render={({ field }) => (
+                  <ReimbursementCustomerField value={field.value} onChange={field.onChange} />
                 )}
               />
             )}

@@ -23,6 +23,7 @@ import {
   Avatar,
   Divider,
   Switch,
+  FormControlLabel,
   Tooltip,
 } from '@mui/material';
 import {
@@ -171,12 +172,21 @@ const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus }) => {
               <Typography variant="h6" fontWeight={700} lineHeight={1.2} mb={0.5} noWrap sx={{ maxWidth: '100%' }}>
                 {article.name}
               </Typography>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                 <Chip
                   label={article.category}
                   size="small"
                   sx={{ borderRadius: 1, fontWeight: 600, bgcolor: alpha(theme.palette.primary.main, 0.08), color: 'primary.main', height: 22, fontSize: '0.7rem', border: 'none' }}
                 />
+                {article.countsForHighscore === false && (
+                  <Tooltip title="Zählt nicht für den Clubscore">
+                    <Chip
+                      label="kein Clubscore"
+                      size="small"
+                      sx={{ borderRadius: 1, height: 22, fontSize: '0.65rem', opacity: 0.65, bgcolor: 'action.hover', border: 'none' }}
+                    />
+                  </Tooltip>
+                )}
                 {purchaseInfo && (
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
                     {purchaseInfo}
@@ -563,10 +573,7 @@ const Articles = () => {
   return (
     <Box sx={{ pb: 10 }}>
       {/* --- Header Section --- */}
-      <Box mb={4}>
-        <Typography variant="h4" fontWeight={800} gutterBottom sx={{ letterSpacing: "-0.02em" }}>
-          Artikelverwaltung
-        </Typography>
+      <Box mb={3}>
         <Typography variant="body1" color="text.secondary">
           Verwalten Sie Ihren Bestand, Preise und Kategorien.
         </Typography>
@@ -988,6 +995,36 @@ const Articles = () => {
                           />
                         </Grid>
                       )}
+                    </Grid>
+                  </Box>
+
+                  <Divider />
+
+                  {/* Section 3: Clubscore */}
+                  <Box>
+                    <Typography variant="overline" fontWeight={700} color="primary" display="block" gutterBottom>Clubscore</Typography>
+                    <Grid container spacing={2}>
+                      <Grid size={{ xs: 12 }}>
+                        <Controller
+                          name="countsForHighscore"
+                          control={control}
+                          defaultValue={true}
+                          render={({ field }) => (
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  checked={!!field.value}
+                                  onChange={(e) => field.onChange(e.target.checked)}
+                                />
+                              }
+                              label="Zählt für den Clubscore"
+                            />
+                          )}
+                        />
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mt: -0.5 }}>
+                          Käufe dieses Artikels fließen in die Rangliste und Team-Wertung ein.
+                        </Typography>
+                      </Grid>
                     </Grid>
                   </Box>
 

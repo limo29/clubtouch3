@@ -1,16 +1,34 @@
 const customerService = require('../services/customerService');
 const prisma = require('../utils/prisma');
 
+// Kontaktfelder, die nur ADMIN und ACCOUNTANT sehen dürfen
+const CONTACT_FIELDS = ['company', 'street', 'zip', 'city', 'phone', 'email'];
+
+/**
+ * Entfernt Kontaktdaten aus einem Kundenobjekt, wenn die Rolle
+ * kein Leserecht dafür hat (nur ADMIN und ACCOUNTANT dürfen sie sehen).
+ */
+function stripContact(customer, role) {
+  if (!customer) return customer;
+  if (role === 'ADMIN' || role === 'ACCOUNTANT') return customer;
+  const stripped = { ...customer };
+  for (const f of CONTACT_FIELDS) {
+    delete stripped[f];
+  }
+  return stripped;
+}
+
 class CustomerController {
   // Liste alle Kunden
   async listCustomers(req, res) {
     try {
-      const { search } = req.query;
-      const customers = await customerService.listCustomers(search);
+      const { search, groupId } = req.query;
+      const customers = await customerService.listCustomers(search, groupId || null);
+      const role = req.user?.role;
 
       res.json({
-        customers,
-        count: customers.length
+        customers: customers.map((c) => stripContact(c, role)),
+        count: customers.length,
       });
     } catch (error) {
       console.error('List customers error:', error);
@@ -28,7 +46,7 @@ class CustomerController {
         return res.status(404).json({ error: 'Kunde nicht gefunden' });
       }
 
-      res.json({ customer });
+      res.json({ customer: stripContact(customer, req.user?.role) });
     } catch (error) {
       console.error('Get customer error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen des Kunden' });
@@ -38,7 +56,13 @@ class CustomerController {
   // Neuen Kunden erstellen
   async createCustomer(req, res) {
     try {
-      const customer = await customerService.createCustomer(req.body);
+      // CASHIER darf Kontaktdaten nicht setzen – diese Felder werden ignoriert
+      const role = req.user?.role;
+      const data = { ...req.body };
+      if (role !== 'ADMIN' && role !== 'ACCOUNTANT') {
+        for (const f of CONTACT_FIELDS) delete data[f];
+      }
+      const customer = await customerService.createCustomer(data);
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -47,19 +71,22 @@ class CustomerController {
           action: 'CREATE_CUSTOMER',
           entityType: 'Customer',
           entityId: customer.id,
-          changes: req.body
-        }
+          changes: req.body,
+        },
       });
 
       res.status(201).json({
         message: 'Kunde erfolgreich erstellt',
-        customer
+        customer: stripContact(customer, role),
       });
     } catch (error) {
       console.error('Create customer error:', error);
 
       if (error.message.includes('existiert bereits')) {
         return res.status(400).json({ error: error.message });
+      }
+      if (error.userError) {
+        return res.status(error.status || 400).json({ error: error.message });
       }
 
       res.status(500).json({ error: 'Fehler beim Erstellen des Kunden' });
@@ -70,8 +97,14 @@ class CustomerController {
   async updateCustomer(req, res) {
     try {
       const { id } = req.params;
+      // CASHIER darf Kontaktdaten nicht setzen – diese Felder werden ignoriert
+      const role = req.user?.role;
+      const data = { ...req.body };
+      if (role !== 'ADMIN' && role !== 'ACCOUNTANT') {
+        for (const f of CONTACT_FIELDS) delete data[f];
+      }
 
-      const customer = await customerService.updateCustomer(id, req.body);
+      const customer = await customerService.updateCustomer(id, data);
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -80,19 +113,22 @@ class CustomerController {
           action: 'UPDATE_CUSTOMER',
           entityType: 'Customer',
           entityId: id,
-          changes: req.body
-        }
+          changes: req.body,
+        },
       });
 
       res.json({
         message: 'Kunde erfolgreich aktualisiert',
-        customer
+        customer: stripContact(customer, role),
       });
     } catch (error) {
       console.error('Update customer error:', error);
 
       if (error.message.includes('existiert bereits')) {
         return res.status(400).json({ error: error.message });
+      }
+      if (error.userError) {
+        return res.status(error.status || 400).json({ error: error.message });
       }
 
       res.status(500).json({ error: 'Fehler beim Aktualisieren des Kunden' });
@@ -118,15 +154,15 @@ class CustomerController {
             amount,
             method,
             reference,
-            newBalance: result.customer.balance
-          }
-        }
+            newBalance: result.customer.balance,
+          },
+        },
       });
 
       res.json({
         message: 'Guthaben erfolgreich aufgeladen',
         topUp: result.topUp,
-        customer: result.customer
+        customer: stripContact(result.customer, req.user?.role),
       });
     } catch (error) {
       console.error('Top up account error:', error);
@@ -144,7 +180,7 @@ class CustomerController {
         return res.status(404).json({ error: 'Kunde nicht gefunden' });
       }
 
-      res.json(stats);
+      res.json({ ...stats, customer: stripContact(stats.customer, req.user?.role) });
     } catch (error) {
       console.error('Get customer stats error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Statistiken' });
@@ -160,7 +196,9 @@ class CustomerController {
       // Default: letzte 30 Tage bis jetzt. "Bis"-Tag inklusive, 'YYYY-MM-DD' lokal.
       const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
       const end = endDate ? endOfLocalDay(endDate) : new Date();
-      const start = startDate ? parseLocalDate(startDate) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const start = startDate
+        ? parseLocalDate(startDate)
+        : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       const statement = await customerService.getAccountStatement(id, start, end);
 
@@ -180,7 +218,7 @@ class CustomerController {
       res.json({
         customers,
         count: customers.length,
-        threshold
+        threshold,
       });
     } catch (error) {
       console.error('Get low balance customers error:', error);
@@ -214,8 +252,8 @@ class CustomerController {
           action: 'REVERSE_TOPUP',
           entityType: 'AccountTopUp',
           entityId: topUpId,
-          changes: { reversalId: reversal.id }
-        }
+          changes: { reversalId: reversal.id },
+        },
       });
 
       res.json({ message: 'Aufladung erfolgreich storniert', reversal });

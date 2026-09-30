@@ -1,461 +1,29 @@
 /**
- * Kassenprüfung (Route /profit-loss): drei Abschnitte als Tabs
- *   EÜR (frei wählbarer Zeitraum, PDF) · Kasse & Bank (letzte Zählung, Konten laut letztem Abschluss)
- *   · Geschäftsjahre (Liste, Anlegen, Abschluss-Stepper).
- * Zahlen kommen ausschließlich aus /accounting/profit-loss (eine Service-Funktion im Backend).
+ * Kassenprüfung (Route /profit-loss): Geschäftsjahre anlegen, abschließen (CloseYearStepper),
+ * Jahresabschluss-PDF und Belege je Jahr prüfen.
+ * Die EÜR-Vorschau liegt unter Berichte („Einnahmen & Ausgaben“), die Bank-Abstimmung unter Kasse & Bank;
+ * alte Links /profit-loss?tab=eur bzw. ?tab=kasse werden dorthin umgeleitet.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Box, Card, CardContent, Typography, Grid, Paper, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Button, IconButton, TextField, Alert, Chip, Dialog,
-  DialogTitle, DialogContent, DialogActions, Stack, Tabs, Tab, Skeleton, useTheme, useMediaQuery,
+  Box, Card, CardContent, Typography, Table, TableBody, TableCell, TableHead, TableRow, Button, IconButton,
+  TextField, Alert, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Stack, useTheme, useMediaQuery,
 } from '@mui/material';
-import {
-  Close, Download, TrendingUp, TrendingDown, AccountBalance, Add, PointOfSale, PictureAsPdf, Lock,
-  ArrowUpward, ArrowDownward, AddCircleOutline, RemoveCircleOutline, ReceiptLong,
-} from '@mui/icons-material';
+import { Close, Add, PictureAsPdf, Lock, ReceiptLong } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../services/api';
-import KPICard from '../components/common/KPICard';
 import CloseYearStepper from '../components/finance/CloseYearStepper';
 import ReceiptReview from '../components/finance/ReceiptReview';
-import CashMovementList from '../components/finance/CashMovementList';
-import BankReconciliation from '../components/finance/BankReconciliation';
+import { fmtDate, signedMoney } from '../components/finance/FinanceBits';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
 
-const fmtDate = (d) => (d ? format(new Date(d), 'dd.MM.yyyy') : '—');
-const fmtDateTime = (d) => (d ? format(new Date(d), 'dd.MM.yyyy HH:mm') : '—');
-const signedMoney = (v) => (num(v) > 0 ? '+' : '') + money(v);
-const TABS = ['eur', 'kasse', 'jahre'];
-
-/* ------------------------------ kleine Bausteine ------------------------------ */
-
-function SectionCard({ title, action, children, sx }) {
-  return (
-    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', ...sx }}>
-      <CardContent sx={{ flexGrow: 1 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-          <Typography variant="h6">{title}</Typography>
-          {action}
-        </Stack>
-        {children}
-      </CardContent>
-    </Card>
-  );
-}
-
-function MiniStat({ label, value, sub, color = 'text.primary', dense = false }) {
-  return (
-    <Paper sx={{ p: 2, height: '100%', minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, display: 'block', overflowWrap: 'anywhere' }}>{label}</Typography>
-      <Typography variant={dense ? 'h6' : 'h5'} sx={{ fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
-      {sub && <Typography variant="caption" color="text.secondary">{sub}</Typography>}
-    </Paper>
-  );
-}
-
-function SimpleTable({ head, rows, empty = 'Keine Einträge', footer, maxHeight = 300 }) {
-  return (
-    <TableContainer sx={{ maxHeight }}>
-      <Table size="small" stickyHeader>
-        <TableHead>
-          <TableRow>{head.map((h, i) => <TableCell key={i} align={i === 0 ? 'left' : 'right'}>{h}</TableCell>)}</TableRow>
-        </TableHead>
-        <TableBody>
-          {rows.length === 0 ? (
-            <TableRow><TableCell colSpan={head.length} sx={{ color: 'text.secondary' }}>{empty}</TableCell></TableRow>
-          ) : rows.map((r, ri) => (
-            <TableRow key={ri}>
-              {r.map((c, ci) => <TableCell key={ci} align={ci === 0 ? 'left' : 'right'} sx={{ whiteSpace: ci === 0 ? 'normal' : 'nowrap' }}>{c}</TableCell>)}
-            </TableRow>
-          ))}
-          {footer && (
-            <TableRow>
-              {footer.map((c, ci) => <TableCell key={ci} align={ci === 0 ? 'left' : 'right'} sx={{ fontWeight: 800, whiteSpace: 'nowrap' }}>{c}</TableCell>)}
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-}
-
-/* ---------------------------------- EÜR ---------------------------------- */
-
-function EurSection() {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [dateRange, setDateRange] = useState({ startDate: new Date(new Date().getFullYear(), 0, 1), endDate: new Date() });
-  const [downloadError, setDownloadError] = useState(null);
-  const [receiptsOpen, setReceiptsOpen] = useState(false);
-  const params = {
-    startDate: format(dateRange.startDate, 'yyyy-MM-dd'),
-    endDate: format(dateRange.endDate, 'yyyy-MM-dd'),
-  };
-
-  const { data, error, isLoading } = useQuery({
-    queryKey: ['profit-loss', params.startDate, params.endDate],
-    queryFn: async () => (await api.get('/accounting/profit-loss', { params })).data,
-    enabled: !!dateRange.startDate && !!dateRange.endDate,
-  });
-
-  const summary = data?.summary || {};
-  const profit = num(summary.profit);
-  const details = data?.details || {};
-  const incomeByType = details.incomeByType || {};
-  const nonRevenue = data?.nonRevenue || {};
-  const liquidity = data?.liquidity || {};
-  const unpaidPurchase = data?.liabilities?.unpaidPurchaseDocuments || {};
-  const unpaidInvoices = data?.receivables?.unpaidInvoices || {};
-
-  const top10 = useMemo(
-    () => (details.incomeByArticle || []).slice(0, 10).map((a) => ({ name: a.article || a.name || '—', Einnahmen: num(a.amount) })),
-    [details.incomeByArticle]
-  );
-
-  const downloadEUR = async () => {
-    try {
-      setDownloadError(null);
-      await downloadFile('/exports/eur', { params, filename: `EUR_${params.startDate}_${params.endDate}.pdf` });
-    } catch (err) {
-      setDownloadError(await apiErrorMessage(err, 'PDF konnte nicht erstellt werden.'));
-    }
-  };
-
-  return (
-    <Stack spacing={3}>
-      <Paper sx={{ p: 2 }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
-          <DatePicker label="Von" value={dateRange.startDate} onChange={(d) => d && setDateRange((r) => ({ ...r, startDate: d }))} slotProps={{ textField: { size: 'small' } }} />
-          <DatePicker label="Bis" value={dateRange.endDate} onChange={(d) => d && setDateRange((r) => ({ ...r, endDate: d }))} slotProps={{ textField: { size: 'small' } }} />
-          <Box sx={{ flex: 1 }} />
-          <Button variant="outlined" startIcon={<ReceiptLong />} onClick={() => setReceiptsOpen(true)}>
-            Belege prüfen
-          </Button>
-          <Button variant="contained" startIcon={<Download />} onClick={downloadEUR}>PDF Export</Button>
-        </Stack>
-      </Paper>
-
-      <Dialog
-        open={receiptsOpen}
-        onClose={() => setReceiptsOpen(false)}
-        maxWidth="xl"
-        fullWidth
-        fullScreen={isMobile}
-      >
-        <Box sx={{ p: { xs: 2, sm: 3 }, display: 'flex', flexDirection: 'column', minHeight: isMobile ? '100vh' : '80vh' }}>
-          <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
-            <Typography variant="h6" sx={{ flex: 1 }}>Belege prüfen (Zeitraum)</Typography>
-            <IconButton onClick={() => setReceiptsOpen(false)} aria-label="Schließen"><Close /></IconButton>
-          </Stack>
-          <Box sx={{ flex: 1, overflow: 'auto' }}>
-            <ReceiptReview
-              fetchUrl="/purchase-documents/receipts"
-              zipUrl="/purchase-documents/receipts.zip"
-              params={{ startDate: params.startDate, endDate: params.endDate }}
-              title="Belege im Zeitraum"
-            />
-          </Box>
-        </Box>
-      </Dialog>
-
-      {error && <Alert severity="error">Fehler beim Laden der EÜR{error?.response?.data?.error ? `: ${error.response.data.error}` : '.'}</Alert>}
-      {downloadError && <Alert severity="error" onClose={() => setDownloadError(null)}>{downloadError}</Alert>}
-
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <KPICard title="Einnahmen" value={money(summary.totalIncome)} icon={TrendingUp} color="success" loading={isLoading} />
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <KPICard title="Ausgaben" value={money(summary.totalExpenses)} icon={TrendingDown} color="error" loading={isLoading} />
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <KPICard title={profit >= 0 ? 'Überschuss' : 'Verlust'} value={signedMoney(profit)} icon={AccountBalance} color={profit >= 0 ? 'success' : 'error'} loading={isLoading} />
-        </Grid>
-      </Grid>
-
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <SectionCard title="Einnahmen nach Typ">
-            <SimpleTable
-              head={['Typ', 'Betrag']}
-              rows={[
-                [`Barverkäufe (${details.transactionCounts?.cash ?? 0})`, money(incomeByType.cash)],
-                [`Kundenkonto (${details.transactionCounts?.account ?? 0})`, money(incomeByType.account)],
-                ['Bezahlte Kundenrechnungen', money(incomeByType.invoices)],
-              ]}
-              footer={['Gesamt', money(summary.totalIncome)]}
-            />
-          </SectionCard>
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <SectionCard title="Einnahmen nach Kategorie">
-            <SimpleTable
-              head={['Kategorie', 'Betrag']}
-              rows={(details.incomeByCategory || []).map((c) => [c.category || '—', money(c.amount)])}
-              footer={['Gesamt', money(incomeByType.transactions)]}
-            />
-          </SectionCard>
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <SectionCard title="Ausgaben nach Lieferant">
-            <SimpleTable
-              head={['Lieferant', 'Belege', 'Betrag']}
-              rows={(details.expensesBySupplier || []).map((s) => [s.supplier || '—', num(s.count), money(s.amount)])}
-              footer={['Gesamt', '', money(summary.totalExpenses)]}
-            />
-          </SectionCard>
-        </Grid>
-
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <SectionCard title="Einnahmen nach Artikel (Top 10)">
-            {top10.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">Keine Artikeldaten im Zeitraum.</Typography>
-            ) : (
-              <ResponsiveContainer width="100%" height={Math.max(160, top10.length * 36 + 30)}>
-                <BarChart data={top10} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.3} />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: theme.palette.text.secondary }} tickFormatter={(v) => money(v)} />
-                  <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 12, fill: theme.palette.text.primary }} interval={0} />
-                  <Tooltip
-                    formatter={(v) => money(v)}
-                    cursor={{ fill: theme.palette.action.hover }}
-                    contentStyle={{ backgroundColor: theme.palette.background.paper, color: theme.palette.text.primary, borderRadius: 8, border: `1px solid ${theme.palette.divider}` }}
-                    itemStyle={{ color: theme.palette.text.primary }}
-                  />
-                  <Bar dataKey="Einnahmen" fill={theme.palette.primary.main} radius={[0, 4, 4, 0]} barSize={20} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </SectionCard>
-        </Grid>
-
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <SectionCard title="Nachrichtlich (kein Ertrag)">
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Eigenverbrauch („Auf den Wirt") und Schwund mindern den Bestand, sind aber keine Einnahme. Bewertung zum Verkaufspreis.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <Typography variant="subtitle2" gutterBottom>Eigenverbrauch · {money(nonRevenue.ownerUse?.value)}</Typography>
-                <SimpleTable head={['Artikel', 'Menge', 'Wert']} rows={(nonRevenue.ownerUse?.items || []).map((r) => [r.article, num(r.quantity), money(r.value ?? r.amount)])} maxHeight={220} />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <Typography variant="subtitle2" gutterBottom>Abgelaufen / Schwund · {money(nonRevenue.expired?.value)}</Typography>
-                <SimpleTable head={['Artikel', 'Menge', 'Wert']} rows={(nonRevenue.expired?.items || []).map((r) => [r.article, num(r.quantity), money(r.value ?? r.amount)])} maxHeight={220} />
-              </Grid>
-            </Grid>
-          </SectionCard>
-        </Grid>
-
-        <Grid size={{ xs: 12 }}>
-          <Typography variant="h6" sx={{ mt: 1 }}>Liquidität & offene Posten</Typography>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <MiniStat label="Aufladungen" value={money(liquidity.topUps?.total)} sub={`${liquidity.topUps?.count ?? 0} Vorgänge · bar ${money(liquidity.topUps?.cash)} · Überweisung ${money(liquidity.topUps?.transfer)}`} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <MiniStat label="Gästeguthaben" value={money(liquidity.guestBalanceEnd)} sub="Stand Ende des Zeitraums (Verbindlichkeit)" />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <MiniStat label="Offene Lieferantenrechnungen" value={money(unpaidPurchase.total)} sub={`${unpaidPurchase.count ?? 0} Belege (Verbindlichkeit)`} color={num(unpaidPurchase.total) > 0 ? 'error.main' : 'text.primary'} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <MiniStat label="Offene Kundenrechnungen" value={money(unpaidInvoices.total)} sub={`${unpaidInvoices.count ?? 0} Rechnungen (Forderung)`} color={num(unpaidInvoices.total) > 0 ? 'warning.main' : 'text.primary'} />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <SectionCard title="Offene Lieferantenrechnungen">
-            <SimpleTable
-              head={['Beleg', 'Datum', 'Betrag']}
-              rows={(unpaidPurchase.items || []).map((d) => [`${d.supplier || '—'}${d.documentNumber ? ` · ${d.documentNumber}` : ''}`, fmtDate(d.documentDate), money(d.totalAmount)])}
-              empty="Keine offenen Lieferantenrechnungen"
-            />
-          </SectionCard>
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <SectionCard title="Offene Kundenrechnungen">
-            <SimpleTable
-              head={['Rechnung', 'Fällig', 'Betrag']}
-              rows={(unpaidInvoices.items || []).map((d) => [`${d.customerName || '—'}${d.invoiceNumber ? ` · ${d.invoiceNumber}` : ''}`, fmtDate(d.dueDate), money(d.totalAmount)])}
-              empty="Keine offenen Kundenrechnungen"
-            />
-          </SectionCard>
-        </Grid>
-      </Grid>
-    </Stack>
-  );
-}
-
-/* ------------------------------- Kasse & Bank ------------------------------- */
-
-const MOVEMENT_TYPE_TILES = [
-  { type: 'DEPOSIT_TO_BANK',      label: 'Einzahlungen auf Bank', icon: ArrowUpward,          color: 'info.main' },
-  { type: 'WITHDRAWAL_FROM_BANK', label: 'Abhebungen von Bank',   icon: ArrowDownward,        color: 'primary.main' },
-  { type: 'OTHER_INCOME',         label: 'Sonstige Einnahmen',    icon: AddCircleOutline,     color: 'success.main' },
-  { type: 'OTHER_EXPENSE',        label: 'Sonstige Ausgaben',     icon: RemoveCircleOutline,  color: 'error.main' },
-];
-
-function CashBankSection({ fiscalYears }) {
-  const navigate = useNavigate();
-  const [error, setError] = useState(null);
-  const [movRange, setMovRange] = useState({
-    from: format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd'),
-    to: format(new Date(), 'yyyy-MM-dd'),
-  });
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['cash-counts', 'latest'],
-    queryFn: async () => (await api.get('/cash-counts/latest')).data,
-  });
-  const cc = data?.cashCount;
-  const lastClosed = (fiscalYears || []).filter((f) => f.closed && f.report).sort((a, b) => new Date(b.endDate) - new Date(a.endDate))[0];
-  const banks = lastClosed?.report?.bankAccountsJson || [];
-
-  const { data: movData, isLoading: movLoading } = useQuery({
-    queryKey: ['cash-movements', 'range', movRange.from, movRange.to],
-    queryFn: async () => (await api.get('/cash-movements', { params: { from: movRange.from, to: movRange.to, limit: 500 } })).data,
-    staleTime: 0,
-  });
-  const movements = useMemo(() => movData?.cashMovements || [], [movData]);
-
-  // Bank-Abstimmung für denselben Zeitraum wie die Kassenbewegungen
-  const { data: reconData, isLoading: reconLoading } = useQuery({
-    queryKey: ['bank-reconciliation', movRange.from, movRange.to],
-    queryFn: async () => (await api.get('/accounting/bank-reconciliation', { params: { startDate: movRange.from, endDate: movRange.to } })).data.bankReconciliation,
-    staleTime: 0,
-  });
-
-  // Summen je Typ (nur nicht stornierte)
-  const movSums = useMemo(() => {
-    const active = movements.filter((m) => !m.cancelled);
-    return MOVEMENT_TYPE_TILES.map((t) => {
-      const items = active.filter((m) => m.type === t.type);
-      return { ...t, total: items.reduce((s, m) => s + num(m.amount), 0), count: items.length };
-    });
-  }, [movements]);
-
-  const pdf = async () => {
-    try { await downloadFile(`/cash-counts/${cc.id}/pdf`, { filename: 'Kassenzaehlung.pdf' }); }
-    catch (err) { setError(await apiErrorMessage(err, 'PDF konnte nicht geladen werden.')); }
-  };
-
-  return (
-    <Grid container spacing={3}>
-      {error && <Grid size={{ xs: 12 }}><Alert severity="error" onClose={() => setError(null)}>{error}</Alert></Grid>}
-
-      {/* Letzte Kassenzählung */}
-      <Grid size={{ xs: 12, md: 6 }}>
-        <SectionCard
-          title="Letzte Kassenzählung"
-          action={<Button variant="contained" size="small" startIcon={<PointOfSale />} onClick={() => navigate('/cash-count')} sx={{ whiteSpace: 'nowrap', ml: 1 }}>Kasse zählen</Button>}
-        >
-          {isLoading ? <Skeleton variant="rounded" height={140} /> : !cc ? (
-            <Typography color="text.secondary">Noch keine Zählung vorhanden. Die Kasse wird nicht täglich gezählt; spätestens vor dem Jahresabschluss muss gezählt werden.</Typography>
-          ) : (
-            <Stack spacing={1.5}>
-              <Typography variant="body2" color="text.secondary">{fmtDateTime(cc.countedAt)} · gezählt von {cc.user?.name || '—'}</Typography>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, sm: 4 }}><MiniStat dense label="Soll" value={money(cc.expectedTotal)} /></Grid>
-                <Grid size={{ xs: 12, sm: 4 }}><MiniStat dense label="Ist" value={money(cc.countedTotal)} /></Grid>
-                <Grid size={{ xs: 12, sm: 4 }}><MiniStat dense label="Differenz" value={signedMoney(cc.difference)} color={Math.abs(num(cc.difference)) < 0.005 ? 'success.main' : 'error.main'} /></Grid>
-              </Grid>
-              {cc.note && <Typography variant="body2" color="text.secondary">Notiz: {cc.note}</Typography>}
-              <Box><Button size="small" startIcon={<PictureAsPdf />} onClick={pdf}>PDF der Zählung</Button></Box>
-            </Stack>
-          )}
-        </SectionCard>
-      </Grid>
-
-      {/* Bankkonten */}
-      <Grid size={{ xs: 12, md: 6 }}>
-        <SectionCard title="Bankkonten">
-          {banks.length === 0 ? (
-            <Typography color="text.secondary">Bankkonten werden beim Jahresabschluss erfasst. Noch kein abgeschlossenes Geschäftsjahr mit Konten.</Typography>
-          ) : (
-            <>
-              <Typography variant="body2" color="text.secondary" gutterBottom>Stand laut Abschluss „{lastClosed.name}" ({fmtDate(lastClosed.endDate)})</Typography>
-              <SimpleTable
-                head={['Konto', 'Saldo']}
-                rows={banks.map((b) => [`${b.name || 'Konto'}${b.iban ? ` · ${b.iban}` : ''}`, money(b.balance)])}
-                footer={['Gesamt', money(banks.reduce((a, b) => a + num(b.balance), 0))]}
-              />
-            </>
-          )}
-        </SectionCard>
-      </Grid>
-
-      {/* Bank-Abstimmung + Kassenbewegungen (gemeinsamer Zeitraum) */}
-      <Grid size={{ xs: 12 }}>
-        <Card>
-          <CardContent>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} sx={{ mb: 2 }}>
-              <Typography variant="h6" sx={{ flex: 1 }}>Bank-Abstimmung</Typography>
-              <DatePicker
-                label="Von"
-                value={movRange.from ? new Date(movRange.from) : null}
-                onChange={(d) => d && setMovRange((r) => ({ ...r, from: format(d, 'yyyy-MM-dd') }))}
-                slotProps={{ textField: { size: 'small' } }}
-              />
-              <DatePicker
-                label="Bis"
-                value={movRange.to ? new Date(movRange.to) : null}
-                onChange={(d) => d && setMovRange((r) => ({ ...r, to: format(d, 'yyyy-MM-dd') }))}
-                slotProps={{ textField: { size: 'small' } }}
-              />
-            </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Was auf dem Konto angekommen sein müsste, wenn nur die App gebucht hätte. Der Ist-Stand wird beim Jahresabschluss je Konto eingetragen.
-            </Typography>
-            <BankReconciliation data={reconData} loading={reconLoading} />
-          </CardContent>
-        </Card>
-      </Grid>
-
-      {/* Kassenbewegungen */}
-      <Grid size={{ xs: 12 }}>
-        <Card>
-          <CardContent>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} sx={{ mb: 2 }}>
-              <Typography variant="h6" sx={{ flex: 1 }}>Kassenbewegungen</Typography>
-              <Typography variant="body2" color="text.secondary">Zeitraum wie bei der Bank-Abstimmung</Typography>
-            </Stack>
-
-            {/* Summen-Kacheln */}
-            <Grid container spacing={2} sx={{ mb: 2 }}>
-              {movSums.map((t) => {
-                const Icon = t.icon;
-                return (
-                  <Grid key={t.type} size={{ xs: 12, sm: 6, md: 3 }}>
-                    <Paper sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, height: '100%' }}>
-                      <Icon sx={{ color: t.color, fontSize: 28 }} />
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, display: 'block', overflowWrap: 'anywhere' }}>{t.label}</Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{money(t.total)}</Typography>
-                        <Typography variant="caption" color="text.secondary">{t.count} Buchung{t.count !== 1 ? 'en' : ''}</Typography>
-                      </Box>
-                    </Paper>
-                  </Grid>
-                );
-              })}
-            </Grid>
-
-            {/* Liste (read-only) */}
-            <CashMovementList movements={movements} loading={movLoading} dense />
-          </CardContent>
-        </Card>
-      </Grid>
-    </Grid>
-  );
-}
-
 /* ------------------------------- Geschäftsjahre ------------------------------- */
 
-function FiscalYearsSection({ fiscalYears, error, onClose, onNew }) {
+function FiscalYearsSection({ fiscalYears, error, onClose, onNew, onReceipts }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [dlError, setDlError] = useState(null);
@@ -470,8 +38,9 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew }) {
   };
 
   const actions = (fy) => (
-    <Stack direction="row" spacing={1} justifyContent="flex-end">
+    <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
       {!fy.closed && <Button size="small" variant="contained" startIcon={<Lock />} onClick={() => onClose(fy)}>Abschließen</Button>}
+      <Button size="small" variant="outlined" startIcon={<ReceiptLong />} onClick={() => onReceipts(fy)}>Belege</Button>
       <Button size="small" variant="outlined" startIcon={<PictureAsPdf />} onClick={() => downloadReport(fy)}>{fy.closed ? 'PDF' : 'Entwurf-PDF'}</Button>
     </Stack>
   );
@@ -479,9 +48,12 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew }) {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="body2" color="text.secondary">Ein Geschäftsjahr wird mit Kassenzählung, Bankständen und Inventur abgeschlossen und eingefroren.</Typography>
-        <Button variant="contained" startIcon={<Add />} onClick={onNew} sx={{ whiteSpace: 'nowrap', ml: 2 }}>Neu</Button>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+        <Typography variant="body2" color="text.secondary">
+          Ein Geschäftsjahr wird mit Kassenzählung, Bankständen, Belegprüfung und Inventur abgeschlossen und eingefroren.
+          Laufende Zahlen: Berichte → „Einnahmen &amp; Ausgaben“, Kontostand und Bank-Abstimmung: Kasse &amp; Bank.
+        </Typography>
+        <Button variant="contained" startIcon={<Add />} onClick={onNew} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>Neues Jahr</Button>
       </Stack>
       {error && <Alert severity="error">Fehler beim Laden der Geschäftsjahre.</Alert>}
       {dlError && <Alert severity="error" onClose={() => setDlError(null)}>{dlError}</Alert>}
@@ -545,10 +117,18 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew }) {
 
 export default function ProfitLoss() {
   const qc = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isPhone = useMediaQuery(theme.breakpoints.down('sm'));
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const tab = TABS.includes(tabParam) ? tabParam : 'eur';
-  const setTab = (v) => setSearchParams(v === 'eur' ? {} : { tab: v }, { replace: true });
+  // Alte Tabs sind umgezogen: EÜR → Berichte, Kasse & Bank → /cash-count?tab=bank
+  useEffect(() => {
+    if (tabParam === 'eur') navigate('/reports?report=eur', { replace: true });
+    else if (tabParam === 'kasse') navigate('/cash-count?tab=bank', { replace: true });
+  }, [tabParam, navigate]);
+  const [receiptsFy, setReceiptsFy] = useState(null);
 
   const { data: fyData, error: fyError } = useQuery({
     queryKey: ['fiscal-years'],
@@ -579,20 +159,27 @@ export default function ProfitLoss() {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>Kassenprüfung</Typography>
-      <Tabs value={tab} onChange={(e, v) => setTab(v)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
-        <Tab value="eur" label="EÜR" />
-        <Tab value="kasse" label="Kasse & Bank" />
-        <Tab value="jahre" label="Geschäftsjahre" />
-      </Tabs>
+      <FiscalYearsSection fiscalYears={fiscalYears} error={fyError} onClose={setCloseTarget} onNew={() => setOpenNew(true)} onReceipts={setReceiptsFy} />
 
-      {tab === 'eur' && <EurSection />}
-      {tab === 'kasse' && <CashBankSection fiscalYears={fiscalYears} />}
-      {tab === 'jahre' && (
-        <FiscalYearsSection fiscalYears={fiscalYears} error={fyError} onClose={setCloseTarget} onNew={() => setOpenNew(true)} />
-      )}
+      <Dialog open={!!receiptsFy} onClose={() => setReceiptsFy(null)} maxWidth="xl" fullWidth fullScreen={isMobile}>
+        <Box sx={{ p: { xs: 2, sm: 3 }, display: 'flex', flexDirection: 'column', minHeight: isMobile ? '100vh' : '80vh' }}>
+          <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
+            <Typography variant="h6" sx={{ flex: 1 }}>Belege prüfen · {receiptsFy?.name}</Typography>
+            <IconButton onClick={() => setReceiptsFy(null)} aria-label="Schließen"><Close /></IconButton>
+          </Stack>
+          <Box sx={{ flex: 1, overflow: 'auto' }}>
+            {receiptsFy && (
+              <ReceiptReview
+                fetchUrl={`/accounting/fiscal-years/${receiptsFy.id}/receipts`}
+                zipUrl={`/accounting/fiscal-years/${receiptsFy.id}/receipts.zip`}
+                title={`Belege ${fmtDate(receiptsFy.startDate)} – ${fmtDate(receiptsFy.endDate)}`}
+              />
+            )}
+          </Box>
+        </Box>
+      </Dialog>
 
-      <Dialog open={openNew} onClose={() => setOpenNew(false)} maxWidth="sm" fullWidth>
+      <Dialog open={openNew} onClose={() => setOpenNew(false)} maxWidth="sm" fullWidth fullScreen={isPhone}>
         <DialogTitle>Geschäftsjahr anlegen</DialogTitle>
         <DialogContent>
           {createError && <Alert severity="error" sx={{ mt: 1 }}>{createError}</Alert>}

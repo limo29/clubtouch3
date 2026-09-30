@@ -1,6 +1,6 @@
 const { body, validationResult } = require('express-validator');
 
-// Validation Rules 
+// Validation Rules
 const validateLogin = [
   body()
     .custom((value, { req }) => {
@@ -33,7 +33,7 @@ const validateRegister = [
     .isIn(['ADMIN', 'CASHIER', 'ACCOUNTANT'])
     .withMessage('Ungültige Rolle'),
   body('username')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 3 })
     .withMessage('Benutzername muss mindestens 3 Zeichen lang sein')
@@ -41,7 +41,7 @@ const validateRegister = [
     .withMessage('Benutzername darf nur Buchstaben, Zahlen und Unterstrich enthalten')
 ];
 
-// Validation Error Handler 
+// Validation Error Handler
 function handleValidationErrors(req, res, next) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -75,12 +75,24 @@ const validateUserUpdate = [
     .isIn(['ADMIN', 'CASHIER', 'ACCOUNTANT'])
     .withMessage('Ungültige Rolle'),
   body('username')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ min: 3 })
     .withMessage('Benutzername muss mindestens 3 Zeichen lang sein')
     .matches(/^[a-zA-Z0-9_]+$/)
     .withMessage('Benutzername darf nur Buchstaben, Zahlen und Unterstrich enthalten')
+];
+
+const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;
+const validateChangePassword = [
+  body('currentPassword')
+    .notEmpty()
+    .withMessage('Aktuelles Passwort erforderlich'),
+  body('newPassword')
+    .isLength({ min: 8 })
+    .withMessage('Passwort muss mindestens 8 Zeichen lang sein')
+    .matches(PASSWORD_RULE)
+    .withMessage('Passwort muss Groß-/Kleinbuchstaben und Zahlen enthalten')
 ];
 
 const validateArticle = [
@@ -160,7 +172,49 @@ const validateCustomer = [
     .withMessage('Name muss mindestens 2 Zeichen lang sein'),
   body('nickname')
     .optional()
+    .trim(),
+  // Gruppe
+  body('groupId')
+    .optional({ values: 'falsy' })
+    .isUUID()
+    .withMessage('groupId muss eine gültige UUID sein'),
+  body('isGroupAccount')
+    .optional()
+    .isBoolean()
+    .withMessage('isGroupAccount muss ein Boolean sein'),
+  // Kontaktdaten (optional; CASHIER-Eingaben werden im Controller ignoriert)
+  body('company')
+    .optional({ values: 'falsy' })
     .trim()
+    .isLength({ max: 150 })
+    .withMessage('Firma/Zusatz darf höchstens 150 Zeichen lang sein'),
+  body('street')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 150 })
+    .withMessage('Straße darf höchstens 150 Zeichen lang sein'),
+  body('zip')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 20 })
+    .withMessage('PLZ darf höchstens 20 Zeichen lang sein'),
+  body('city')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('Ort darf höchstens 100 Zeichen lang sein'),
+  body('phone')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Telefon darf höchstens 50 Zeichen lang sein'),
+  body('email')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isEmail()
+    .withMessage('E-Mail-Adresse ist ungültig')
+    .isLength({ max: 200 })
+    .withMessage('E-Mail darf höchstens 200 Zeichen lang sein'),
 ];
 
 const validateCustomerUpdate = [
@@ -171,7 +225,49 @@ const validateCustomerUpdate = [
     .withMessage('Name muss mindestens 2 Zeichen lang sein'),
   body('nickname')
     .optional()
+    .trim(),
+  // Gruppe
+  body('groupId')
+    .optional({ values: 'falsy' })
+    .isUUID()
+    .withMessage('groupId muss eine gültige UUID sein'),
+  body('isGroupAccount')
+    .optional()
+    .isBoolean()
+    .withMessage('isGroupAccount muss ein Boolean sein'),
+  // Kontaktdaten (optional; CASHIER-Eingaben werden im Controller ignoriert)
+  body('company')
+    .optional({ values: 'falsy' })
     .trim()
+    .isLength({ max: 150 })
+    .withMessage('Firma/Zusatz darf höchstens 150 Zeichen lang sein'),
+  body('street')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 150 })
+    .withMessage('Straße darf höchstens 150 Zeichen lang sein'),
+  body('zip')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 20 })
+    .withMessage('PLZ darf höchstens 20 Zeichen lang sein'),
+  body('city')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('Ort darf höchstens 100 Zeichen lang sein'),
+  body('phone')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Telefon darf höchstens 50 Zeichen lang sein'),
+  body('email')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isEmail()
+    .withMessage('E-Mail-Adresse ist ungültig')
+    .isLength({ max: 200 })
+    .withMessage('E-Mail darf höchstens 200 Zeichen lang sein'),
 ];
 
 const validateTopUp = [
@@ -184,6 +280,54 @@ const validateTopUp = [
   body('reference')
     .optional()
     .trim()
+];
+
+// Kundengruppe anlegen/aktualisieren
+const validateCustomerGroup = [
+  body('name')
+    .trim()
+    .isLength({ min: 1, max: 40 })
+    .withMessage('Name muss zwischen 1 und 40 Zeichen lang sein'),
+  body('color')
+    .optional({ values: 'falsy' })
+    .matches(/^#[0-9a-fA-F]{6}$/)
+    .withMessage('Farbe muss im Format #rrggbb angegeben werden'),
+  body('emoji')
+    .optional({ values: 'falsy' })
+    .isLength({ max: 16 })
+    .withMessage('Emoji darf höchstens 16 Zeichen lang sein'),
+  body('sortOrder')
+    .optional({ values: 'falsy' })
+    .isInt()
+    .withMessage('sortOrder muss eine ganze Zahl sein'),
+  body('active')
+    .optional()
+    .isBoolean()
+    .withMessage('active muss ein Boolean sein'),
+];
+
+const validateCustomerGroupUpdate = [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 40 })
+    .withMessage('Name muss zwischen 1 und 40 Zeichen lang sein'),
+  body('color')
+    .optional({ values: 'falsy' })
+    .matches(/^#[0-9a-fA-F]{6}$/)
+    .withMessage('Farbe muss im Format #rrggbb angegeben werden'),
+  body('emoji')
+    .optional({ values: 'falsy' })
+    .isLength({ max: 16 })
+    .withMessage('Emoji darf höchstens 16 Zeichen lang sein'),
+  body('sortOrder')
+    .optional({ values: 'falsy' })
+    .isInt()
+    .withMessage('sortOrder muss eine ganze Zahl sein'),
+  body('active')
+    .optional()
+    .isBoolean()
+    .withMessage('active muss ein Boolean sein'),
 ];
 
 // Kassenzählung: Stückelung = Objekt { "200": 0, ..., "0.01": 3 } mit nichtnegativen Ganzzahlen
@@ -317,12 +461,15 @@ module.exports = {
   validateLogin,
   validateRegister,
   validateUserUpdate,
+  validateChangePassword,
   validateArticle,
   validateArticleUpdate,
   validateDelivery,
   validateInventory,
   validateCustomer,
   validateCustomerUpdate,
+  validateCustomerGroup,
+  validateCustomerGroupUpdate,
   validateTopUp,
   validateSale,
   validateQuickSale,
@@ -332,5 +479,3 @@ module.exports = {
 
   handleValidationErrors
 };
-
-

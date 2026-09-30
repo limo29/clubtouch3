@@ -21,8 +21,11 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init for proper signal handling, tzdata für die lokale Zeitzone
+RUN apk add --no-cache dumb-init tzdata
+
+# Geschäftstag (06:00) und Jahreswechsel gelten in lokaler Zeit, Railway läuft sonst in UTC
+ENV TZ=Europe/Berlin
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs

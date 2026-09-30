@@ -1,3 +1,8 @@
+// Zeitzone vor allen anderen Modulen festlegen: Der Geschäftstag beginnt um 06:00 LOKAL
+// (utils/businessDay.js), Jahreswertung am 1.1. lokal. Railway/Docker laufen sonst in UTC,
+// dann begänne der Tag im Sommer erst um 08:00.
+process.env.TZ = process.env.TZ || 'Europe/Berlin';
+
 require('dotenv').config();
 const { app, prisma } = require('./app');
 const { createServer } = require('http');
@@ -22,6 +27,8 @@ async function main() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
       console.log(`📂 Working Directory: ${process.cwd()}`);
+      // Clubscore: Ausgangsstand, Jahresarchiv, Timer auf den nächsten Geschäftstagsbeginn
+      require('./services/highscoreService').init();
     });
   } catch (error) {
     console.error('❌ Error starting server:', error);

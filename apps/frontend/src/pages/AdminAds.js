@@ -446,10 +446,7 @@ export default function AdminAds() {
         <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 } }}>
             <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} sx={{ mb: 3 }}>
                 <Box>
-                    <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: '-0.02em' }}>
-                        Werbung
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary">
                         Bilder, Videos und Slides für den Bildschirm im Clubraum.
                         {ads.length > 0 && ` ${activeCount} von ${ads.length} aktiv · Durchlauf ca. ${Math.round(totalSeconds)} s.`}
                     </Typography>

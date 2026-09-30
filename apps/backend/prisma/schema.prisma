@@ -13,19 +13,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Nutzer des Systems (Kassierer, Admins, etc.) 
+// Nutzer des Systems (Kassierer, Admins, etc.)
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
   username  String?  @unique
   name      String
-  password  String // Hashed! 
+  password  String // Hashed!
   role      Role     @default(CASHIER)
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relationen 
+  // Relationen
   transactions      Transaction[]
   auditLogs         AuditLog[]
   sessions          Session[]
@@ -37,80 +37,109 @@ model User {
   cashMovements     CashMovement[]
 }
 
-// Kunden mit Guthaben-Konto 
-model Customer {
-  id              String           @id @default(uuid())
-  name            String
-  nickname        String?
-  balance         Decimal          @default(0) @db.Decimal(10, 2)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  gender          Gender?          @default(OTHER)
-  lastActivity    DateTime         @default(now())
-  active          Boolean          @default(true)
-
-  // Relationen 
-  transactions    Transaction[]
-  accountTopUps   AccountTopUp[]
-  highscorePoints HighscoreEntry[]
-  invoices        Invoice[]
+// Kundengruppen (z. B. KjG-Gruppen „Panther", „Füchse")
+model CustomerGroup {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  color     String     @default("#1976d2")
+  emoji     String?
+  imageUrl  String? // /uploads/groups/<uuid>.webp
+  active    Boolean    @default(true)
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  customers Customer[]
 }
 
-// Artikel/Produkte 
+// Kunden mit Guthaben-Konto
+model Customer {
+  id           String   @id @default(uuid())
+  name         String
+  nickname     String?
+  balance      Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  gender       Gender?  @default(OTHER)
+  lastActivity DateTime @default(now())
+  active       Boolean  @default(true)
+
+  // Gruppe (optional)
+  groupId        String?
+  group          CustomerGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  isGroupAccount Boolean        @default(false) // gemeinsames Konto einer Gruppe
+
+  // Kontaktdaten (optional, nur ADMIN/ACCOUNTANT sehen und pflegen sie; nie über /api/public)
+  company String? // Firma / Anschriftzusatz
+  street  String?
+  zip     String?
+  city    String?
+  phone   String?
+  email   String?
+
+  // Relationen
+  transactions        Transaction[]
+  accountTopUps       AccountTopUp[]
+  reimbursedPurchases PurchaseDocument[] @relation("AuslageKunde")
+  invoices            Invoice[]
+
+  @@index([groupId])
+}
+
+// Artikel/Produkte
 model Article {
-  id                 String  @id @default(uuid())
+  id                 String   @id @default(uuid())
   name               String
-  price              Decimal @db.Decimal(10, 2)
-  stock              Decimal @default(0) @db.Decimal(10, 2) // Geändert zu Decimal
-  minStock           Decimal @default(0) @db.Decimal(10, 2) // Geändert zu Decimal
-  unit               String  @default("Stück") // Verkaufseinheit (z.B. "Flasche")
+  price              Decimal  @db.Decimal(10, 2)
+  stock              Decimal  @default(0) @db.Decimal(10, 2) // Geändert zu Decimal
+  minStock           Decimal  @default(0) @db.Decimal(10, 2) // Geändert zu Decimal
+  unit               String   @default("Stück") // Verkaufseinheit (z.B. "Flasche")
   category           String
-  order              Int     @default(0)
+  order              Int      @default(0)
   imageUrl           String?
-  active             Boolean @default(true)
-  countsForHighscore Boolean @default(true) // Für Highscore-Konfiguration 
+  active             Boolean  @default(true)
+  countsForHighscore Boolean  @default(true) // Für Highscore-Konfiguration
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
-  
-  // NEU: Mehrere Bildgrößen
-  imageThumbnail     String? // 150x150
-  imageSmall         String? // 300x300
-  imageMedium        String? // 600x600
-  imageLarge         String? // 1200x1200
-  
-  // Umrechnungsfaktoren für Einkauf
-  purchaseUnit       String?  @default("Kiste") // Einkaufseinheit (z.B. "Kiste")
-  unitsPerPurchase   Decimal? @db.Decimal(10, 2) @default(20) // z.B. 6 Flaschen pro Kiste
 
-  // Relationen 
-  transactionItems TransactionItem[]
-  stockMovements   StockMovement[]
-  invoiceItems     InvoiceItem[]
+  // NEU: Mehrere Bildgrößen
+  imageThumbnail String? // 150x150
+  imageSmall     String? // 300x300
+  imageMedium    String? // 600x600
+  imageLarge     String? // 1200x1200
+
+  // Umrechnungsfaktoren für Einkauf
+  purchaseUnit     String?  @default("Kiste") // Einkaufseinheit (z.B. "Kiste")
+  unitsPerPurchase Decimal? @default(20) @db.Decimal(10, 2) // z.B. 6 Flaschen pro Kiste
+
+  // Relationen
+  transactionItems      TransactionItem[]
+  stockMovements        StockMovement[]
+  invoiceItems          InvoiceItem[]
   // --- GEÄNDERT ---
   // Verweist jetzt auf das neue Modell
   purchaseDocumentItems PurchaseDocumentItem[]
 }
 
-// Verkaufstransaktion 
+// Verkaufstransaktion
 model Transaction {
-  id          String          @id @default(uuid())
-  type        TransactionType
+  id            String          @id @default(uuid())
+  type          TransactionType
   paymentMethod PaymentMethod
-  totalAmount Decimal         @db.Decimal(10, 2)
-  cancelled   Boolean         @default(false)
-  cancelledAt DateTime?
-  cancelledBy String? // User ID 
-  instanceId  String? // Multi-Instanz-Support 
-  createdAt   DateTime        @default(now())
+  totalAmount   Decimal         @db.Decimal(10, 2)
+  cancelled     Boolean         @default(false)
+  cancelledAt   DateTime?
+  cancelledBy   String? // User ID
+  instanceId    String? // Multi-Instanz-Support
+  createdAt     DateTime        @default(now())
 
-  // Relationen 
+  // Relationen
   userId     String
-  user       User            @relation(fields: [userId], references: [id])
+  user       User              @relation(fields: [userId], references: [id])
   customerId String?
-  customer   Customer?       @relation(fields: [customerId], references: [id])
+  customer   Customer?         @relation(fields: [customerId], references: [id])
   items      TransactionItem[]
 
-  // Für Storno-Verknüpfung 
+  // Für Storno-Verknüpfung
   originalTransactionId String?
   originalTransaction   Transaction?  @relation("CancelledTransaction", fields: [originalTransactionId], references: [id])
   cancelledTransactions Transaction[] @relation("CancelledTransaction")
@@ -121,37 +150,42 @@ model Transaction {
   @@index([customerId, createdAt])
 }
 
-// Einzelne Positionen einer Transaktion 
+// Einzelne Positionen einer Transaktion
 model TransactionItem {
-  id            String  @id @default(uuid())
-  quantity      Int
-  pricePerUnit  Decimal @db.Decimal(10, 2)
-  totalPrice    Decimal @db.Decimal(10, 2)
+  id           String  @id @default(uuid())
+  quantity     Int
+  pricePerUnit Decimal @db.Decimal(10, 2)
+  totalPrice   Decimal @db.Decimal(10, 2)
 
-  // Relationen 
+  // Relationen
   transactionId String
   transaction   Transaction @relation(fields: [transactionId], references: [id])
   articleId     String
   article       Article     @relation(fields: [articleId], references: [id])
 
-
   @@index([articleId])
 }
 
-// Kundenkonto-Aufladungen 
+// Kundenkonto-Aufladungen
 model AccountTopUp {
   id        String      @id @default(uuid())
   amount    Decimal     @db.Decimal(10, 2)
   method    TopUpMethod
-  reference String? // z.B. Überweisungsreferenz 
+  reference String? // z.B. Überweisungsreferenz
   createdAt DateTime    @default(now())
 
-  // Relationen 
+  // Relationen
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
+
+  // Nur bei REIMBURSEMENT: die ausgelegte Lieferantenrechnung (bleibt nach Löschen über reference nachvollziehbar)
+  purchaseDocumentId String?
+  purchaseDocument   PurchaseDocument? @relation(fields: [purchaseDocumentId], references: [id], onDelete: SetNull)
+
+  @@index([purchaseDocumentId])
 }
 
-// Bestandsbewegungen (Wareneingang, Inventur, etc.) 
+// Bestandsbewegungen (Wareneingang, Inventur, etc.)
 model StockMovement {
   id        String            @id @default(uuid())
   type      StockMovementType
@@ -159,26 +193,26 @@ model StockMovement {
   reason    String?
   createdAt DateTime          @default(now())
 
-  // Relationen 
+  // Relationen
   articleId String
   article   Article @relation(fields: [articleId], references: [id])
 }
 
-// Audit-Log für alle Änderungen 
+// Audit-Log für alle Änderungen
 model AuditLog {
   id         String   @id @default(uuid())
-  action     String // z.B. "CREATE_ARTICLE", "CANCEL_TRANSACTION" 
-  entityType String // z.B. "Article", "Transaction" 
+  action     String // z.B. "CREATE_ARTICLE", "CANCEL_TRANSACTION"
+  entityType String // z.B. "Article", "Transaction"
   entityId   String
-  changes    Json? // JSON mit Änderungen 
+  changes    Json? // JSON mit Änderungen
   createdAt  DateTime @default(now())
 
-  // Relationen 
+  // Relationen
   userId String
   user   User   @relation(fields: [userId], references: [id])
 }
 
-// Sessions für JWT-Token-Management 
+// Sessions für JWT-Token-Management
 model Session {
   id           String   @id @default(uuid())
   token        String   @unique
@@ -186,26 +220,12 @@ model Session {
   expiresAt    DateTime
   createdAt    DateTime @default(now())
 
-  // Relationen 
+  // Relationen
   userId String
   user   User   @relation(fields: [userId], references: [id])
 }
 
-// Highscore-Einträge 
-model HighscoreEntry {
-  id         String        @id @default(uuid())
-  type       HighscoreType
-  value      Decimal       @db.Decimal(10, 2) // Euro oder Anzahl 
-  date       DateTime      @default(now())
-
-  // Relationen 
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
-
-  @@index([type, date])
-}
-
-// ENUMS 
+// ENUMS
 enum Role {
   ADMIN
   CASHIER
@@ -229,28 +249,22 @@ enum PaymentMethod {
 enum TopUpMethod {
   CASH
   TRANSFER
+  REIMBURSEMENT // Auslage: Lieferantenrechnung vom Kunden bezahlt, dem Konto gutgeschrieben (kein Geldeingang)
 }
 
 enum StockMovementType {
-  DELIVERY // Wareneingang 
-  INVENTORY // Inventur 
-  CORRECTION // Korrektur 
-  SALE // Verkauf (automatisch) 
+  DELIVERY // Wareneingang
+  INVENTORY // Inventur
+  CORRECTION // Korrektur
+  SALE // Verkauf (automatisch)
   EXPIRED // Abgelaufen
   OWNER_USE // Eigenverbrauch
-}
-
-enum HighscoreType {
-  DAILY_AMOUNT // Tagesumsatz in Euro 
-  DAILY_COUNT // Tagesanzahl 
-  YEARLY_AMOUNT // Jahresumsatz in Euro 
-  YEARLY_COUNT // Jahresanzahl 
 }
 
 // --- NEUES, KONSOLIDIERTES EINKAUFSMODELL ---
 // Ersetzt Purchase, PurchaseItem, DeliveryNote, DeliveryNoteItem
 
-// Definiert, ob ein Beleg eine Rechnung (mit Geld) 
+// Definiert, ob ein Beleg eine Rechnung (mit Geld)
 // oder ein Lieferschein (nur Ware) ist.
 enum PurchaseDocumentType {
   RECHNUNG
@@ -259,47 +273,52 @@ enum PurchaseDocumentType {
 
 // Ein Beleg kann entweder eine Rechnung oder ein Lieferschein sein.
 model PurchaseDocument {
-  id             String               @id @default(uuid())
+  id String @id @default(uuid())
 
   // KERNFELD: RECHNUNG oder LIEFERSCHEIN
-  type           PurchaseDocumentType
+  type PurchaseDocumentType
 
   // Gemeinsame Daten
-  documentNumber String               @unique // "RE2025-11" oder "LS2025-3"
+  documentNumber String   @unique // "RE2025-11" oder "LS2025-3"
   supplier       String
   documentDate   DateTime // Datum des Belegs
   nachweisUrl    String? // URL zum Scan (PDF/Bild)
   description    String?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   // Finanzdaten (nur relevant für type = RECHNUNG)
-  totalAmount    Decimal?             @db.Decimal(10, 2) // Bei LIEFERSCHEIN = null
-  paid           Boolean              @default(false)
-  paidAt         DateTime?
-  paymentMethod  PaymentMethod? // Nimmt das bestehende Enum
-  dueDate        DateTime?
+  totalAmount   Decimal?       @db.Decimal(10, 2) // Bei LIEFERSCHEIN = null
+  paid          Boolean        @default(false)
+  paidAt        DateTime?
+  paymentMethod PaymentMethod? // Nimmt das bestehende Enum
+  dueDate       DateTime?
 
   // Wareneingangsdaten (Positionen)
   // Ein Lieferschein MUSS items haben.
   // Eine RECHNUNG KANN items haben (beim Sofortkauf).
   // Eine Sammelrechnung hat KEINE items (da diese bei den Lieferscheinen liegen).
-  items          PurchaseDocumentItem[]
+  items PurchaseDocumentItem[]
 
   // --- DIE SCHLÜSSEL-VERKNÜPFUNG (1:N) ---
 
-  // Wenn dies ein Lieferschein ist (type=LIEFERSCHEIN), 
+  // Wenn dies ein Lieferschein ist (type=LIEFERSCHEIN),
   // kann er EINER Rechnung zugewiesen werden.
-  rechnungId     String?
-  rechnung       PurchaseDocument?    @relation("RechnungZuLieferscheinen", fields: [rechnungId], references: [id], onDelete: SetNull)
+  rechnungId String?
+  rechnung   PurchaseDocument? @relation("RechnungZuLieferscheinen", fields: [rechnungId], references: [id], onDelete: SetNull)
 
-  // Wenn dies eine Rechnung ist (type=RECHNUNG), 
+  // Wenn dies eine Rechnung ist (type=RECHNUNG),
   // kann sie MEHRERE Lieferscheine haben.
-  lieferscheine  PurchaseDocument[]   @relation("RechnungZuLieferscheinen")
+  lieferscheine PurchaseDocument[] @relation("RechnungZuLieferscheinen")
+
+  // Auslage (paymentMethod = ACCOUNT): Kunde, dem der Betrag gutgeschrieben wurde; null, solange nichts gutgeschrieben ist
+  reimbursedCustomerId String?
+  reimbursedCustomer   Customer?      @relation("AuslageKunde", fields: [reimbursedCustomerId], references: [id])
+  accountTopUps        AccountTopUp[]
 
   // Relationen
-  userId         String
-  user           User                 @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
   @@index([type])
   @@index([supplier])
@@ -320,41 +339,40 @@ model PurchaseDocumentItem {
   baseUnitQuantity     Decimal? @db.Decimal(10, 2) // z.B. 3
 
   // Finanzdaten (nur relevant bei Sofortkauf, sonst 0)
-  pricePerUnit Decimal @db.Decimal(10, 2) @default(0) // Preis pro *FINALE* Einheit
-  totalPrice   Decimal @db.Decimal(10, 2) @default(0)
+  pricePerUnit Decimal @default(0) @db.Decimal(10, 2) // Preis pro *FINALE* Einheit
+  totalPrice   Decimal @default(0) @db.Decimal(10, 2)
 
   // Relationen
   documentId String
   document   PurchaseDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
-  articleId  String?
-  article    Article?         @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  articleId String?
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
 }
-
 
 // Neues Model für Ausgangsrechnungen
 model Invoice {
-  id              String        @id @default(uuid())
-  invoiceNumber   String        @unique
+  id              String         @id @default(uuid())
+  invoiceNumber   String         @unique
   customerName    String
   customerAddress String?
   description     String?
-  totalAmount     Decimal       @db.Decimal(10, 2)
-  taxRate         Decimal       @default(19) @db.Decimal(5, 2)
-  status          InvoiceStatus @default(DRAFT)
+  totalAmount     Decimal        @db.Decimal(10, 2)
+  taxRate         Decimal        @default(19) @db.Decimal(5, 2)
+  status          InvoiceStatus  @default(DRAFT)
   paidAt          DateTime?
   paymentMethod   PaymentMethod? // nur CASH oder TRANSFER; null bei Altbestand (gilt als Bank)
   dueDate         DateTime
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   // Relationen
-  userId          String
-  user            User          @relation(fields: [userId], references: [id])
-  customerId      String? // Optional, falls registrierter Kunde
-  customer        Customer?     @relation(fields: [customerId], references: [id])
-  items           InvoiceItem[]
-  transactions    Transaction[] // Verknüpfung zu Zahlungen
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  customerId   String? // Optional, falls registrierter Kunde
+  customer     Customer?     @relation(fields: [customerId], references: [id])
+  items        InvoiceItem[]
+  transactions Transaction[] // Verknüpfung zu Zahlungen
 }
 
 // Rechnungspositionen
@@ -388,54 +406,54 @@ enum InvoiceStatus {
 
 // prisma/schema.prisma (Ergänzung)
 model FiscalYear {
-  id           String   @id @default(cuid())
-  name         String
-  startDate    DateTime
-  endDate      DateTime
-  closed       Boolean  @default(false)
-  report       YearEndReport?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id        String         @id @default(cuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  closed    Boolean        @default(false)
+  report    YearEndReport?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 }
 
 model YearEndReport {
-  id               String   @id @default(cuid())
-  fiscalYearId     String   @unique
-  fiscalYear       FiscalYear @relation(fields: [fiscalYearId], references: [id])
+  id                String     @id @default(cuid())
+  fiscalYearId      String     @unique
+  fiscalYear        FiscalYear @relation(fields: [fiscalYearId], references: [id])
   // Finanz-Zusammenfassung
-  incomeTotal      Decimal   @default(0)
-  expensesTotal    Decimal   @default(0)
-  profit           Decimal   @default(0)
+  incomeTotal       Decimal    @default(0)
+  expensesTotal     Decimal    @default(0)
+  profit            Decimal    @default(0)
   // Bestände / Guthaben zum Stichtag
-  cashOnHand       Decimal   @default(0)   // Barkasse (manuell eingegeben)
-  bankAccountsJson Json      @default("[]")// [{name, iban?, balance}]
-  guestBalance     Decimal   @default(0)   // Summe Customer.balance
+  cashOnHand        Decimal    @default(0) // Barkasse (manuell eingegeben)
+  bankAccountsJson  Json       @default("[]") // [{name, iban?, balance}]
+  guestBalance      Decimal    @default(0) // Summe Customer.balance
   // Rohdaten-Snapshots
-  inventorySystem  Json      @default("[]")// [{articleId,name,systemStock,unit}]
-  inventoryPhysical Json     @default("[]")// [{articleId,name,physicalStock,unit}]
-  inventoryDiff    Json      @default("[]")// [{articleId,name,diff,unit}]
+  inventorySystem   Json       @default("[]") // [{articleId,name,systemStock,unit}]
+  inventoryPhysical Json       @default("[]") // [{articleId,name,physicalStock,unit}]
+  inventoryDiff     Json       @default("[]") // [{articleId,name,diff,unit}]
   // Vollständiger Abschluss-Snapshot (Listen, Kassenzählung, Gästeguthaben, EÜR-Blöcke).
   // Das Jahresabschluss-PDF rendert bei geschlossenem Jahr ausschließlich hieraus.
-  detailsJson      Json      @default("{}")
-  createdAt        DateTime  @default(now())
+  detailsJson       Json       @default("{}")
+  createdAt         DateTime   @default(now())
 }
 
 // Kassenzählung: freier, gespeicherter Vorgang (nicht täglich, aber spätestens zur Kassenprüfung).
 // Soll = countedTotal der Vorzählung + Bar-Verkäufe + Bar-Aufladungen - Bar-Erstattungen - bar bezahlte Eingangsrechnungen
 // seit der Vorzählung. Ohne Vorzählung startet das Soll bei 0.
 model CashCount {
-  id              String   @id @default(uuid())
-  countedAt       DateTime @default(now())
-  denominations   Json     // {"200":0,"100":1,...,"0.01":3} -> Anzahl je Stückelung
-  countedTotal    Decimal  @db.Decimal(10, 2)
-  expectedTotal   Decimal  @db.Decimal(10, 2)
-  difference      Decimal  @db.Decimal(10, 2) // countedTotal - expectedTotal
-  breakdownJson   Json     @default("{}") // Soll-Herleitung zum Zeitpunkt der Zählung (eingefroren)
-  note            String?
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  countedAt     DateTime @default(now())
+  denominations Json // {"200":0,"100":1,...,"0.01":3} -> Anzahl je Stückelung
+  countedTotal  Decimal  @db.Decimal(10, 2)
+  expectedTotal Decimal  @db.Decimal(10, 2)
+  difference    Decimal  @db.Decimal(10, 2) // countedTotal - expectedTotal
+  breakdownJson Json     @default("{}") // Soll-Herleitung zum Zeitpunkt der Zählung (eingefroren)
+  note          String?
+  createdAt     DateTime @default(now())
 
-  userId          String
-  user            User     @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
   previousCountId String?
   previousCount   CashCount?  @relation("CashCountChain", fields: [previousCountId], references: [id], onDelete: SetNull)
@@ -450,10 +468,10 @@ model CashCount {
 // amount ist immer positiv, die Richtung ergibt sich aus dem Typ.
 // Storno statt Löschen (cancelled), wie bei Transaction.
 enum CashMovementType {
-  DEPOSIT_TO_BANK      // Bargeld auf die Bank eingezahlt: Kasse -
+  DEPOSIT_TO_BANK // Bargeld auf die Bank eingezahlt: Kasse -
   WITHDRAWAL_FROM_BANK // Bargeld von der Bank abgehoben:   Kasse +
-  OTHER_INCOME         // Sonstige Bareinnahme (Betriebseinnahme): Kasse +
-  OTHER_EXPENSE        // Sonstige Barausgabe  (Betriebsausgabe):  Kasse -
+  OTHER_INCOME // Sonstige Bareinnahme (Betriebseinnahme): Kasse +
+  OTHER_EXPENSE // Sonstige Barausgabe  (Betriebsausgabe):  Kasse -
 }
 
 model CashMovement {
@@ -461,11 +479,11 @@ model CashMovement {
   type        CashMovementType
   amount      Decimal          @db.Decimal(10, 2)
   occurredAt  DateTime         @default(now())
-  note        String?          // Pflicht bei OTHER_*, optional bei Bank
-  bankAccount String?          // Name des Kontos (frei), nur bei Bank-Typen
+  note        String? // Pflicht bei OTHER_*, optional bei Bank
+  bankAccount String? // Name des Kontos (frei), nur bei Bank-Typen
   cancelled   Boolean          @default(false)
   cancelledAt DateTime?
-  cancelledBy String?          // User ID
+  cancelledBy String? // User ID
   createdAt   DateTime         @default(now())
 
   userId String
@@ -476,15 +494,15 @@ model CashMovement {
 }
 
 model AdSlide {
-  id          String           @id @default(uuid())
-  imageUrl    String
-  duration    Int              @default(10) // Sekunden
-  transition  AdTransitionType @default(FADE)
-  order       Int              @default(0)
-  active      Boolean          @default(true)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  slideData   Json?            // Stores the JSON representation of the slide elements
+  id         String           @id @default(uuid())
+  imageUrl   String
+  duration   Int              @default(10) // Sekunden
+  transition AdTransitionType @default(FADE)
+  order      Int              @default(0)
+  active     Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  slideData  Json? // Stores the JSON representation of the slide elements
 }
 
 enum AdTransitionType {

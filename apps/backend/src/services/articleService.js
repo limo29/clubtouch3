@@ -1,5 +1,16 @@
 const prisma = require('../utils/prisma');
 
+function triggerRefreshBoards() {
+  try {
+    const hs = require('./highscoreService');
+    Promise.resolve(hs.refreshBoards?.()).catch((err) =>
+      console.error('[ArticleService] refreshBoards Fehler:', err)
+    );
+  } catch (err) {
+    console.error('[ArticleService] highscoreService laden fehlgeschlagen:', err);
+  }
+}
+
 class ArticleService {
   // Liste alle Artikel
   async listArticles(includeInactive = false) {
@@ -61,6 +72,9 @@ class ArticleService {
   async updateArticle(id, data) {
     const { stockAdjustment, adjustmentReason, ...updateData } = data;
 
+    // Vorherigen Stand laden, um Änderungen an highscore-relevanten Feldern zu erkennen
+    const before = await prisma.article.findUnique({ where: { id }, select: { countsForHighscore: true, active: true } });
+
     const article = await prisma.article.update({
       where: { id },
       data: {
@@ -87,6 +101,15 @@ class ArticleService {
     if (stockAdjustment && stockAdjustment !== 0) {
       await this.adjustStock(id, stockAdjustment, adjustmentReason || 'Manuelle Anpassung');
     }
+
+    // Highscore neu berechnen falls relevante Felder geändert wurden
+    if (before) {
+      const highscoreChanged =
+        (typeof updateData.countsForHighscore === 'boolean' && updateData.countsForHighscore !== before.countsForHighscore) ||
+        (typeof updateData.active === 'boolean' && updateData.active !== before.active);
+      if (highscoreChanged) triggerRefreshBoards();
+    }
+
     return article;
   }
 
@@ -94,7 +117,10 @@ class ArticleService {
   async toggleArticleStatus(id) {
     const article = await prisma.article.findUnique({ where: { id } });
     if (!article) throw new Error('Artikel nicht gefunden');
-    return prisma.article.update({ where: { id }, data: { active: !article.active } });
+    const updated = await prisma.article.update({ where: { id }, data: { active: !article.active } });
+    // active geändert → Highscore aktualisieren
+    triggerRefreshBoards();
+    return updated;
   }
 
   // Bestand anpassen

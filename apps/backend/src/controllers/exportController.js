@@ -241,8 +241,8 @@ class ExportController {
         },
         {
           id: 'eur',
-          name: 'Einnahmen-Überschuss-Rechnung',
-          description: 'EÜR mit Belegen, Eigenverbrauch und offenen Posten als PDF',
+          name: 'Einnahmen & Ausgaben (EÜR)',
+          description: 'Live-Vorschau und PDF mit Belegen, Eigenverbrauch und offenen Posten',
           format: 'PDF',
           parameters: ['startDate', 'endDate']
         },

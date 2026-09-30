@@ -1,4 +1,5 @@
 const prisma = require('../utils/prisma');
+const { CUSTOMER_BASIC_SELECT } = require('../utils/customerSelect');
 const PDFDocument = require('pdfkit');
 const { Prisma } = require('@prisma/client');
 const QRCode = require('qrcode');
@@ -85,10 +86,10 @@ class InvoiceService {
     if (status) where.status = status;
     if (startDate || endDate) { where.createdAt = {}; if (startDate) where.createdAt.gte = new Date(startDate); if (endDate) where.createdAt.lte = new Date(endDate); }
     if (search) where.OR = [{ invoiceNumber: { contains: search } }, { customerName: { contains: search } }, { description: { contains: search } }];
-    return prisma.invoice.findMany({ where, include: { customer: true, _count: { select: { items: true } } }, orderBy: { createdAt: 'desc' } });
+    return prisma.invoice.findMany({ where, include: { customer: { select: CUSTOMER_BASIC_SELECT }, _count: { select: { items: true } } }, orderBy: { createdAt: 'desc' } });
   }
 
-  async getInvoice(id) { return prisma.invoice.findUnique({ where: { id }, include: { items: { include: { article: true } }, customer: true, user: { select: { name: true } }, transactions: true } }); }
+  async getInvoice(id) { return prisma.invoice.findUnique({ where: { id }, include: { items: { include: { article: true } }, customer: { select: CUSTOMER_BASIC_SELECT }, user: { select: { name: true } }, transactions: true } }); }
 
   /**
    * Statuswechsel. Bei PAID ist die Zahlungsart Pflicht (CASH = Bargeld in die Kasse,
