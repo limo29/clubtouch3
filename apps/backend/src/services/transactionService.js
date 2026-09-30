@@ -470,8 +470,9 @@ class TransactionService {
 
     // Aufladungen, Stornos und die Transaktionsliste des Tages (für Tagesabschluss-PDF)
     const [topUps, refunds, dayTransactions] = await Promise.all([
+      // Auslagen (REIMBURSEMENT) sind keine Aufladung mit Geldeingang und gehören nicht in den Tagesabschluss
       prisma.accountTopUp.findMany({
-        where: { createdAt: { gte: startOfDay, lte: endOfDay } },
+        where: { method: { in: ['CASH', 'TRANSFER'] }, createdAt: { gte: startOfDay, lte: endOfDay } },
         include: { customer: { select: { name: true, nickname: true } } },
         orderBy: { createdAt: 'asc' }
       }),

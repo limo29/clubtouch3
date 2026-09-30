@@ -43,6 +43,7 @@ class PurchaseDocumentController {
       // Datentypen konvertieren (aus FormData sind alles Strings)
       data.totalAmount = data.totalAmount ? parseFloat(data.totalAmount) : null;
       data.paid = data.paid === 'true';
+      if (data.reimbursedCustomerId === '') data.reimbursedCustomerId = undefined;
 
       const document = await purchaseDocumentService.createDocument(
         data,
@@ -68,6 +69,7 @@ class PurchaseDocumentController {
       res.status(201).json(document);
     } catch (error) {
       console.error('Create document error:', error);
+      if (error.userFacing) return res.status(400).json({ error: error.message });
       // Prisma-Transaktionsfehler abfangen
       if (error.message.includes('Artikel mit ID')) {
         return res.status(404).json({ error: error.message });
@@ -169,7 +171,7 @@ class PurchaseDocumentController {
   async markAsPaid(req, res) {
     try {
       const { id } = req.params;
-      const { paymentMethod } = req.body;
+      const { paymentMethod, reimbursedCustomerId } = req.body;
 
       if (!paymentMethod) {
         return res.status(400).json({ error: 'paymentMethod ist erforderlich.' });
@@ -178,13 +180,14 @@ class PurchaseDocumentController {
       const document = await purchaseDocumentService.markAsPaid(
         id,
         paymentMethod,
-        req.user.id
+        req.user.id,
+        reimbursedCustomerId || null
       );
 
       res.json(document);
     } catch (error) {
       console.error('Mark as paid error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(error.userFacing ? 400 : 500).json({ error: error.message });
     }
   }
   // POST /:id/mark-unpaid
@@ -200,7 +203,7 @@ class PurchaseDocumentController {
       res.json(document);
     } catch (error) {
       console.error('Mark as unpaid error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(error.userFacing ? 400 : 500).json({ error: error.message });
     }
   }
   // POST /unlink
@@ -253,6 +256,7 @@ class PurchaseDocumentController {
       // Datentypen aus FormData konvertieren
       if (data.totalAmount) data.totalAmount = parseFloat(data.totalAmount);
       if (data.paid !== undefined) data.paid = data.paid === 'true';
+      if (data.reimbursedCustomerId === '') data.reimbursedCustomerId = undefined;
 
       const document = await purchaseDocumentService.updateDocument(
         id,
@@ -264,6 +268,7 @@ class PurchaseDocumentController {
       res.json(document);
     } catch (error) {
       console.error('Update document error:', error);
+      if (error.userFacing) return res.status(400).json({ error: error.message });
       res.status(500).json({ error: 'Fehler beim Aktualisieren des Belegs', details: error.message });
     }
   }

@@ -306,7 +306,9 @@ class CustomerService {
       movements.push({
         date: topUp.createdAt,
         type: 'TOPUP',
-        description: `Aufladung (${topUp.method})`,
+        description: topUp.method === 'REIMBURSEMENT'
+          ? (topUp.reference || 'Auslage')
+          : `Aufladung (${topUp.method === 'CASH' ? 'Bar' : 'Überweisung'})`,
         amount: topUp.amount,
         balance: 0 // Wird später berechnet
       });
@@ -402,6 +404,9 @@ class CustomerService {
     return await prisma.$transaction(async (tx) => {
       const original = await tx.accountTopUp.findUnique({ where: { id: topUpId } });
       if (!original) throw new Error('Aufladung nicht gefunden');
+      if (original.method === 'REIMBURSEMENT') {
+        throw new Error('Auslagen werden über die Lieferantenrechnung zurückgebucht (im Einkauf auf „offen“ setzen).');
+      }
 
       // Prüfen ob schon storniert (indem wir schauen ob es eine Gegenbuchung mit dieser Referenz gibt)
       // Wir nutzen das "reference" Feld um die ID der Originalbuchung zu speichern

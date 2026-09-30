@@ -45,6 +45,7 @@ import { useArticleLines, toPurchasePayload, linesFromPurchaseItems } from "../h
 import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
 import { invalidate } from '../utils/invalidate';
+import ReimbursementCustomerField, { PAYMENT_METHOD_LABELS } from "../components/purchases/ReimbursementCustomerField";
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentEdit               */
@@ -58,6 +59,7 @@ export default function PurchaseDocumentEdit() {
   const showFloatingActions = useMediaQuery(theme.breakpoints.down("md"));
 
   const [file, setFile] = useState(null);
+  const [formError, setFormError] = useState(null);
   const [linkedLieferscheinIds, setLinkedLieferscheinIds] = useState(new Set());
   const initializedRef = useRef(false);
 
@@ -73,10 +75,12 @@ export default function PurchaseDocumentEdit() {
       totalAmount: "",
       paid: false,
       paymentMethod: "TRANSFER",
+      reimbursedCustomerId: "",
       dueDate: null,
     },
   });
   const watchedPaid = watch("paid");
+  const watchedMethod = watch("paymentMethod");
   const watchedSupplier = watch("supplier");
 
   /* ------------------------------ Positionen ------------------------------ */
@@ -88,6 +92,12 @@ export default function PurchaseDocumentEdit() {
     queryFn: () => api.get(`/purchase-documents/${id}`).then((res) => res.data),
     enabled: !!id,
   });
+  // Auslage ist bereits aufs Kundenkonto gebucht → Betrag, Zahlungsart und Kunde gesperrt,
+  // bis der Beleg auf „offen" gesetzt wird (das bucht die Gutschrift zurück).
+  const credited = !!(documentData?.paid && documentData?.paymentMethod === "ACCOUNT" && documentData?.reimbursedCustomerId);
+  // Altbestand: vor der Auslage-Funktion als „Kundenkonto" bezahlt, ohne Kunde und ohne Gutschrift
+  const legacyAccount = !!(documentData?.paid && documentData?.paymentMethod === "ACCOUNT" && !documentData?.reimbursedCustomerId);
+  const lockMoney = credited && watchedPaid;
 
   // inkl. inaktive Artikel, damit bestehende Positionen inaktiver Artikel sichtbar bleiben
   const { allArticles, isLoading: isLoadingArticles } = useArticles({ activeOnly: false });
@@ -124,6 +134,7 @@ export default function PurchaseDocumentEdit() {
       totalAmount: documentData.totalAmount || "",
       paid: documentData.paid || false,
       paymentMethod: documentData.paymentMethod || "TRANSFER",
+      reimbursedCustomerId: documentData.reimbursedCustomerId || "",
       dueDate: documentData.dueDate ? new Date(documentData.dueDate) : null,
     });
 
@@ -155,6 +166,16 @@ export default function PurchaseDocumentEdit() {
   });
 
   const onSubmit = (data) => {
+    const isAuslage = documentData?.type === "RECHNUNG" && data.paid && data.paymentMethod === "ACCOUNT";
+    if (isAuslage && !credited && !data.reimbursedCustomerId && !legacyAccount) {
+      setFormError("Bitte wählen, wer die Rechnung ausgelegt hat.");
+      return;
+    }
+    if (isAuslage && !credited && data.reimbursedCustomerId && !(Number(data.totalAmount) > 0)) {
+      setFormError("Für eine Auslage muss der Gesamtbetrag größer als 0 sein.");
+      return;
+    }
+    setFormError(null);
     const formData = new FormData();
     formData.append("documentDate", data.documentDate.toISOString());
     formData.append("supplier", data.supplier);
@@ -164,6 +185,7 @@ export default function PurchaseDocumentEdit() {
       formData.append("totalAmount", data.totalAmount || "0");
       formData.append("paid", data.paid);
       if (data.paid) formData.append("paymentMethod", data.paymentMethod);
+      if (isAuslage && !credited && data.reimbursedCustomerId) formData.append("reimbursedCustomerId", data.reimbursedCustomerId);
       if (data.dueDate) formData.append("dueDate", data.dueDate.toISOString());
     }
 
@@ -188,7 +210,7 @@ export default function PurchaseDocumentEdit() {
     if (toUnlink.length) promises.push(unlinkMutation.mutateAsync(toUnlink));
 
     Promise.all(promises).finally(() => {
-      invalidate(queryClient, "purchases", "stock", "finance");
+      invalidate(queryClient, "purchases", "stock", "finance", "customers");
       navigate("/purchases");
     });
   };
@@ -213,6 +235,7 @@ export default function PurchaseDocumentEdit() {
   const sidebar = (
     <Paper elevation={1} sx={{ height: "100%", overflowY: "auto", p: { xs: 2, md: 2.5 }, borderRadius: 2 }}>
       <Stack spacing={2.5}>
+        {formError && <Alert severity="warning" onClose={() => setFormError(null)}>{formError}</Alert>}
         {mutation.isError && (
           <Alert severity="error">
             Fehler: {mutation.error?.response?.data?.error || mutation.error?.message}
@@ -265,17 +288,35 @@ export default function PurchaseDocumentEdit() {
         {documentData?.type === "RECHNUNG" && (
           <>
             <Controller name="totalAmount" control={control} rules={{ required: "Betrag ist erforderlich", min: { value: 0, message: "Betrag muss positiv sein" } }} render={({ field, fieldState }) => (
-              <TextField {...field} label="Betrag" type="number" size="small" fullWidth error={!!fieldState.error} helperText={fieldState.error?.message} InputProps={{ endAdornment: <InputAdornment position="end">€</InputAdornment>, inputProps: { step: "0.01" } }} />
+              <TextField {...field} label="Betrag" type="number" size="small" fullWidth disabled={lockMoney} error={!!fieldState.error} helperText={fieldState.error?.message} InputProps={{ endAdornment: <InputAdornment position="end">€</InputAdornment>, inputProps: { step: "0.01" } }} />
             )} />
             <Controller name="paid" control={control} render={({ field }) => <FormControlLabel control={<Switch {...field} checked={!!field.value} color="success" />} label="Bereits bezahlt" />} />
             {watchedPaid && (
               <Controller name="paymentMethod" control={control} render={({ field }) => (
-                <TextField {...field} label="Zahlungsart" select size="small" fullWidth>
-                  <MenuItem value="CASH">Bar</MenuItem>
-                  <MenuItem value="TRANSFER">Überweisung</MenuItem>
-                  <MenuItem value="ACCOUNT">Kundenkonto</MenuItem>
+                <TextField {...field} label="Zahlungsart" select size="small" fullWidth disabled={lockMoney}>
+                  {Object.entries(PAYMENT_METHOD_LABELS).map(([v, label]) => (
+                    <MenuItem key={v} value={v}>{label}</MenuItem>
+                  ))}
                 </TextField>
               )} />
+            )}
+            {watchedPaid && watchedMethod === "ACCOUNT" && (
+              <Controller name="reimbursedCustomerId" control={control} render={({ field }) => (
+                <ReimbursementCustomerField
+                  value={field.value}
+                  onChange={field.onChange}
+                  disabled={lockMoney}
+                  helperText={legacyAccount && !field.value ? "Älterer Beleg ohne Gutschrift – Kunde wählen, um den Betrag jetzt gutzuschreiben." : undefined}
+                />
+              )} />
+            )}
+            {lockMoney && (
+              <Alert severity="info">
+                {documentData.totalAmount != null ? `${Number(documentData.totalAmount).toFixed(2).replace(".", ",")} € ` : ""}
+                sind {documentData.reimbursedCustomer?.name ? `${documentData.reimbursedCustomer.name} ` : "dem Kunden "}
+                gutgeschrieben. Betrag, Zahlungsart und Kunde lassen sich erst ändern, wenn der Beleg auf „offen" gesetzt wird
+                (dabei wird die Gutschrift zurückgebucht).
+              </Alert>
             )}
           </>
         )}

@@ -612,7 +612,11 @@ const Sales = () => {
             <List sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               {historyData.map(t => {
                 const isTopUp = t.type === 'TOPUP';
-                const isPositive = isTopUp;
+                const isAuslage = t.method === 'REIMBURSEMENT';
+                // Gegenbuchungen (Storno einer Aufladung/Auslage) sind negative TopUps
+                const isPositive = isTopUp && Number(t.amount) >= 0;
+                // Auslagen werden nur über die Lieferantenrechnung zurückgebucht, Gegenbuchungen nicht erneut storniert
+                const canCancel = !t.cancelled && !isAuslage && !(isTopUp && Number(t.amount) < 0);
                 return (
                   <Card key={t.id} elevation={0} sx={{
                     border: '1px solid', borderColor: 'divider',
@@ -632,7 +636,7 @@ const Sales = () => {
 
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="body1" fontWeight={700} noWrap sx={{ textDecoration: t.cancelled ? 'line-through' : 'none' }}>
-                          {isTopUp ? 'Guthaben' : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}
+                          {isAuslage ? (t.reference || 'Auslage') : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}
                         </Typography>
 
                         {/* Sold Items List */}
@@ -666,7 +670,7 @@ const Sales = () => {
                         <Typography variant="h6" fontWeight={800} color={t.cancelled ? 'text.disabled' : (isPositive ? 'success.main' : 'error.main')} sx={{ textDecoration: t.cancelled ? 'line-through' : 'none' }}>
                           {isPositive ? '+' : '-'} {money(Math.abs(t.cancelled && t.originalAmount ? t.originalAmount : t.amount))}
                         </Typography>
-                        {!t.cancelled && (
+                        {canCancel && (
                           <Button
                             variant="outlined"
                             color="error"
