@@ -40,6 +40,9 @@ export const API_ENDPOINTS = {
   // Cash Movements
   CASH_MOVEMENTS: '/cash-movements',
   CASH_MOVEMENTS_BANK_ACCOUNTS: '/cash-movements/bank-accounts',
+
+  // Customer Groups
+  CUSTOMER_GROUPS: '/customer-groups',
 };
 
 export { API_BASE_URL, WS_URL };

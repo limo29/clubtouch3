@@ -81,6 +81,13 @@ function emitHighscoreUpdate(data) {
   }
 }
 
+// Clubscore-Anzeigeeinstellung (gilt für alle Bildschirme)
+function emitHighscoreDisplay(display) {
+  if (io) {
+    io.to('highscore').emit('highscore:display', display);
+  }
+}
+
 // Neuer Verkauf Event
 function emitNewSale(transaction) {
   if (io) {
@@ -98,5 +105,6 @@ module.exports = {
   initializeWebSocket,
   getIO,
   emitHighscoreUpdate,
+  emitHighscoreDisplay,
   emitNewSale
 };

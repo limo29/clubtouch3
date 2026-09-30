@@ -22,13 +22,13 @@ class CustomerController {
   // Liste alle Kunden
   async listCustomers(req, res) {
     try {
-      const { search } = req.query;
-      const customers = await customerService.listCustomers(search);
+      const { search, groupId } = req.query;
+      const customers = await customerService.listCustomers(search, groupId || null);
       const role = req.user?.role;
 
       res.json({
-        customers: customers.map(c => stripContact(c, role)),
-        count: customers.length
+        customers: customers.map((c) => stripContact(c, role)),
+        count: customers.length,
       });
     } catch (error) {
       console.error('List customers error:', error);
@@ -71,19 +71,22 @@ class CustomerController {
           action: 'CREATE_CUSTOMER',
           entityType: 'Customer',
           entityId: customer.id,
-          changes: req.body
-        }
+          changes: req.body,
+        },
       });
 
       res.status(201).json({
         message: 'Kunde erfolgreich erstellt',
-        customer: stripContact(customer, role)
+        customer: stripContact(customer, role),
       });
     } catch (error) {
       console.error('Create customer error:', error);
 
       if (error.message.includes('existiert bereits')) {
         return res.status(400).json({ error: error.message });
+      }
+      if (error.userError) {
+        return res.status(error.status || 400).json({ error: error.message });
       }
 
       res.status(500).json({ error: 'Fehler beim Erstellen des Kunden' });
@@ -110,19 +113,22 @@ class CustomerController {
           action: 'UPDATE_CUSTOMER',
           entityType: 'Customer',
           entityId: id,
-          changes: req.body
-        }
+          changes: req.body,
+        },
       });
 
       res.json({
         message: 'Kunde erfolgreich aktualisiert',
-        customer: stripContact(customer, role)
+        customer: stripContact(customer, role),
       });
     } catch (error) {
       console.error('Update customer error:', error);
 
       if (error.message.includes('existiert bereits')) {
         return res.status(400).json({ error: error.message });
+      }
+      if (error.userError) {
+        return res.status(error.status || 400).json({ error: error.message });
       }
 
       res.status(500).json({ error: 'Fehler beim Aktualisieren des Kunden' });
@@ -148,15 +154,15 @@ class CustomerController {
             amount,
             method,
             reference,
-            newBalance: result.customer.balance
-          }
-        }
+            newBalance: result.customer.balance,
+          },
+        },
       });
 
       res.json({
         message: 'Guthaben erfolgreich aufgeladen',
         topUp: result.topUp,
-        customer: stripContact(result.customer, req.user?.role)
+        customer: stripContact(result.customer, req.user?.role),
       });
     } catch (error) {
       console.error('Top up account error:', error);
@@ -190,7 +196,9 @@ class CustomerController {
       // Default: letzte 30 Tage bis jetzt. "Bis"-Tag inklusive, 'YYYY-MM-DD' lokal.
       const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
       const end = endDate ? endOfLocalDay(endDate) : new Date();
-      const start = startDate ? parseLocalDate(startDate) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const start = startDate
+        ? parseLocalDate(startDate)
+        : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       const statement = await customerService.getAccountStatement(id, start, end);
 
@@ -210,7 +218,7 @@ class CustomerController {
       res.json({
         customers,
         count: customers.length,
-        threshold
+        threshold,
       });
     } catch (error) {
       console.error('Get low balance customers error:', error);
@@ -244,8 +252,8 @@ class CustomerController {
           action: 'REVERSE_TOPUP',
           entityType: 'AccountTopUp',
           entityId: topUpId,
-          changes: { reversalId: reversal.id }
-        }
+          changes: { reversalId: reversal.id },
+        },
       });
 
       res.json({ message: 'Aufladung erfolgreich storniert', reversal });

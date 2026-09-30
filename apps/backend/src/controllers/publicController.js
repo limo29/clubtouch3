@@ -1,38 +1,26 @@
 const prisma = require('../utils/prisma');
-const highscoreController = require('./highscoreController'); // Reuse logic if possible, or replicate simplified
+const highscoreController = require('./highscoreController');
 
 class PublicController {
-    // Public Highscore (Simplified, JSON only)
-    async getHighscore(req, res) {
-        // Reuse the existing highscore logic but maybe cache it or strip sensitive data if any
-        // For now, we can just proxy to the existing controller method if it doesn't require auth in the function itself
-        // But highscoreController methods usually take (req, res).
-        // Let's call the existing controller's logic or duplicate the safe parts.
-        // Looking at highscoreController (I haven't seen it yet, but I saw the route uses it).
-        // I'll assume I can just call the logic or use the same service.
-        // For safety, let's implement a clean read here.
-
-        try {
-            // We can actually just use the same logic as the main highscore
-            // but we need to make sure we don't expose anything we shouldn't.
-            // The existing highscore seems public-safe (names, scores).
-            return highscoreController.getHighscore(req, res);
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: 'Fehler beim Laden des Highscores' });
-        }
+    // Clubscore: dieselben Handler wie /api/highscore (dort mit Fehlerbehandlung)
+    getHighscore(req, res) {
+        return highscoreController.getHighscore(req, res);
     }
 
-    async getAllHighscores(req, res) {
+    getAllHighscores(req, res) {
         return highscoreController.getAllHighscores(req, res);
     }
 
-    async getGoalsProgress(req, res) {
+    getGoalsProgress(req, res) {
         return highscoreController.getGoalsProgress(req, res);
     }
 
-    // Fruehere Jahreswertungen, nur Platz 1-3 (Public-Display)
-    async getArchive(req, res) {
+    getHighscoreDisplay(req, res) {
+        return highscoreController.getDisplay(req, res);
+    }
+
+    // Frühere Jahreswertungen, nur Platz 1-3 (Public-Display)
+    getArchive(req, res) {
         return highscoreController.getPublicArchive(req, res);
     }
 

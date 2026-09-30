@@ -4,7 +4,7 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
-const { UPLOADS_DIR, fromPublicUrl } = require('../utils/uploadsDir');
+const { UPLOADS_DIR, toPublicUrl, fromPublicUrl } = require('../utils/uploadsDir');
 
 class FileUploadService {
   constructor() {
@@ -23,6 +23,8 @@ class FileUploadService {
       path.join(this.uploadDir, 'articles', 'small'),
       path.join(this.uploadDir, 'articles', 'medium'),
       path.join(this.uploadDir, 'articles', 'large'),
+      // Gruppen
+      path.join(this.uploadDir, 'groups'),
     ];
 
     for (const dir of dirs) {
@@ -80,6 +82,18 @@ class FileUploadService {
     },
   });
 
+  // -------- Gruppenbilder (im Speicher, dann sharp -> Disk) --------
+  groupImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    fileFilter: (req, file, cb) => {
+      const allowed = /jpeg|jpg|png|webp/;
+      const extOk = allowed.test(path.extname(file.originalname).toLowerCase());
+      const mimeOk = allowed.test(file.mimetype);
+      return (extOk && mimeOk) ? cb(null, true) : cb(new Error('Nur JPEG, PNG und WebP Bilder sind erlaubt'));
+    },
+  });
+
   // Artikelbilder verarbeiten (original + 4 Größen) -> absolute URLs zurückgeben
   async processArticleImage(file) {
     const filename = `${uuidv4()}.webp`;
@@ -124,6 +138,39 @@ class FileUploadService {
         if (err && err.code !== 'ENOENT') {
           console.error('Error deleting image:', imagePath, err.message);
         }
+      }
+    }
+  }
+
+  // -------- Gruppenbilder verarbeiten: 256×256 cover → WebP --------
+
+  /**
+   * Bild in groups/<uuid>.webp als 256×256 WebP speichern.
+   * @param {Express.Multer.File} file - multer file mit buffer
+   * @returns {Promise<string>} - öffentliche URL "/uploads/groups/<uuid>.webp"
+   */
+  async processGroupImage(file) {
+    const filename = `${uuidv4()}.webp`;
+    const outPath = path.join(this.uploadDir, 'groups', filename);
+    await sharp(file.buffer)
+      .resize(256, 256, { fit: 'cover', position: 'center' })
+      .webp({ quality: 85 })
+      .toFile(outPath);
+    return toPublicUrl(outPath);
+  }
+
+  /**
+   * Gruppenbild löschen.
+   * @param {string} imageUrl - öffentliche URL "/uploads/groups/…"
+   */
+  async deleteGroupImage(imageUrl) {
+    if (!imageUrl) return;
+    try {
+      const fsPath = fromPublicUrl(imageUrl);
+      await fs.unlink(fsPath);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        console.error('Error deleting group image:', imageUrl, err.message);
       }
     }
   }

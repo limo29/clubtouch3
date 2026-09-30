@@ -1,526 +1,232 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Box, Card, CardContent, Chip, IconButton, Stack,
-  Typography, alpha, GlobalStyles, Button,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Autocomplete, Grid, Tooltip, Switch, FormControlLabel, CssBaseline,
-  Snackbar, Alert, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Divider
+  Alert, Box, Button, CircularProgress, IconButton, Snackbar, Stack, ToggleButton, ToggleButtonGroup, Tooltip,
+  Typography, useMediaQuery, useTheme,
 } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import HistoryIcon from '@mui/icons-material/History';
-import TrophyIcon from '@mui/icons-material/EmojiEvents';
+import FlagIcon from '@mui/icons-material/Flag';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-import FlagIcon from '@mui/icons-material/Flag';
-import CloseIcon from '@mui/icons-material/Close';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useAuth } from '../context/AuthContext';
-
 import api from '../services/api';
-import { API_ENDPOINTS } from '../config/api';
-import Podium from '../components/common/Podium';
+import useHighscoreLogic, { HS_DISPLAY_PUT_URL } from '../hooks/useHighscoreLogic';
+import useClubscoreEvents from '../hooks/useClubscoreEvents';
+import useFullscreen from '../hooks/useFullscreen';
+import { useNow, useRankChanges } from '../components/highscore/useRankChanges';
+import useRotatingView from '../components/highscore/useRotatingView';
+import Board from '../components/highscore/Board';
+import TeamBoard from '../components/highscore/TeamBoard';
+import GoalsSection from '../components/highscore/GoalsSection';
+import GoalOverlay from '../components/highscore/GoalOverlay';
+import Ticker from '../components/highscore/Ticker';
+import StatusBar from '../components/highscore/StatusBar';
+import RotateProgress from '../components/highscore/RotateProgress';
+import DisplayMenu from '../components/highscore/DisplayMenu';
+import DisplaySettingsDialog from '../components/highscore/DisplaySettingsDialog';
+import GoalsDialog, { goalsApiError } from '../components/highscore/GoalsDialog';
+import ArchiveDialog from '../components/highscore/ArchiveDialog';
+import ResetYearDialog from '../components/highscore/ResetYearDialog';
+import { buildTickerItems } from '../components/highscore/tickerItems';
+import { VIEW_LABELS, dateDE, timeHM } from '../components/highscore/format';
 
-import GoalOverlay from '../components/common/GoalOverlay';
-import GoalBar from '../components/common/GoalBar';
-import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
+const DAY_EMPTY = 'Heute noch keine Wertung – der erste Kauf zählt!';
+const YEAR_EMPTY = 'In diesem Jahr noch keine Wertung – der erste Kauf zählt!';
+const TEAM_EMPTY = 'Noch keine Team-Wertung – Kunden einem Team zuordnen und los geht’s!';
+// über AppBar (1100) und Drawer (1200), unter Dialogen/Menüs (1300)
+const FULLSCREEN_Z = 1210;
 
-/* ---------- Helpers ---------- */
-const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
-const dateDE = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
-const periodLabel = (a) => `${dateDE(a.periodStart)} – ${dateDE(a.periodEnd)}`;
-const MEDALS = ['🥇', '🥈', '🥉'];
-const RESET_WORD = 'RESET';
-const TOOLBAR_HIDE_MS = 3000; // im Vollbild: Leiste nach 3 s ohne Mausbewegung ausblenden
-
-const useLocalBool = (key, initial) => {
-  const [val, setVal] = useState(() => {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return initial;
-    return raw === 'true';
-  });
-  useEffect(() => localStorage.setItem(key, String(val)), [key, val]);
-  return [val, setVal];
-};
-
-/* ---------- Components ---------- */
-
-function GridList({ items, renderItem }) {
-  const splitIndex = 9;
-  const col1 = items.slice(0, splitIndex);
-  const col2 = items.slice(splitIndex);
-
-  return (
-    <Box sx={{
-      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, height: '100%',
-    }}>
-      <Stack spacing={0} sx={{ height: '100%' }}>{col1.map(renderItem)}</Stack>
-      <Stack spacing={0} sx={{ height: '100%' }}>{col2.map(renderItem)}</Stack>
-    </Box>
-  )
-}
-
+/** Interner Clubscore (/highscore): Live-Wertungen, Ziele, Anzeige-Steuerung für alle Bildschirme. */
 export default function Highscore() {
-  // USE THE HOOK
-  const {
-    boards, goalProgress, loading, live, startDate,
-    overlay, setOverlay, refresh
-  } = useHighscoreLogic();
+  const theme = useTheme();
+  const isXs = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
+  const queryClient = useQueryClient();
+  const { user, isAdmin } = useAuth();
+  const canEdit = ['ADMIN', 'CASHIER'].includes(user?.role);
 
-  const navigate = useNavigate();
-  const { isAdmin } = useAuth();
-  const [autoRotate] = useLocalBool('hs_autoRotate', true);
-  const [mode, setMode] = useState('AMOUNT');
-  const [allArticles, setAllArticles] = useState([]);
+  const hs = useHighscoreLogic();
+  const { data, display, setDisplay } = hs;
+  const marks = useRankChanges(data);
+  const now = useNow(15000);
+  const { view, rotating, cycle, seconds } = useRotatingView(display);
+  const { overlay, dismissOverlay, tickerEvents } = useClubscoreEvents(data.events, {
+    dayStart: data.period?.dayStart,
+    enabled: !hs.loading && !!hs.lastUpdated,
+  });
 
-  // Goal Settings
-  const [goalsOpen, setGoalsOpen] = useState(false);
-  const [goalDraft, setGoalDraft] = useState([]);
-  const [movingTargetsDraft, setMovingTargetsDraft] = useState(false);
+  const [dialog, setDialog] = useState(null); // 'goals' | 'display' | 'archive' | 'reset'
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [snack, setSnack] = useState(null);
+  const fs = useFullscreen({ hold: menuOpen || !!dialog });
 
-  // Jahres-Reset (nur Admin)
-  const [resetOpen, setResetOpen] = useState(false);
-  const [resetWord, setResetWord] = useState('');
-  const [resetBusy, setResetBusy] = useState(false);
-  const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
-  const yearlyStart = boards.yearly?.amount?.startDate ? new Date(boards.yearly.amount.startDate) : null;
-  const yearlyIsReset = !!yearlyStart && (yearlyStart.getMonth() !== 0 || yearlyStart.getDate() !== 1 || yearlyStart.getHours() !== 0);
-  const yearlyLabel = yearlyStart ? `seit ${dateDE(yearlyStart)}` : '';
-  const yearlyEntries = boards.yearly?.amount?.entries || [];
+  const { data: archive = [] } = useQuery({
+    queryKey: ['clubscore-archive'],
+    queryFn: async () => (await api.get('/highscore/archive')).data?.archive || [],
+    staleTime: 10 * 60 * 1000,
+  });
 
-  // Archiv: jeder Jahres-Reset friert den Stand davor ein (AuditLog) → "Frühere Jahreswertungen"
-  const [archive, setArchive] = useState([]);
-  const loadArchive = React.useCallback(() => {
-    api.get(API_ENDPOINTS.HIGHSCORE_ARCHIVE).then(r => setArchive(r.data?.archive || [])).catch(() => setArchive([]));
-  }, []);
-  useEffect(() => { loadArchive(); }, [loadArchive]);
-
-  const doReset = async () => {
-    if (resetWord.trim().toUpperCase() !== RESET_WORD) return;
-    setResetBusy(true);
-    try {
-      const r = await api.post(API_ENDPOINTS.HIGHSCORE_RESET, { type: 'YEARLY' });
-      const n = Number(r.data?.archivedEntries || 0);
-      setSnack({ open: true, severity: 'success', msg: `Jahres-Clubscore zurückgesetzt (${n} ${n === 1 ? 'Eintrag' : 'Einträge'} archiviert). Die Wertung zählt ab jetzt neu.` });
-      setResetOpen(false);
-      setResetWord('');
-      refresh();
-      loadArchive();
-    } catch (e) {
-      setSnack({ open: true, severity: 'error', msg: e.response?.data?.error || 'Zurücksetzen fehlgeschlagen' });
-    } finally {
-      setResetBusy(false);
-    }
-  };
-
-  const [isFull, setIsFull] = useState(!!document.fullscreenElement);
-  const toggleFull = async () => { try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch { } };
-
-  useEffect(() => {
-    const onChange = () => setIsFull(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
-
-  // Vollbild ersetzt den früheren gesperrten Anzeigemodus: Leiste blendet sich aus und kommt bei Mausbewegung/Tipp zurück.
-  const [toolbarVisible, setToolbarVisible] = useState(true);
-  const hideTimer = useRef(null);
-  useEffect(() => {
-    if (!isFull) { setToolbarVisible(true); return undefined; }
-    const arm = () => {
-      setToolbarVisible(true);
-      clearTimeout(hideTimer.current);
-      hideTimer.current = setTimeout(() => setToolbarVisible(false), TOOLBAR_HIDE_MS);
-    };
-    arm();
-    window.addEventListener('mousemove', arm);
-    window.addEventListener('touchstart', arm, { passive: true });
-    return () => {
-      clearTimeout(hideTimer.current);
-      window.removeEventListener('mousemove', arm);
-      window.removeEventListener('touchstart', arm);
-    };
-  }, [isFull]);
-
-  // Fetch Articles for Config Dialog (only once)
-  useEffect(() => {
-    api.get('/articles?includeInactive=true').then(r => setAllArticles(r.data.articles || [])).catch(() => { });
-  }, []);
-
-  // Sync Draft when opening dialog
-  useEffect(() => {
-    if (goalsOpen && goalProgress.meta) {
-      // Only if we have data, we init format
-      const serverCfg = goalProgress.meta.goalsConfig || [];
-      setGoalDraft(serverCfg.length ? serverCfg.map(g => ({ ...g, enabled: true })) : [{ enabled: true, articleId: '', label: '', targetUnits: 0 }]);
-      setMovingTargetsDraft(goalProgress.meta.movingTargets || false);
-    }
-  }, [goalsOpen, goalProgress.meta]);
-
-  // Auto-rotate mode
-  useEffect(() => {
-    if (!autoRotate) return;
-    const t = setInterval(() => setMode(p => p === 'AMOUNT' ? 'COUNT' : 'AMOUNT'), 15000);
-    return () => clearInterval(t);
-  }, [autoRotate]);
-
-  const saveGoals = async () => {
-    const payload = goalDraft.filter(g => g.articleId && g.targetUnits > 0).map(g => ({ articleId: g.articleId, targetUnits: Number(g.targetUnits), label: g.label || '' })).slice(0, 4);
-    await api.post(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS, { goals: payload, movingTargets: movingTargetsDraft });
-    refresh(); // Use hook's refresh
-    setGoalsOpen(false);
-  };
-
-  const RankRow = ({ entry }) => (
-    <Stack direction="row" alignItems="center" justifyContent="space-between"
-      sx={{
-        py: 1, px: 2,
-        borderBottom: '1px solid', borderColor: 'divider',
-        transition: 'background-color 0.2s',
-        flexGrow: 0,
-        '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
-      }}
-    >
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 0 }}>
-        <Box sx={{
-          width: 28, height: 28,
-          borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.05)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 800, fontSize: '0.9rem', color: 'text.secondary'
-        }}>
-          {entry.rank}
-        </Box>
-        <Typography noWrap sx={{ fontWeight: 600, fontSize: '1rem' }}>{entry.customerNickname || entry.customerName}</Typography>
-      </Stack>
-      <Typography sx={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', fontSize: '1.1rem' }} color="primary">
-        {mode === 'AMOUNT' ? money(entry.score) : `${entry.score}`}
-      </Typography>
-    </Stack>
+  const tickerItems = useMemo(
+    () => buildTickerItems(data, tickerEvents, { lastArchive: archive[0] }),
+    [data, tickerEvents, archive]
   );
 
-  const Board = ({ title, subtitle, data, icon }) => (
-    <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', overflow: 'hidden' }}>
-      <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-          <Box sx={{ p: 1, borderRadius: 2, bgcolor: alpha('#fff', 0.05), color: 'primary.main' }}>
-            {icon}
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="h6" fontWeight={800} noWrap>{title}</Typography>
-            <Typography variant="caption" color="text.secondary">Top 20 • {mode === 'AMOUNT' ? 'Umsatz' : 'Anzahl'}{subtitle ? ` • ${subtitle}` : ''}</Typography>
-          </Box>
-        </Stack>
+  const saveDisplay = useMutation({
+    mutationFn: async (next) => (await api.put(HS_DISPLAY_PUT_URL, next)).data,
+    onMutate: (next) => {
+      const prev = display;
+      setDisplay(next);
+      return { prev };
+    },
+    onError: (err, _next, ctx) => {
+      if (ctx?.prev) setDisplay(ctx.prev);
+      setSnack({ severity: 'error', msg: goalsApiError(err, 'Anzeige konnte nicht gespeichert werden.') });
+    },
+    onSuccess: (res) => {
+      if (res && typeof res === 'object' && res.view) setDisplay((d) => ({ ...d, ...res }));
+    },
+  });
 
-        <Box sx={{ mb: 2, flexShrink: 0 }}>
-          <Podium entries={(data?.entries || []).slice(0, 3)} mode={mode} moneyFormatter={money} />
-        </Box>
+  const closeDialog = useCallback(() => setDialog(null), []);
 
-        <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}>
-          <GridList
-            items={(data?.entries || []).slice(3, 20)}
-            renderItem={(e, i) => <RankRow key={e.customerId || i} entry={e} />}
-          />
-        </Box>
-      </CardContent>
-    </Card>
-  );
-
-  const handleMilestone = (goal, level) => {
-    const target = Math.max(1, Number(goal.targetUnits));
-    const total = target * (level);
-    setOverlay({
-      active: true,
-      type: 'GOAL',
-      message: `Ziel erreicht! ${goal.label}: ${total} ${goal.purchaseUnit || 'Stk'}!`
-    });
+  const onViewChange = (_, v) => {
+    if (!v || !canEdit || v === display.view) return;
+    saveDisplay.mutate({ ...display, view: v });
   };
 
-  if (loading && !goalProgress.goals.length) return (
-    <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <Typography>Lade Highscore...</Typography>
-    </Box>
+  const period = data.period || {};
+  const mode = view === 'count' ? 'COUNT' : 'AMOUNT';
+  const boardKinds = display.board === 'day' ? ['day'] : display.board === 'year' ? ['year'] : ['day', 'year'];
+  const fill = isMdUp;
+  const single = boardKinds.length === 1;
+
+  const renderBoard = (kind) => {
+    const isDay = kind === 'day';
+    const title = isDay ? 'Tageswertung' : 'Jahreswertung';
+    const subtitle = isDay
+      ? `seit ${period.dayStart ? timeHM(period.dayStart) : '06:00'} Uhr`
+      : `seit ${period.yearStart ? dateDE(period.yearStart) : '01.01.'}${period.yearManualReset ? ' (zurückgesetzt)' : ''}`;
+    if (view === 'teams') {
+      const tb = isDay ? data.teams?.daily?.amount : data.teams?.yearly?.amount;
+      return (
+        <TeamBoard key={kind} title={`${title} · Teams`} subtitle={subtitle} board={tb} mode="AMOUNT"
+          fill={fill} emptyText={TEAM_EMPTY} />
+      );
+    }
+    const scope = isDay ? 'daily' : 'yearly';
+    const key = `${scope}.${view === 'count' ? 'count' : 'amount'}`;
+    return (
+      <Board key={kind} title={title} subtitle={subtitle} board={data[scope]?.[view === 'count' ? 'count' : 'amount']}
+        mode={mode} marks={marks} marksKey={key} now={now} fill={fill}
+        columns={single ? 3 : 2} podiumHeight={single ? 200 : 160} minRow={30} dense={fill} emptyText={isDay ? DAY_EMPTY : YEAR_EMPTY} />
+    );
+  };
+
+  const toolbarHidden = fs.isFull && !fs.controlsVisible;
+
+  const viewToggle = (
+    <ToggleButtonGroup exclusive size="small" value={display.view} onChange={onViewChange}
+      disabled={!canEdit || saveDisplay.isPending} aria-label="Ansicht für alle Bildschirme"
+      sx={{ flexShrink: 0, '& .MuiToggleButton-root': { px: { xs: 1.1, sm: 1.5 }, py: 0.5, textTransform: 'none', fontWeight: 700 } }}>
+      {['amount', 'count', 'teams', 'rotate'].map((v) => (
+        <ToggleButton key={v} value={v} aria-label={VIEW_LABELS[v]}>{VIEW_LABELS[v]}</ToggleButton>
+      ))}
+    </ToggleButtonGroup>
   );
 
   return (
-    <Box sx={{
-      // im Layout bleiben AppBar (64px) und unterer Innenabstand (16px) frei, sonst ist der Fuß abgeschnitten
-      height: isFull ? '100vh' : 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column',
-      bgcolor: 'background.default', color: 'text.primary',
-      overflow: 'hidden',
-      ...(isFull && {
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999
-      })
-    }}>
-      <CssBaseline />
-      <GlobalStyles styles={{ body: { overflow: 'hidden' } }} />
+    <Box sx={fs.isFull
+      ? { position: 'fixed', inset: 0, zIndex: FULLSCREEN_Z, bgcolor: 'background.default', p: 2, display: 'flex', flexDirection: 'column', gap: 1.5, overflow: 'auto' }
+      : { display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, height: isMdUp ? 'calc(100dvh - 80px)' : 'auto' }}>
 
-      <GoalOverlay
-        trigger={overlay.active}
-        type={overlay.type}
-        message={overlay.message}
-        onComplete={() => setOverlay({ ...overlay, active: false })}
-      />
-
-      {/* Toolbar: normal im Fluss; im Vollbild als Overlay, das sich nach kurzer Zeit ausblendet */}
-      {(!isFull || toolbarVisible) && (
-        <Box sx={{
-          p: 1.5, borderBottom: '1px solid', borderColor: 'divider',
-          bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 }, flexWrap: 'wrap',
-          ...(isFull && { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, opacity: 0.96 })
-        }}>
-          <Button startIcon={<CloseIcon />} onClick={() => navigate('/dashboard')}>
-            Dashboard
-          </Button>
-          <Box sx={{ flex: 1 }} />
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Chip
-              icon={<Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: live ? '#00e676' : 'error.main' }} />}
-              label={live ? "LIVE" : "OFFLINE"}
-              variant="outlined" size="small"
-            />
-            <Tooltip title="Tages-Challenge: Geschäftstag ab 06:00 Uhr">
-              <Chip label={`Tag: ${startDate ? startDate.toLocaleDateString('de-DE') : 'Heute'}`} size="small" />
-            </Tooltip>
-            {yearlyStart && (
-              <Tooltip title={yearlyIsReset ? 'Jahreswertung wurde manuell zurückgesetzt' : 'Jahreswertung seit Jahresbeginn'}>
-                <Chip label={`Jahr: ${yearlyLabel}`} size="small" color={yearlyIsReset ? 'warning' : 'default'} variant="outlined" />
+      {/* Leiste */}
+      <Box sx={{ flexShrink: 0, opacity: toolbarHidden ? 0 : 1, transition: 'opacity 0.4s', pointerEvents: toolbarHidden ? 'none' : 'auto' }}>
+        <Stack direction="row" alignItems="center" sx={{ flexWrap: 'wrap', columnGap: 1.5, rowGap: 1 }}>
+          <Box sx={{ flex: '1 1 160px', minWidth: 0 }}>
+            <StatusBar status={hs.status} offlineSince={hs.offlineSince} lastUpdated={hs.lastUpdated} period={period} />
+          </Box>
+          <Box sx={{ order: { xs: 3, md: 0 }, width: { xs: '100%', md: 'auto' }, display: 'flex', justifyContent: { xs: 'center', md: 'flex-start' } }}>
+            {canEdit ? viewToggle : (
+              <Tooltip title="Nur Admin und Kasse können die Ansicht ändern">
+                <span>{viewToggle}</span>
               </Tooltip>
             )}
+          </Box>
+          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexShrink: 0 }}>
+            {canEdit && (isXs ? (
+              <Tooltip title="Ziele">
+                <IconButton onClick={() => setDialog('goals')} aria-label="Ziele"><FlagIcon /></IconButton>
+              </Tooltip>
+            ) : (
+              <Button variant="outlined" size="small" startIcon={<FlagIcon />} onClick={() => setDialog('goals')}>Ziele</Button>
+            ))}
+            {fs.supported && (
+              <Tooltip title={fs.isFull ? 'Vollbild beenden' : 'Vollbild'}>
+                <IconButton onClick={fs.toggle} aria-label={fs.isFull ? 'Vollbild beenden' : 'Vollbild'}>
+                  {fs.isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                </IconButton>
+              </Tooltip>
+            )}
+            <DisplayMenu canEditDisplay={canEdit} isAdmin={isAdmin} onOpenChange={setMenuOpen}
+              onDisplay={() => setDialog('display')} onArchive={() => setDialog('archive')} onReset={() => setDialog('reset')} />
           </Stack>
-          <Button
-            variant={goalProgress.goals.length ? 'contained' : 'outlined'}
-            onClick={() => setGoalsOpen(true)}
-            startIcon={<FlagIcon />}
-          >
-            Ziele
-          </Button>
-          <Tooltip title="Auto-Rotate">
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="caption">Auto-Rotate</Typography>
-            </Box>
-          </Tooltip>
-          <Tooltip title={isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
-            <IconButton onClick={toggleFull} aria-label={isFull ? 'Vollbild verlassen' : 'Vollbild'}>
-              {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </IconButton>
-          </Tooltip>
-          {isAdmin && (
-            <Tooltip title="Jahres-Clubscore zurücksetzen (nur Admin)">
-              <Button color="warning" variant="outlined" size="small" startIcon={<RestartAltIcon />} onClick={() => { setResetWord(''); setResetOpen(true); }}>
-                Jahr zurücksetzen
-              </Button>
-            </Tooltip>
-          )}
+        </Stack>
+        <Box sx={{ mt: 1 }}>
+          <RotateProgress active={rotating} cycle={cycle} seconds={seconds} />
         </Box>
-      )}
-
-      {/* Main Content */}
-      <Box sx={{ flex: 1, p: 2, overflow: { xs: 'auto', md: 'hidden' }, display: 'flex', flexDirection: 'column', gap: 2 }}>
-
-        {/* Top: Goals (if any) */}
-        {/* Top: Goals (if any) */}
-        {goalProgress.goals.filter(g => g.articleId).length > 0 && (
-          <Card variant="outlined" sx={{ flexShrink: 0, bgcolor: 'background.paper' }}>
-            <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-                <FlagIcon fontSize="small" color="primary" />
-                <Typography variant="subtitle1" fontWeight={700}>Tagesziele</Typography>
-              </Stack>
-              <Grid container spacing={4}>
-                {goalProgress.goals.filter(g => g.articleId).map((g, i, arr) => {
-                  const count = arr.length;
-                  // Dynamic sizing logic
-                  // 1: Full width
-                  // 2: Half width
-                  // 3: Third width
-                  // 4: Quarter width
-                  const mdSize = count === 1 ? 12 : count === 2 ? 6 : count === 3 ? 4 : 3;
-
-
-                  return (
-                    <Grid size={{ xs: 12, md: mdSize }} key={g.articleId || i}>
-                      <GoalBar
-                        goal={g}
-                        movingTargets={goalProgress.meta?.movingTargets}
-                        onMilestone={handleMilestone}
-                      />
-                    </Grid>
-                  );
-                })}
-              </Grid>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Bottom: Boards Split */}
-        {/* unter md scrollt die Seite und die Boards behalten ihre feste Höhe (sonst ragen sie über den Container hinaus) */}
-        <Box sx={{ flex: { xs: 'none', md: 1 }, minHeight: { xs: 'auto', md: 0 }, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
-          <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 520, md: 0 } }}>
-            <Board
-              title="Tages-Challenge"
-              subtitle="ab 06:00 Uhr"
-              icon={<TrophyIcon />}
-              data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count}
-            />
-          </Box>
-          <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 520, md: 0 } }}>
-            <Board
-              title="Jahres-Ranking"
-              subtitle={yearlyLabel}
-              icon={<TrophyIcon />}
-              data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
-            />
-          </Box>
-        </Box>
-
-        {/* Archiv früherer Jahreswertungen (nur wenn es Resets gab; im Vollbild ausgeblendet) */}
-        {archive.length > 0 && !isFull && (
-          <Accordion variant="outlined" disableGutters sx={{ flexShrink: 0, bgcolor: 'background.paper', '&:before': { display: 'none' } }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <HistoryIcon fontSize="small" color="primary" />
-                <Typography variant="subtitle1" fontWeight={700}>Frühere Jahreswertungen</Typography>
-                <Chip size="small" label={archive.length} />
-                {archive[0]?.amount?.entries?.[0] && (
-                  <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
-                    · zuletzt {periodLabel(archive[0])}: {archive[0].amount.entries[0].customerNickname || archive[0].amount.entries[0].customerName}
-                  </Typography>
-                )}
-              </Stack>
-            </AccordionSummary>
-            <AccordionDetails sx={{ pt: 0, maxHeight: { md: '40vh' }, overflowY: 'auto' }}>
-              <Stack divider={<Divider flexItem />} spacing={1.5}>
-                {archive.map((a) => {
-                  const top = (a.amount?.entries || []).slice(0, 3);
-                  const countWinner = a.count?.entries?.[0];
-                  return (
-                    <Box key={a.id}>
-                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.5, sm: 2 }} alignItems={{ sm: 'center' }} sx={{ mb: 0.5 }}>
-                        <Typography variant="subtitle2" fontWeight={700}>{periodLabel(a)}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          zurückgesetzt am {dateDE(a.resetAt)}{a.resetBy ? ` von ${a.resetBy}` : ''} · {a.entriesCount} {a.entriesCount === 1 ? 'Teilnehmer' : 'Teilnehmer'}
-                        </Typography>
-                      </Stack>
-                      {top.length === 0 ? (
-                        <Typography variant="body2" color="text.secondary">Keine Einträge in dieser Wertung.</Typography>
-                      ) : (
-                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 0.5, md: 3 }} flexWrap="wrap">
-                          {top.map((e, i) => (
-                            <Typography key={e.customerId || i} variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                              {MEDALS[i]} <strong>{e.customerNickname || e.customerName}</strong> · {money(e.score)}
-                            </Typography>
-                          ))}
-                          {countWinner && (
-                            <Typography variant="body2" color="text.secondary">
-                              Meiste Getränke: {countWinner.customerNickname || countWinner.customerName} ({countWinner.score})
-                            </Typography>
-                          )}
-                        </Stack>
-                      )}
-                    </Box>
-                  );
-                })}
-              </Stack>
-            </AccordionDetails>
-          </Accordion>
-        )}
       </Box>
 
-      {/* Dialog */}
-      <Dialog open={goalsOpen} onClose={() => setGoalsOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Tagesziele konfigurieren</DialogTitle>
-        <DialogContent>
-          <Stack spacing={3} sx={{ mt: 1 }}>
-            <Box sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 2 }}>
-              <FormControlLabel
-                control={<Switch checked={movingTargetsDraft} onChange={e => setMovingTargetsDraft(e.target.checked)} />}
-                label={<Box><Typography variant="subtitle2" fontWeight={700}>Dynamische Ziele (Moving Targets)</Typography><Typography variant="caption" color="text.secondary">Ziele wachsen automatisch mit (z.B. 24 &rarr; 48 &rarr; 72)</Typography></Box>}
-              />
-            </Box>
-            {goalDraft.map((g, idx) => (
-              <Stack key={idx} spacing={1} sx={{ p: 2, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-                <Stack direction="row" justifyContent="space-between">
-                  <Typography variant="subtitle2" fontWeight={700}>Ziel #{idx + 1}</Typography>
-                  <IconButton size="small" color="error" onClick={() => { const cp = [...goalDraft]; cp.splice(idx, 1); setGoalDraft(cp); }}><CloseIcon fontSize="small" /></IconButton>
-                </Stack>
-                <Grid container spacing={2}>
-                  <Grid size={{ xs: 8 }}>
-                    <Autocomplete
-                      size="small" options={allArticles} getOptionLabel={o => o.name || ''}
-                      value={allArticles.find(a => a.id === g.articleId) || null}
-                      onChange={(_, v) => {
-                        const cp = [...goalDraft];
-                        cp[idx].articleId = v?.id || '';
-                        cp[idx].label = v?.name || '';
-                        setGoalDraft(cp);
-                      }}
-                      renderInput={params => <TextField {...params} label="Artikel wählen" />}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 4 }}>
-                    <TextField
-                      size="small" type="number" label="Zielmenge" fullWidth
-                      value={g.targetUnits}
-                      onChange={e => { const cp = [...goalDraft]; cp[idx].targetUnits = e.target.value; setGoalDraft(cp); }}
-                    />
-                  </Grid>
-                </Grid>
-              </Stack>
-            ))}
-            {goalDraft.length < 4 && <Button variant="dashed" startIcon={<FlagIcon />} onClick={() => setGoalDraft([...goalDraft, { articleId: '', targetUnits: 0 }])} sx={{ border: '1px dashed', borderColor: 'divider', py: 2 }}>Ziel hinzufügen</Button>}
+      {hs.loading ? (
+        <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', py: 8 }}>
+          <Stack alignItems="center" spacing={2}>
+            <CircularProgress />
+            <Typography color="text.secondary">Clubscore wird geladen …</Typography>
           </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setGoalsOpen(false)}>Abbrechen</Button>
-          <Button variant="contained" onClick={saveGoals}>Speichern</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Jahres-Reset (Admin) */}
-      <Dialog open={resetOpen} onClose={() => !resetBusy && setResetOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Jahres-Clubscore zurücksetzen</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 0.5 }}>
-            <Alert severity="warning">
-              Das Jahres-Ranking startet danach bei null. Diese Aktion lässt sich nicht rückgängig machen.
+        </Box>
+      ) : (
+        <>
+          {hs.error && !hs.lastUpdated && (
+            <Alert severity="error" action={<Button color="inherit" size="small" onClick={hs.refresh}>Erneut versuchen</Button>}>
+              Clubscore konnte nicht geladen werden.
             </Alert>
-            <Typography variant="body2"><strong>Was passiert:</strong></Typography>
-            <Typography variant="body2" component="ul" sx={{ pl: 2.5, m: 0 }}>
-              <li>Der aktuelle Stand ({yearlyEntries.length} {yearlyEntries.length === 1 ? 'Eintrag' : 'Einträge'}{yearlyEntries[0] ? `, Platz 1: ${yearlyEntries[0].customerNickname || yearlyEntries[0].customerName} mit ${money(yearlyEntries[0].score)}` : ''}) wird im Protokoll archiviert (Umsatz und Anzahl).</li>
-              <li>Die Jahreswertung zählt ab dem Zeitpunkt des Zurücksetzens neu; ältere Verkäufe fließen nicht mehr ein.</li>
-              <li>Tages-Challenge, Tagesziele, Buchungen und Kundenguthaben bleiben unverändert.</li>
-              <li>Am 1. Januar beginnt die Wertung ohnehin automatisch neu.</li>
-            </Typography>
-            {yearlyIsReset && (
-              <Typography variant="body2" color="text.secondary">
-                Letzter Reset: {dateDE(yearlyStart)} um {yearlyStart.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr.
-              </Typography>
-            )}
-            <TextField
-              label={`Zur Bestätigung „${RESET_WORD}“ eingeben`}
-              value={resetWord}
-              onChange={(e) => setResetWord(e.target.value)}
-              autoFocus
-              fullWidth
-              inputProps={{ 'aria-label': 'Bestätigungswort' }}
-              onKeyDown={(e) => { if (e.key === 'Enter') doReset(); }}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setResetOpen(false)} disabled={resetBusy}>Abbrechen</Button>
-          <Button
-            variant="contained" color="warning" onClick={doReset}
-            disabled={resetBusy || resetWord.trim().toUpperCase() !== RESET_WORD}
-            startIcon={resetBusy ? <CircularProgress size={16} color="inherit" /> : <RestartAltIcon />}
-          >
-            {resetBusy ? 'Setze zurück…' : 'Jetzt zurücksetzen'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+          )}
+          <GoalsSection goals={data.goals} columnsMax={4} />
+          <Box sx={{
+            flex: fill ? 1 : 'none', minHeight: 0, display: 'grid', gap: 1.5,
+            gridTemplateColumns: { xs: '1fr', md: single ? '1fr' : 'repeat(2, minmax(0, 1fr))' },
+          }}>
+            {boardKinds.map(renderBoard)}
+          </Box>
+          {display.ticker && <Ticker items={tickerItems} />}
+        </>
+      )}
 
-      <Snackbar open={snack.open} autoHideDuration={6000} onClose={() => setSnack((x) => ({ ...x, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        <Alert severity={snack.severity} onClose={() => setSnack((x) => ({ ...x, open: false }))} variant="filled">{snack.msg}</Alert>
+      <GoalOverlay event={overlay} onDone={dismissOverlay} />
+
+      <GoalsDialog open={dialog === 'goals'} onClose={closeDialog} goalsProgress={data.goals} canEdit={canEdit}
+        onSaved={(res) => {
+          if (res && Array.isArray(res.goals)) hs.patchData({ goals: res });
+          setSnack({ severity: 'success', msg: 'Tagesziele gespeichert.' });
+        }} />
+      <DisplaySettingsDialog open={dialog === 'display'} onClose={closeDialog} display={display} canEdit={canEdit}
+        saving={saveDisplay.isPending}
+        error={saveDisplay.isError ? goalsApiError(saveDisplay.error, 'Anzeige konnte nicht gespeichert werden.') : ''}
+        onSave={(next) => saveDisplay.mutate(next, {
+          onSuccess: () => { closeDialog(); setSnack({ severity: 'success', msg: 'Anzeige für alle Bildschirme gespeichert.' }); },
+        })} />
+      <ArchiveDialog open={dialog === 'archive'} onClose={closeDialog} />
+      {isAdmin && (
+        <ResetYearDialog open={dialog === 'reset'} onClose={closeDialog} yearlyEntries={data.yearly?.amount?.entries || []}
+          period={period}
+          onDone={(msg) => {
+            setSnack({ severity: 'success', msg });
+            hs.refresh();
+            queryClient.invalidateQueries({ queryKey: ['clubscore-archive'] });
+          }} />
+      )}
+
+      <Snackbar open={!!snack} autoHideDuration={5000} onClose={() => setSnack(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} sx={{ zIndex: 1400 }}>
+        {snack ? <Alert severity={snack.severity} variant="filled" onClose={() => setSnack(null)}>{snack.msg}</Alert> : <span />}
       </Snackbar>
     </Box>
   );

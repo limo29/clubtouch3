@@ -1,344 +1,216 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
-    Box, Card, CardContent, Chip, Stack, CssBaseline,
-    Typography, GlobalStyles, alpha, useTheme, Grid, IconButton, Tooltip, Fade
+  Box, Chip, CircularProgress, CssBaseline, Fade, IconButton, Stack, ThemeProvider, Tooltip, Typography,
+  createTheme, useMediaQuery,
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
-import FlagIcon from '@mui/icons-material/Flag';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-
+import WifiOffIcon from '@mui/icons-material/WifiOff';
 import api from '../services/api';
-import { API_ENDPOINTS } from '../config/api';
-import Podium from '../components/common/Podium';
-import GoalOverlay from '../components/common/GoalOverlay';
-import { useHighscoreLogic } from '../hooks/useHighscoreLogic';
-// import { usePrevious } from '../hooks/usePrevious'; // We still need this for GoalBar's internal logic -> No we don't, GoalBar imports it itself.
-import GoalBar from '../components/common/GoalBar';
+import useHighscoreLogic from '../hooks/useHighscoreLogic';
+import useClubscoreEvents from '../hooks/useClubscoreEvents';
+import useFullscreen from '../hooks/useFullscreen';
+import { useNow, useRankChanges } from '../components/highscore/useRankChanges';
+import useRotatingView from '../components/highscore/useRotatingView';
+import Board from '../components/highscore/Board';
+import TeamBoard from '../components/highscore/TeamBoard';
+import GoalsSection from '../components/highscore/GoalsSection';
+import GoalOverlay from '../components/highscore/GoalOverlay';
+import Ticker from '../components/highscore/Ticker';
+import RotateProgress from '../components/highscore/RotateProgress';
+import TvStage from '../components/highscore/TvStage';
+import { buildTickerItems } from '../components/highscore/tickerItems';
+import { VIEW_LABELS, dateDE, timeHM } from '../components/highscore/format';
 
-// Helper functions
-const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
-const CONTROLS_HIDE_MS = 3000; // Vollbild-Knopf blendet sich nach 3 s ohne Mausbewegung aus
+const BG = '#0b0d12';
+const DAY_EMPTY = 'Heute noch keine Wertung – der erste Kauf zählt!';
+const YEAR_EMPTY = 'In diesem Jahr noch keine Wertung – der erste Kauf zählt!';
+const TEAM_EMPTY = 'Noch keine Team-Wertung – der erste Kauf eines Teams zählt!';
+const URL_VIEWS = ['amount', 'count', 'teams', 'rotate'];
+const URL_BOARDS = ['both', 'day', 'year'];
 
-/** Dezenter Vollbild-Schalter rechts oben (Fullscreen API, Esc verlässt wie üblich). */
-function FullscreenControl() {
-    const [isFull, setIsFull] = useState(!!document.fullscreenElement);
-    const [visible, setVisible] = useState(true);
-    const timer = useRef(null);
-    useEffect(() => {
-        const onChange = () => setIsFull(!!document.fullscreenElement);
-        document.addEventListener('fullscreenchange', onChange);
-        const arm = () => {
-            setVisible(true);
-            clearTimeout(timer.current);
-            timer.current = setTimeout(() => setVisible(false), CONTROLS_HIDE_MS);
-        };
-        arm();
-        window.addEventListener('mousemove', arm);
-        window.addEventListener('touchstart', arm, { passive: true });
-        return () => {
-            clearTimeout(timer.current);
-            document.removeEventListener('fullscreenchange', onChange);
-            window.removeEventListener('mousemove', arm);
-            window.removeEventListener('touchstart', arm);
-        };
-    }, []);
-    const toggle = async () => {
-        try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch { }
-    };
-    if (typeof document.documentElement.requestFullscreen !== 'function') return null;
-    return (
-        <Fade in={visible}>
-            <Box sx={{ position: 'fixed', top: 12, right: 12, zIndex: 10 }}>
-                <Tooltip title={isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
-                    <IconButton onClick={toggle} aria-label={isFull ? 'Vollbild verlassen' : 'Vollbild'}
-                        sx={{ color: 'rgba(255,255,255,0.7)', bgcolor: 'rgba(255,255,255,0.06)', '&:hover': { bgcolor: 'rgba(255,255,255,0.14)' } }}>
-                        {isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
-                    </IconButton>
-                </Tooltip>
-            </Box>
-        </Fade>
-    );
+// Die öffentliche Anzeige ist immer dunkel, egal welcher Farbmodus im Browser gespeichert ist.
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: { main: '#90caf9' },
+    background: { default: BG, paper: '#141821' },
+  },
+});
+
+/** URL-Parameter (view, board, ticker=0|1) haben Vorrang; fehlende Werte kommen live vom Server. */
+const useEffectiveDisplay = (serverDisplay) => {
+  const [params] = useSearchParams();
+  const view = params.get('view');
+  const board = params.get('board');
+  const ticker = params.get('ticker');
+  return useMemo(() => ({
+    ...serverDisplay,
+    ...(URL_VIEWS.includes(view) ? { view } : {}),
+    ...(URL_BOARDS.includes(board) ? { board } : {}),
+    ...(ticker === '0' || ticker === '1' ? { ticker: ticker === '1' } : {}),
+  }), [serverDisplay, view, board, ticker]);
+};
+
+function Clock({ now, lg }) {
+  return (
+    <Typography sx={{ fontWeight: 800, fontSize: lg ? '2.4rem' : '1.1rem', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
+      {timeHM(now)}
+    </Typography>
+  );
 }
 
-
-
-/* -------------------------------------------------------------------------- */
-/*                           PUBLIC HIGHSCORE PAGE                            */
-/* -------------------------------------------------------------------------- */
-export default function PublicHighscore() {
-    // USE THE HOOK
-    const {
-        boards, goalProgress, loading, live, lastUpdated, startDate,
-        overlay, setOverlay
-    } = useHighscoreLogic();
-
-    const [mode, setMode] = useState('AMOUNT'); // 'AMOUNT' | 'COUNT'
-    const yearlyStart = boards.yearly?.amount?.startDate ? new Date(boards.yearly.amount.startDate) : null;
-
-    // Letzte abgeschlossene Jahreswertung (nur Platz 1–3, öffentlicher Endpoint); leer, wenn nie zurückgesetzt wurde
-    const [lastArchive, setLastArchive] = useState(null);
-    useEffect(() => {
-        const load = () => api.get(API_ENDPOINTS.PUBLIC_HIGHSCORE_ARCHIVE)
-            .then(r => setLastArchive((r.data?.archive || []).find(a => a.amount?.entries?.length) || null))
-            .catch(() => setLastArchive(null));
-        load();
-        const t = setInterval(load, 10 * 60 * 1000);
-        return () => clearInterval(t);
-    }, []);
-    const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('de-DE') : '');
-
-    // Auto-rotate mode every 15s
-    useEffect(() => {
-        const t = setInterval(() => setMode(p => p === 'AMOUNT' ? 'COUNT' : 'AMOUNT'), 15000);
-        return () => clearInterval(t);
-    }, []);
-
-    const theme = useTheme();
-
-    // Milestone Handler (UI specific)
-    const handleMilestone = (goal, level) => {
-        const target = Math.max(1, Number(goal.targetUnits));
-        const total = target * (level);
-        setOverlay({
-            active: true,
-            type: 'GOAL',
-            message: `Ziel erreicht! ${goal.label}: ${total} ${goal.purchaseUnit || 'Stk'}!`
-        });
-    };
-
-    const RankRow = ({ entry, isTop }) => {
-        return (
-            <Stack
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-                sx={{
-                    py: 1,
-                    px: 2,
-                    borderRadius: 2,
-                    borderBottom: '1px solid', borderColor: 'divider',
-                    mb: 1,
-                    bgcolor: isTop ? alpha(theme.palette.primary.main, 0.1) : 'transparent'
-                }}
-            >
-                <Stack direction="row" alignItems="center" spacing={2} sx={{ minWidth: 0 }}>
-                    <Box sx={{
-                        width: 32, height: 32, borderRadius: '50%', bgcolor: 'action.hover',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: 'text.secondary'
-                    }}>
-                        {entry.rank}
-                    </Box>
-                    <Typography variant="body1" noWrap sx={{ fontWeight: isTop ? 700 : 500 }}>
-                        {entry.customerNickname || entry.customerName}
-                    </Typography>
-                </Stack>
-                <Typography
-                    sx={{ fontWeight: 900, fontSize: '1.2rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
-                    color="primary"
-                >
-                    {mode === 'AMOUNT' ? money(entry.score) : `${entry.score}`}
-                </Typography>
-            </Stack>
-        );
-    };
-
-    const Board = ({ title, subtitle, data, footer }) => {
-        const topThree = (data?.entries || []).slice(0, 3);
-        const rest = (data?.entries || []).slice(3, 20);
-
-        return (
-            <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: 'background.paper' }}>
-                <CardContent sx={{ p: 4, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
-                        <Stack direction="row" spacing={2} alignItems="center">
-                            <Box sx={{ p: 1.5, borderRadius: 3, bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main' }}>
-                                <TrophyIcon fontSize="large" />
-                            </Box>
-                            <Box>
-                                <Typography variant="h4" fontWeight={900}>{title}</Typography>
-                                <Typography variant="subtitle1" color="text.secondary">
-                                    {mode === 'AMOUNT' ? 'Nach Umsatz' : 'Nach Anzahl'} &bull; Top 20{subtitle ? <> &bull; {subtitle}</> : null}
-                                </Typography>
-                            </Box>
-                        </Stack>
-                        {topThree.length > 0 && (
-                            <Box sx={{ textAlign: 'right' }}>
-                                <Typography variant="caption" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, opacity: 0.6 }}>Top Score</Typography>
-                                <Typography variant="h3" color="primary" sx={{ fontWeight: 900, lineHeight: 1 }}>
-                                    {mode === 'AMOUNT' ? money(topThree[0].score) : topThree[0].score}
-                                </Typography>
-                            </Box>
-                        )}
-                    </Stack>
-
-                    {data?.entries?.length === 0 ? (
-                        <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
-                            <Typography variant="h5">Noch keine Daten</Typography>
-                        </Box>
-                    ) : (
-                        <>
-                            {/* Podium */}
-                            <Box sx={{ mb: 4 }}>
-                                <Podium entries={topThree} mode={mode} moneyFormatter={money} />
-                            </Box>
-
-                            {/* List */}
-                            <Box sx={{
-                                flex: 1,
-                                overflowY: 'auto',
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
-                                columnGap: 4,
-                                rowGap: 1,
-                                alignContent: 'start',
-                                overflow: 'hidden'
-                            }}>
-                                {rest.map((e, idx) => (
-                                    <RankRow key={e.customerId ?? idx} entry={e} />
-                                ))}
-                            </Box>
-                        </>
-                    )}
-                    {footer}
-                </CardContent>
-            </Card>
-        );
-    };
-
-    if (loading) return null; // Or a spinner
-
+function StatusChip({ hs, lg }) {
+  if (hs.status === 'live') {
     return (
-        <Box sx={{
-            height: '100vh',
-            width: '100vw',
-            bgcolor: '#0a0a0a',
-            color: 'white',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            p: 3
-        }}>
-            <CssBaseline />
-            <GlobalStyles styles={{
-                body: { overflow: 'hidden', backgroundColor: '#0a0a0a' },
-                '::-webkit-scrollbar': { width: 8, height: 8 },
-                '::-webkit-scrollbar-track': { background: 'transparent' },
-                '::-webkit-scrollbar-thumb': { background: '#333', borderRadius: 4 },
-                '::-webkit-scrollbar-thumb:hover': { background: '#555' }
-            }} />
-
-            <FullscreenControl />
-
-            <GoalOverlay
-                trigger={overlay.active}
-                type={overlay.type}
-                message={overlay.message}
-                onComplete={() => setOverlay({ ...overlay, active: false })}
-            />
-
-            {/* Header */}
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3, pr: 7 /* Platz für den Vollbild-Schalter */ }}>
-                <Stack direction="row" spacing={3} alignItems="center">
-                    <Typography variant="h3" sx={{ fontWeight: 900, letterSpacing: -1, background: 'linear-gradient(45deg, #FFF, #999)', backgroundClip: 'text', textFillColor: 'transparent', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                        Clubscore
-                    </Typography>
-                    {live && <Chip icon={<Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#00e676', boxShadow: '0 0 10px #00e676' }} />} label="LIVE" size="small" sx={{ bgcolor: alpha('#00e676', 0.1), color: '#00e676', fontWeight: 800, border: '1px solid', borderColor: alpha('#00e676', 0.2) }} />}
-                </Stack>
-
-                <Stack direction="row" spacing={4} alignItems="center">
-                    <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>Zeitraum</Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1 }}>
-                            {startDate ? startDate.toLocaleDateString('de-DE') : 'Heute'}
-                        </Typography>
-                    </Box>
-                    <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>Letztes Update</Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1, fontFamily: 'monospace' }}>
-                            {lastUpdated ? lastUpdated.toLocaleTimeString('de-DE') : '--:--'}
-                        </Typography>
-                    </Box>
-                </Stack>
-            </Stack>
-
-            {/* Content Grid */}
-            <Box sx={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 3,
-                overflowY: { xs: 'auto', md: 'hidden' }, // Scroll on mobile, auto-fit on desktop
-                pr: { xs: 1, md: 0 } // Right padding for scrollbar on mobile
-            }}>
-                {/* Top: Goals (if any) */}
-                {goalProgress.goals.filter(g => g.articleId).length > 0 && (
-                    <Card variant="outlined" sx={{ flexShrink: 0, bgcolor: 'background.paper' }}>
-                        <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-                                <FlagIcon fontSize="small" color="primary" />
-                                <Typography variant="h6" fontWeight={800}>Tagesziele</Typography>
-                            </Stack>
-                            <Grid container spacing={4} justifyContent="center">
-                                {goalProgress.goals.filter(g => g.articleId).map((g, i, arr) => {
-                                    const count = arr.length;
-                                    const smSize = count === 1 ? 12 : 6;
-                                    const mdSize = count === 1 ? 12 : count === 2 ? 6 : count === 3 ? 4 : 3;
-
-                                    return (
-                                        <Grid size={{ xs: 12, sm: smSize, md: mdSize }} key={g.articleId || i}>
-                                            <GoalBar
-                                                goal={g}
-                                                movingTargets={goalProgress.meta?.movingTargets}
-                                                onMilestone={handleMilestone}
-                                            />
-                                        </Grid>
-                                    );
-                                })}
-                            </Grid>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* Boards Split */}
-                <Box sx={{
-                    flex: 1,
-                    minHeight: 0,
-                    display: 'flex',
-                    flexDirection: { xs: 'column', md: 'row' }, // Stack on mobile
-                    gap: 3,
-                    pb: { xs: 4, md: 0 } // Bottom padding on mobile
-                }}>
-                    {/* Daily Board */}
-                    <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
-                        <Board
-                            title="Tages-Ranking"
-                            subtitle="ab 06:00 Uhr"
-                            data={mode === 'AMOUNT' ? boards.daily.amount : boards.daily.count}
-                        />
-                    </Box>
-
-                    {/* Yearly Board */}
-                    <Box sx={{ flex: 1, minWidth: 0, minHeight: { xs: 600, md: 0 } }}>
-                        <Board
-                            title="Jahres-Charts"
-                            subtitle={yearlyStart ? `seit ${yearlyStart.toLocaleDateString('de-DE')}` : ''}
-                            data={mode === 'AMOUNT' ? boards.yearly.amount : boards.yearly.count}
-                            footer={lastArchive && (
-                                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ pt: 2, mt: 'auto', borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
-                                    <TrophyIcon sx={{ color: '#FFD700' }} />
-                                    <Typography variant="h6" sx={{ fontWeight: 700 }} noWrap>
-                                        Sieger {fmtDate(lastArchive.periodStart)} – {fmtDate(lastArchive.periodEnd)}:{' '}
-                                        {lastArchive.amount.entries[0].customerNickname || lastArchive.amount.entries[0].customerName}
-                                        <Typography component="span" color="primary" sx={{ fontWeight: 900, ml: 1 }}>{money(lastArchive.amount.entries[0].score)}</Typography>
-                                    </Typography>
-                                </Stack>
-                            )}
-                        />
-                    </Box>
-                </Box>
-            </Box>
-        </Box>
+      <Stack direction="row" spacing={1} alignItems="center" role="status" aria-live="polite">
+        <Box aria-hidden sx={{ width: lg ? 16 : 10, height: lg ? 16 : 10, borderRadius: '50%', bgcolor: '#00e676', boxShadow: '0 0 10px #00e676' }} />
+        <Typography sx={{ fontWeight: 800, fontSize: lg ? '1.5rem' : '0.9rem', letterSpacing: 1 }}>Live</Typography>
+      </Stack>
     );
+  }
+  const stand = hs.lastUpdated ? timeHM(hs.lastUpdated) : timeHM(hs.offlineSince || new Date());
+  return (
+    <Chip role="status" aria-live="polite" color="warning" icon={<WifiOffIcon />}
+      label={`Verbindung weg – Stand ${stand}`}
+      sx={lg ? { height: 48, fontSize: '1.3rem', fontWeight: 700, px: 1, '& .MuiChip-icon': { fontSize: 28 } } : { fontWeight: 700 }} />
+  );
+}
+
+function Content() {
+  const isMdUp = useMediaQuery(darkTheme.breakpoints.up('md'));
+  const hs = useHighscoreLogic();
+  const { data } = hs;
+  const display = useEffectiveDisplay(hs.display);
+  const marks = useRankChanges(data);
+  const now = useNow(15000);
+  const { view, rotating, cycle, seconds } = useRotatingView(display);
+  const { overlay, dismissOverlay, tickerEvents } = useClubscoreEvents(data.events, {
+    dayStart: data.period?.dayStart,
+    enabled: !hs.loading && !!hs.lastUpdated,
+  });
+  const fs = useFullscreen({ alwaysAutoHide: true });
+
+  const { data: archive = [] } = useQuery({
+    queryKey: ['clubscore-public-archive'],
+    queryFn: async () => (await api.get('/public/highscore/archive')).data?.archive || [],
+    staleTime: 30 * 60 * 1000,
+    refetchInterval: 30 * 60 * 1000,
+  });
+  const tickerItems = useMemo(
+    () => buildTickerItems(data, tickerEvents, { lastArchive: archive[0] }),
+    [data, tickerEvents, archive]
+  );
+
+  const period = data.period || {};
+  const boardKinds = display.board === 'day' ? ['day'] : display.board === 'year' ? ['year'] : ['day', 'year'];
+  const single = boardKinds.length === 1;
+  const hasGoals = (data.goals?.goals || []).length > 0;
+  const size = isMdUp ? 'lg' : 'md';
+  const lg = isMdUp;
+
+  const renderBoard = (kind) => {
+    const isDay = kind === 'day';
+    const title = isDay ? 'Tageswertung' : 'Jahreswertung';
+    const subtitle = isDay
+      ? `seit ${period.dayStart ? timeHM(period.dayStart) : '06:00'} Uhr`
+      : `seit ${period.yearStart ? dateDE(period.yearStart) : '01.01.'}`;
+    if (view === 'teams') {
+      const tb = isDay ? data.teams?.daily?.amount : data.teams?.yearly?.amount;
+      return <TeamBoard key={kind} title={`${title} · Teams`} subtitle={subtitle} board={tb} mode="AMOUNT" size={size} fill={lg} emptyText={TEAM_EMPTY} />;
+    }
+    const scope = isDay ? 'daily' : 'yearly';
+    const m = view === 'count' ? 'count' : 'amount';
+    return (
+      <Board key={kind} title={title} subtitle={subtitle} board={data[scope]?.[m]} mode={m.toUpperCase()}
+        marks={marks} marksKey={`${scope}.${m}`} now={now} size={size} fill={lg}
+        columns={lg ? (single ? 3 : 2) : 1} podiumHeight={lg ? (hasGoals ? (single ? 240 : 178) : (single ? 320 : 270)) : 190} minRow={lg ? 34 : 36}
+        emptyText={isDay ? DAY_EMPTY : YEAR_EMPTY} />
+    );
+  };
+
+  const header = (
+    <Stack direction="row" alignItems="center" spacing={lg ? 3 : 1.5} sx={{ flexShrink: 0 }}>
+      <TrophyIcon sx={{ fontSize: lg ? 64 : 32, color: '#ffd54f' }} />
+      <Typography component="h1" sx={{ fontWeight: 900, fontSize: lg ? '3.6rem' : '1.6rem', lineHeight: 1, letterSpacing: lg ? 1 : 0 }}>
+        Clubscore
+      </Typography>
+      <Chip label={VIEW_LABELS[view] || 'Umsatz'} variant="outlined"
+        sx={lg ? { height: 44, fontSize: '1.4rem', fontWeight: 700, px: 1 } : { fontWeight: 700 }} />
+      <Box sx={{ flex: 1 }} />
+      <StatusChip hs={hs} lg={lg} />
+      {lg && <Clock now={now} lg />}
+    </Stack>
+  );
+
+  const body = hs.loading ? (
+    <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: lg ? 0 : '60vh' }}>
+      <Stack alignItems="center" spacing={3}>
+        <CircularProgress size={lg ? 80 : 40} />
+        <Typography sx={{ fontSize: lg ? '2rem' : '1.1rem' }} color="text.secondary">Clubscore wird geladen …</Typography>
+      </Stack>
+    </Box>
+  ) : (
+    <>
+      <GoalsSection goals={data.goals} size={size} />
+      <Box sx={{
+        flex: lg ? 1 : 'none', minHeight: 0, display: 'grid', gap: lg ? 3 : 1.5,
+        gridTemplateColumns: lg && !single ? 'repeat(2, minmax(0, 1fr))' : '1fr',
+      }}>
+        {boardKinds.map(renderBoard)}
+      </Box>
+      {display.ticker && <Ticker items={tickerItems} size={lg ? 'lg' : 'sm'} />}
+    </>
+  );
+
+  return (
+    <>
+      {lg ? (
+        <Box sx={{ position: 'fixed', inset: 0, bgcolor: BG }}>
+          <TvStage background={BG}>
+            <Box sx={{ width: '100%', height: '100%', p: 3, display: 'flex', flexDirection: 'column', gap: 2, color: 'text.primary' }}>
+              {header}
+              <RotateProgress active={rotating} cycle={cycle} seconds={seconds} height={6} />
+              {body}
+            </Box>
+          </TvStage>
+        </Box>
+      ) : (
+        <Box sx={{ minHeight: '100dvh', bgcolor: BG, px: 2, py: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          {header}
+          <RotateProgress active={rotating} cycle={cycle} seconds={seconds} />
+          {body}
+        </Box>
+      )}
+
+      {/* außerhalb der skalierten Bühne, sonst bezieht sich position:fixed auf die Bühne */}
+      <GoalOverlay event={overlay} onDone={dismissOverlay} />
+
+      {fs.supported && lg && (
+        <Fade in={fs.controlsVisible}>
+          <Box sx={{ position: 'fixed', top: 12, right: 12, zIndex: 1300 }}>
+            <Tooltip title={fs.isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
+              <IconButton onClick={fs.toggle} aria-label={fs.isFull ? 'Vollbild verlassen' : 'Vollbild'}
+                sx={{ color: 'rgba(255,255,255,0.75)', bgcolor: 'rgba(255,255,255,0.08)', '&:hover': { bgcolor: 'rgba(255,255,255,0.16)' } }}>
+                {fs.isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Fade>
+      )}
+    </>
+  );
+}
+
+/** Öffentliche Clubscore-Anzeige (/public/highscore) für Fernseher und Handy, ohne Login und ohne Ton. */
+export default function PublicHighscore() {
+  return (
+    <ThemeProvider theme={darkTheme}>
+      <CssBaseline />
+      <Content />
+    </ThemeProvider>
+  );
 }

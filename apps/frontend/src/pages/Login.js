@@ -143,7 +143,7 @@ const Login = () => {
             </Divider>
             <Stack spacing={1}>
               <Button variant="outlined" onClick={() => navigate('/public/highscore')}>
-                Zum Highscore
+                Zum Clubscore
               </Button>
               <Button variant="outlined" onClick={() => navigate('/check-balance')}>
                 Guthaben prüfen

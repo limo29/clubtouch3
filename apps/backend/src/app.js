@@ -9,6 +9,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const articleRoutes = require('./routes/articles');
 const customerRoutes = require('./routes/customers');
+const customerGroupRoutes = require('./routes/customerGroups');
 const transactionRoutes = require('./routes/transactions');
 const highscoreRoutes = require('./routes/highscore');
 const exportRoutes = require('./routes/exports');
@@ -30,18 +31,19 @@ const { UPLOADS_DIR: uploadsPath } = require('./utils/uploadsDir');
 const fs = require('fs');
 
 
-console.log('📂 Serving uploads from:', uploadsPath);
+console.log('Serving uploads from:', uploadsPath);
 app.use('/uploads', express.static(uploadsPath));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/articles', articleRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api/customer-groups', customerGroupRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/highscore', highscoreRoutes);
 app.use('/api/exports', exportRoutes);
 app.use('/api/invoices', invoiceRoutes);
-app.use('/api/purchase-documents', purchaseDocumentRoutes)
+app.use('/api/purchase-documents', purchaseDocumentRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/ads', adRoutes);
 app.use('/api/public', publicRoutes);
@@ -53,7 +55,7 @@ app.use('/api/cash-movements', cashMovementRoutes);
 // Basis-Route
 app.get('/', (req, res) => {
   res.json({
-    message: 'Clubtouch3 Backend läuft!',
+    message: 'Clubtouch3 Backend laeuft!',
     version: '1.0.0',
     timestamp: new Date()
   });
@@ -90,7 +92,7 @@ app.use((err, req, res, next) => {
 });
 // Alle JSON-Antworten: BigInt/Decimal sicher serialisieren
 app.set('json replacer', (_key, value) => {
-  if (typeof value === 'bigint') return Number(value);            // oder String(value)
+  if (typeof value === 'bigint') return Number(value);
   if (value && typeof value === 'object' && typeof value.toNumber === 'function') {
     // Prisma Decimal
     return value.toNumber();

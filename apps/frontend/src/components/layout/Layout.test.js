@@ -42,7 +42,7 @@ describe('Navigation Layout', () => {
         // Top level
         expect(screen.getByText('Verkauf')).toBeInTheDocument();
         expect(screen.getByText('Dashboard')).toBeInTheDocument();
-        expect(screen.getByText('Highscore')).toBeInTheDocument();
+        expect(screen.getByText('Clubscore')).toBeInTheDocument();
         expect(screen.getByText('Werbung')).toBeInTheDocument();
 
         // Groups

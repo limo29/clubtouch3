@@ -1,165 +1,170 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import api from '../services/api';
-import { API_ENDPOINTS, WS_URL } from '../config/api';
-import { usePrevious } from './usePrevious';
+import { WS_URL } from '../config/api';
 
-const RANK_1_MESSAGES = [
-    "Neuer Spitzenreiter!", "Führungswechsel!", "Die neue Nummer 1!",
-    "Ganz oben!", "Nicht zu stoppen!", "Der König des Clubs!"
-];
+/**
+ * Clubscore-Daten für interne und öffentliche Anzeige.
+ * Ein Objekt aus GET /public/highscore/all bzw. Socket 'highscore:update' (ersetzt komplett),
+ * dazu die Anzeige-Einstellung (GET /public/highscore/display, Socket 'highscore:display').
+ * Polling (60 s) nur, solange der Socket getrennt ist; beim Sichtbarwerden des Tabs sofort neu laden.
+ */
 
-const RANK_TOP3_MESSAGES = [
-    "Neu auf dem Treppchen!", "Podiumsplatz gesichert!",
-    "Bronze ist sicher!", "Fantastische Leistung!", "Aufstieg in die Top 3!"
-];
+export const HS_ALL_URL = '/public/highscore/all';
+export const HS_DISPLAY_URL = '/public/highscore/display';
+export const HS_DISPLAY_PUT_URL = '/highscore/display';
+const POLL_MS = 60000;
 
-const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+export const VIEWS = ['amount', 'count', 'teams'];
+export const DEFAULT_DISPLAY = {
+  view: 'rotate',
+  rotateViews: ['amount', 'count', 'teams'],
+  rotateSeconds: 15,
+  board: 'both',
+  ticker: true,
+};
+
+const emptyBoard = (type, mode) => ({ type, mode, startDate: null, entries: [] });
+
+export const EMPTY_DATA = {
+  daily: { amount: emptyBoard('DAILY', 'AMOUNT'), count: emptyBoard('DAILY', 'COUNT') },
+  yearly: { amount: emptyBoard('YEARLY', 'AMOUNT'), count: emptyBoard('YEARLY', 'COUNT') },
+  teams: {
+    daily: { amount: emptyBoard('DAILY', 'AMOUNT'), count: emptyBoard('DAILY', 'COUNT') },
+    yearly: { amount: emptyBoard('YEARLY', 'AMOUNT'), count: emptyBoard('YEARLY', 'COUNT') },
+  },
+  goals: { movingTargets: false, goals: [], monthReached: 0 },
+  events: [],
+  stats: { day: { amount: 0, count: 0, customers: 0 }, recordDay: null },
+  period: null,
+  serverTime: null,
+};
+
+const board = (b, type, mode) => ({ ...emptyBoard(type, mode), ...(b || {}), entries: Array.isArray(b?.entries) ? b.entries : [] });
+
+/** Payload tolerant auf die Vertragsform bringen (fehlende Teile = leer). */
+export const normalizeClubscore = (raw) => {
+  const d = raw || {};
+  const pair = (src, type) => ({ amount: board(src?.amount, type, 'AMOUNT'), count: board(src?.count, type, 'COUNT') });
+  const g = d.goals && !Array.isArray(d.goals) ? d.goals : {};
+  return {
+    daily: pair(d.daily, 'DAILY'),
+    yearly: pair(d.yearly, 'YEARLY'),
+    teams: { daily: pair(d.teams?.daily, 'DAILY'), yearly: pair(d.teams?.yearly, 'YEARLY') },
+    goals: {
+      movingTargets: !!g.movingTargets,
+      goals: Array.isArray(g.goals) ? g.goals : [],
+      monthReached: Number(g.monthReached) || 0,
+    },
+    events: Array.isArray(d.events) ? d.events : [],
+    stats: {
+      day: { amount: 0, count: 0, customers: 0, ...(d.stats?.day || {}) },
+      recordDay: d.stats?.recordDay || null,
+    },
+    period: d.period || null,
+    serverTime: d.serverTime || null,
+    reset: !!d.reset,
+  };
+};
+
+/** Anzeige-Einstellung validieren (unbekannte Werte → Default). */
+export const normalizeDisplay = (raw) => {
+  const d = raw || {};
+  const rotateViews = Array.isArray(d.rotateViews) ? d.rotateViews.filter((v) => VIEWS.includes(v)) : [];
+  const secs = Number(d.rotateSeconds);
+  return {
+    view: ['amount', 'count', 'teams', 'rotate'].includes(d.view) ? d.view : DEFAULT_DISPLAY.view,
+    rotateViews: rotateViews.length ? rotateViews : DEFAULT_DISPLAY.rotateViews,
+    rotateSeconds: Number.isFinite(secs) ? Math.min(120, Math.max(5, Math.round(secs))) : DEFAULT_DISPLAY.rotateSeconds,
+    board: ['both', 'day', 'year'].includes(d.board) ? d.board : DEFAULT_DISPLAY.board,
+    ticker: d.ticker === undefined ? DEFAULT_DISPLAY.ticker : !!d.ticker,
+  };
+};
 
 export const useHighscoreLogic = () => {
-    const [loading, setLoading] = useState(true);
-    const [live, setLive] = useState(false);
-    const [lastUpdated, setLastUpdated] = useState(null);
-    const [startDate, setStartDate] = useState(null);
+  const [data, setData] = useState(EMPTY_DATA);
+  const [display, setDisplay] = useState(DEFAULT_DISPLAY);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [socketUp, setSocketUp] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [offlineSince, setOfflineSince] = useState(null);
+  const socketUpRef = useRef(false);
 
-    const [boards, setBoards] = useState({
-        daily: { amount: { entries: [] }, count: { entries: [] } },
-        yearly: { amount: { entries: [] }, count: { entries: [] } }
+  const apply = useCallback((raw) => {
+    setData(normalizeClubscore(raw));
+    setLastUpdated(new Date());
+  }, []);
+
+  const fetchAll = useCallback(async () => {
+    const [allRes, dispRes] = await Promise.allSettled([api.get(HS_ALL_URL), api.get(HS_DISPLAY_URL)]);
+    if (allRes.status === 'fulfilled') {
+      apply(allRes.value.data);
+      setError(null);
+      setOfflineSince(null);
+    } else {
+      setError(allRes.reason || new Error('Laden fehlgeschlagen'));
+      setOfflineSince((prev) => prev || new Date());
+    }
+    if (dispRes.status === 'fulfilled') setDisplay(normalizeDisplay(dispRes.value.data));
+    setLoading(false);
+  }, [apply]);
+
+  useEffect(() => {
+    fetchAll();
+    const token = localStorage.getItem('token');
+    const socket = io(WS_URL, token ? { auth: { token } } : {});
+
+    socket.on('connect', () => {
+      const wasDown = !socketUpRef.current;
+      socketUpRef.current = true;
+      setSocketUp(true);
+      setOfflineSince(null);
+      if (wasDown) fetchAll(); // Verpasstes nachholen
+    });
+    socket.on('disconnect', () => {
+      socketUpRef.current = false;
+      setSocketUp(false);
+      setOfflineSince((prev) => prev || new Date());
+    });
+    socket.on('highscore:update', (payload) => {
+      if (!payload) return;
+      apply(payload);
+      setError(null);
+    });
+    socket.on('highscore:display', (payload) => {
+      if (payload) setDisplay(normalizeDisplay(payload));
     });
 
-    const [goalProgress, setGoalProgress] = useState({ goals: [], meta: null });
-    // erst nach dem ersten echten Datensatz Rangwechsel erkennen (sonst Overlay bei jedem Seitenaufruf)
-    const initializedRef = useRef(false);
-    const [overlay, setOverlay] = useState({ active: false, type: 'GOAL', message: '' });
-
-    // 1. Data Fetching
-    const fetchAll = useCallback(async () => {
-        try {
-            const [allHs, progress] = await Promise.all([
-                api.get(API_ENDPOINTS.HIGHSCORE_ALL),
-                api.get(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS)
-            ]);
-
-            const hs = allHs.data || {};
-            setBoards({
-                daily: { amount: hs?.daily?.amount || { entries: [] }, count: hs?.daily?.count || { entries: [] } },
-                yearly: { amount: hs?.yearly?.amount || { entries: [] }, count: hs?.yearly?.count || { entries: [] } }
-            });
-
-            setGoalProgress(progress.data);
-
-            if (hs?.daily?.amount?.lastUpdated) setLastUpdated(new Date(hs.daily.amount.lastUpdated));
-            if (hs?.daily?.amount?.startDate) setStartDate(new Date(hs.daily.amount.startDate));
-
-            setLoading(false);
-        } catch (err) {
-            console.error("Failed to fetch highscore data", err);
-            // Don't necessarily stop loading if it fails, maybe keep old data
-            setLoading(false);
-        }
-    }, []);
-
-    // 2. Initial Load & WebSocket
-    useEffect(() => {
-        fetchAll();
-
-        // Auth token might be needed for socket in some setups, but PublicHighscore usually works without if configured public
-        // Assuming WS_URL handles it or we pass token if available. 
-        // PublicHighscore.js used: io(WS_URL)
-        // Highscore.js used: io(WS_URL, { auth: { token: getToken() } })
-        // We'll try to be generic. If we are on public page, maybe we don't have a token.
-        const token = localStorage.getItem('token');
-        const socketOpts = token ? { auth: { token } } : {};
-
-        const socket = io(WS_URL, socketOpts);
-
-        socket.on('connect', () => setLive(true));
-        socket.on('disconnect', () => setLive(false));
-
-        // Das Backend emittiert 'highscore:update' (websocket.js). Der alte Listener hieß
-        // 'highscore_update' und hat nie gefeuert – Live-Updates kamen nur per 60s-Polling.
-        socket.on('highscore:update', (data) => {
-            if (data) {
-                if (data.reset) initializedRef.current = false; // nach Reset kein "Neuer Spitzenreiter"-Overlay
-                // Optimistic / Direct update from socket
-                setBoards(prev => ({
-                    daily: { amount: data.daily?.amount || prev.daily.amount, count: data.daily?.count || prev.daily.count },
-                    yearly: { amount: data.yearly?.amount || prev.yearly.amount, count: data.yearly?.count || prev.yearly.count }
-                }));
-
-                // Also refresh goals to be sure (since sales trigger goals too)
-                api.get(API_ENDPOINTS.HIGHSCORE_GOALS_PROGRESS)
-                    .then(res => setGoalProgress(res.data))
-                    .catch(() => { });
-            }
-        });
-
-        const interval = setInterval(fetchAll, 60000); // Fallback polling
-        return () => { clearInterval(interval); socket.disconnect(); };
-    }, [fetchAll]);
-
-    // 3. Rank Change Detection Logic
-    const prevDaily = usePrevious(boards.daily.amount.entries);
-    const prevYearly = usePrevious(boards.yearly.amount.entries);
-
-    useEffect(() => {
-        if (loading) return;
-        if (!initializedRef.current) {
-            // erster Datensatz nach Laden/Reset: nur merken, kein Overlay
-            if (boards.daily.amount.lastUpdated || boards.yearly.amount.lastUpdated) initializedRef.current = true;
-            return;
-        }
-
-        const checkChanges = (prev, curr, context) => {
-            if (!prev || !curr) return;
-            const top3Prev = prev.slice(0, 3);
-            const top3Curr = curr.slice(0, 3);
-
-            // Check Rank 1
-            if (top3Curr[0] && top3Curr[0].customerId !== top3Prev[0]?.customerId) {
-                const name = top3Curr[0].customerNickname || top3Curr[0].customerName;
-                setOverlay({
-                    active: true,
-                    type: `${context}_RANK_1`,
-                    message: `${pickRandom(RANK_1_MESSAGES)} ${name} ist jetzt #1!`
-                });
-                return; // Priority
-            }
-
-            // Check Rank 2 & 3
-            for (let i = 1; i <= 2; i++) {
-                const p = top3Prev[i];
-                const c = top3Curr[i];
-                if (c && c.customerId !== p?.customerId) {
-                    // Check if dropped from higher
-                    const wasHigher = top3Prev.slice(0, i).find(x => x.customerId === c.customerId);
-                    if (!wasHigher) {
-                        const name = c.customerNickname || c.customerName;
-                        setOverlay({
-                            active: true,
-                            type: `${context}_RANK`,
-                            message: `${pickRandom(RANK_TOP3_MESSAGES)} ${name} ist auf Platz ${i + 1}!`
-                        });
-                        return; // Trigger one at a time
-                    }
-                }
-            }
-        };
-
-        checkChanges(prevDaily, boards.daily.amount.entries, 'DAILY');
-        checkChanges(prevYearly, boards.yearly.amount.entries, 'YEARLY');
-
-    }, [boards, prevDaily, prevYearly, loading]);
-
-    return {
-        boards,
-        goalProgress,
-        loading,
-        live,
-        lastUpdated,
-        startDate,
-        overlay,
-        setOverlay,
-        refresh: fetchAll
+    const poll = setInterval(() => { if (!socketUpRef.current) fetchAll(); }, POLL_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchAll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(poll);
+      document.removeEventListener('visibilitychange', onVisible);
+      socket.disconnect();
     };
+  }, [fetchAll, apply]);
+
+  /** Teilaktualisierung nach eigener Aktion (z. B. gespeicherte Ziele), bis das Socket-Update kommt. */
+  const patchData = useCallback((patch) => setData((prev) => ({ ...prev, ...patch })), []);
+
+  // live: Socket verbunden. offline: kein Socket und letzter Abruf fehlgeschlagen.
+  const status = socketUp ? 'live' : error ? 'offline' : 'polling';
+
+  return {
+    data,
+    display,
+    setDisplay,
+    loading,
+    error,
+    live: socketUp,
+    status,
+    offlineSince,
+    lastUpdated,
+    refresh: fetchAll,
+    patchData,
+  };
 };
+
+export default useHighscoreLogic;

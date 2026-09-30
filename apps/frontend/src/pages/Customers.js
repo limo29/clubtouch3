@@ -45,6 +45,7 @@ import {
   AccountBalanceWallet,
   Warning,
   ContactMail,
+  Groups,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
@@ -53,6 +54,8 @@ import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
 import { invalidate } from '../utils/invalidate';
 import { useAuth } from '../context/AuthContext';
+import GroupBadge from '../components/customers/GroupBadge';
+import GroupManagerDialog from '../components/customers/GroupManagerDialog';
 
 const Customers = () => {
   const queryClient = useQueryClient();
@@ -61,22 +64,35 @@ const Customers = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [openTopUpDialog, setOpenTopUpDialog] = useState(false);
   const [openDetailDialog, setOpenDetailDialog] = useState(false);
+  const [openGroupManager, setOpenGroupManager] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const { control, handleSubmit, reset, formState: { errors } } = useForm();
   const { control: topUpControl, handleSubmit: handleTopUpSubmit, reset: resetTopUp } = useForm();
 
+  // Gruppen laden (für Filter und Formular-Dropdown)
+  const { data: groupsData } = useQuery({
+    queryKey: ['customer-groups'],
+    queryFn: async () => {
+      const res = await api.get(API_ENDPOINTS.CUSTOMER_GROUPS);
+      return res.data;
+    },
+  });
+  const groups = groupsData?.groups || [];
+
   // Fetch customers
   const { data: customersData } = useQuery({
-    queryKey: ['customers', searchTerm],
+    queryKey: ['customers', searchTerm, groupFilter],
     queryFn: async () => {
-      const response = await api.get(API_ENDPOINTS.CUSTOMERS, {
-        params: searchTerm ? { search: searchTerm } : {}
-      });
+      const params = {};
+      if (searchTerm) params.search = searchTerm;
+      if (groupFilter) params.groupId = groupFilter;
+      const response = await api.get(API_ENDPOINTS.CUSTOMERS, { params });
       return response.data;
     },
   });
@@ -115,11 +131,16 @@ const Customers = () => {
   // Create/Update customer mutation
   const customerMutation = useMutation({
     mutationFn: async (data) => {
+      const payload = {
+        ...data,
+        groupId: data.groupId || null,
+        isGroupAccount: !!data.isGroupAccount,
+      };
       if (editingCustomer) {
-        const response = await api.put(`${API_ENDPOINTS.CUSTOMERS}/${editingCustomer.id}`, data);
+        const response = await api.put(`${API_ENDPOINTS.CUSTOMERS}/${editingCustomer.id}`, payload);
         return response.data;
       } else {
-        const response = await api.post(API_ENDPOINTS.CUSTOMERS, data);
+        const response = await api.post(API_ENDPOINTS.CUSTOMERS, payload);
         return response.data;
       }
     },
@@ -163,6 +184,8 @@ const Customers = () => {
         nickname: customer.nickname || '',
         gender: customer.gender || 'OTHER',
         active: customer.active !== false,
+        groupId: customer.groupId || '',
+        isGroupAccount: !!customer.isGroupAccount,
         company: customer.company || '',
         street: customer.street || '',
         zip: customer.zip || '',
@@ -176,6 +199,8 @@ const Customers = () => {
         nickname: '',
         gender: 'OTHER',
         active: true,
+        groupId: '',
+        isGroupAccount: false,
         company: '',
         street: '',
         zip: '',
@@ -290,6 +315,7 @@ const Customers = () => {
               placeholder="Kunde suchen..."
               variant="outlined"
               size="small"
+              fullWidth
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               InputProps={{
@@ -300,6 +326,37 @@ const Customers = () => {
                 ),
               }}
             />
+          </Grid>
+          {groups.length > 0 && (
+            <Grid size={{ xs: 12, sm: 'auto' }}>
+              <TextField
+                select
+                label="Gruppe"
+                size="small"
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                sx={{ minWidth: 160 }}
+              >
+                <MenuItem value="">Alle Gruppen</MenuItem>
+                {groups.map((g) => (
+                  <MenuItem key={g.id} value={g.id}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <GroupBadge group={g} size={20} tooltip={false} />
+                      {g.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+          )}
+          <Grid>
+            <Button
+              variant="outlined"
+              startIcon={<Groups />}
+              onClick={() => setOpenGroupManager(true)}
+            >
+              Gruppen
+            </Button>
           </Grid>
           <Grid>
             <Button
@@ -347,20 +404,34 @@ const Customers = () => {
               >
                 <TableCell>
                   <Box display="flex" alignItems="center">
-                    <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}>
+                    {customer.group && (
+                      <Box sx={{ mr: 1, flexShrink: 0 }}>
+                        <GroupBadge group={customer.group} size={28} />
+                      </Box>
+                    )}
+                    <Avatar sx={{ mr: 2, bgcolor: 'primary.main', flexShrink: 0 }}>
                       <Person />
                     </Avatar>
-                    <Box>
-                      <Typography variant="body2" fontWeight="bold">
-                        {customer.name}
-                      </Typography>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Box display="flex" alignItems="center" gap={0.5} flexWrap="wrap">
+                        <Typography variant="body2" fontWeight="bold" noWrap>
+                          {customer.name}
+                        </Typography>
+                        {customer.isGroupAccount && (
+                          <Chip
+                            label="Gruppenkonto"
+                            size="small"
+                            sx={{ height: 16, fontSize: '0.6rem', flexShrink: 0 }}
+                          />
+                        )}
+                      </Box>
                       {isMobile && customer.nickname && (
-                        <Typography variant="caption" display="block" color="text.secondary">
+                        <Typography variant="caption" display="block" color="text.secondary" noWrap>
                           {customer.nickname}
                         </Typography>
                       )}
                     </Box>
-                    <Box sx={{ ml: 2 }} onClick={(e) => e.stopPropagation()}>
+                    <Box sx={{ ml: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                       <Tooltip title={customer.active !== false ? "Aktiv" : "Versteckt"}>
                         <Switch
                           size="small"
@@ -475,6 +546,52 @@ const Customers = () => {
                     />
                   )}
                 />
+              </Grid>
+
+              {/* Gruppe */}
+              <Grid size={{ xs: 12 }}>
+                <Divider><Typography variant="caption" color="text.secondary">Team / Gruppe (optional)</Typography></Divider>
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <Controller
+                  name="groupId"
+                  control={control}
+                  defaultValue=""
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Gruppe"
+                      select
+                      fullWidth
+                    >
+                      <MenuItem value="">– keine –</MenuItem>
+                      {groups.map((g) => (
+                        <MenuItem key={g.id} value={g.id}>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <GroupBadge group={g} size={20} tooltip={false} />
+                            {g.name}
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  )}
+                />
+              </Grid>
+              <Grid size={{ xs: 12 }}>
+                <Controller
+                  name="isGroupAccount"
+                  control={control}
+                  defaultValue={false}
+                  render={({ field }) => (
+                    <FormControlLabel
+                      control={<Switch {...field} checked={field.value} onChange={(e) => field.onChange(e.target.checked)} />}
+                      label="Gruppenkonto (mehrere buchen auf dieses Konto)"
+                    />
+                  )}
+                />
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mt: -0.5 }}>
+                  Zählt in der Team-Wertung, aber nicht als Kopf bei „pro Kopf"
+                </Typography>
               </Grid>
 
               {canSeeContact && (
@@ -825,6 +942,11 @@ const Customers = () => {
           <Button onClick={handleCloseDetailDialog}>Schließen</Button>
         </DialogActions>
       </Dialog>
+      {/* Gruppen-Manager */}
+      <GroupManagerDialog
+        open={openGroupManager}
+        onClose={() => setOpenGroupManager(false)}
+      />
     </Box>
   );
 };

@@ -20,6 +20,7 @@ import ArticleLinePicker from '../components/articles/ArticleLinePicker';
 import { isCurrentBusinessDay } from '../utils/businessDay';
 import { num, money } from '../utils/format';
 import { invalidate } from '../utils/invalidate';
+import GroupBadge from '../components/customers/GroupBadge';
 
 /* Helpers */
 const withinHours = (date, h) => { const d = new Date(date); if (Number.isNaN(d.getTime())) return false; return Date.now() - d.getTime() <= h * 60 * 60 * 1000; };
@@ -313,7 +314,10 @@ const Sales = () => {
             {(customer.nickname?.[0] || customer.name?.[0] || '?').toUpperCase()}
           </Avatar>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography noWrap variant="body1" sx={{ fontWeight: 600, fontSize: '1rem' }}>{customer.nickname || customer.name}</Typography>
+            <Stack direction="row" alignItems="center" spacing={0.5}>
+              {customer.group && <GroupBadge group={customer.group} size={18} tooltip={false} />}
+              <Typography noWrap variant="body1" sx={{ fontWeight: 600, fontSize: '1rem' }}>{customer.nickname || customer.name}</Typography>
+            </Stack>
             {customer._specialActive
               ? (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.nickname ? `${customer.name} · ` : ''}zuletzt {timeLabel(customer.lastActivity)}</Typography>)
               : customer.nickname && (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.name}</Typography>)}

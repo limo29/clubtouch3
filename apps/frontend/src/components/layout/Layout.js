@@ -203,7 +203,7 @@ const Layout = () => {
     const p = location.pathname;
     if (p.startsWith('/sales')) return 'Verkauf';
     if (p.startsWith('/dashboard')) return 'Dashboard';
-    if (p.startsWith('/highscore')) return 'Highscore';
+    if (p.startsWith('/highscore')) return 'Clubscore';
     if (p.startsWith('/ads')) return 'Werbung';
     if (p.startsWith('/invoices')) return 'Kundenrechnungen';
     if (p.startsWith('/purchases')) return 'Einkauf';

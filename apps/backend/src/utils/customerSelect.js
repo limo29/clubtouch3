@@ -12,6 +12,17 @@ const CUSTOMER_BASIC_SELECT = {
   lastActivity: true,
   createdAt: true,
   updatedAt: true,
+  groupId: true,
+  isGroupAccount: true,
+  group: {
+    select: {
+      id: true,
+      name: true,
+      color: true,
+      emoji: true,
+      imageUrl: true,
+    },
+  },
 };
 
 module.exports = { CUSTOMER_BASIC_SELECT };

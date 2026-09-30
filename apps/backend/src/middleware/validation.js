@@ -1,6 +1,6 @@
 const { body, validationResult } = require('express-validator');
 
-// Validation Rules 
+// Validation Rules
 const validateLogin = [
   body()
     .custom((value, { req }) => {
@@ -41,7 +41,7 @@ const validateRegister = [
     .withMessage('Benutzername darf nur Buchstaben, Zahlen und Unterstrich enthalten')
 ];
 
-// Validation Error Handler 
+// Validation Error Handler
 function handleValidationErrors(req, res, next) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -173,6 +173,15 @@ const validateCustomer = [
   body('nickname')
     .optional()
     .trim(),
+  // Gruppe
+  body('groupId')
+    .optional({ values: 'falsy' })
+    .isUUID()
+    .withMessage('groupId muss eine gültige UUID sein'),
+  body('isGroupAccount')
+    .optional()
+    .isBoolean()
+    .withMessage('isGroupAccount muss ein Boolean sein'),
   // Kontaktdaten (optional; CASHIER-Eingaben werden im Controller ignoriert)
   body('company')
     .optional({ values: 'falsy' })
@@ -217,6 +226,15 @@ const validateCustomerUpdate = [
   body('nickname')
     .optional()
     .trim(),
+  // Gruppe
+  body('groupId')
+    .optional({ values: 'falsy' })
+    .isUUID()
+    .withMessage('groupId muss eine gültige UUID sein'),
+  body('isGroupAccount')
+    .optional()
+    .isBoolean()
+    .withMessage('isGroupAccount muss ein Boolean sein'),
   // Kontaktdaten (optional; CASHIER-Eingaben werden im Controller ignoriert)
   body('company')
     .optional({ values: 'falsy' })
@@ -262,6 +280,54 @@ const validateTopUp = [
   body('reference')
     .optional()
     .trim()
+];
+
+// Kundengruppe anlegen/aktualisieren
+const validateCustomerGroup = [
+  body('name')
+    .trim()
+    .isLength({ min: 1, max: 40 })
+    .withMessage('Name muss zwischen 1 und 40 Zeichen lang sein'),
+  body('color')
+    .optional({ values: 'falsy' })
+    .matches(/^#[0-9a-fA-F]{6}$/)
+    .withMessage('Farbe muss im Format #rrggbb angegeben werden'),
+  body('emoji')
+    .optional({ values: 'falsy' })
+    .isLength({ max: 16 })
+    .withMessage('Emoji darf höchstens 16 Zeichen lang sein'),
+  body('sortOrder')
+    .optional({ values: 'falsy' })
+    .isInt()
+    .withMessage('sortOrder muss eine ganze Zahl sein'),
+  body('active')
+    .optional()
+    .isBoolean()
+    .withMessage('active muss ein Boolean sein'),
+];
+
+const validateCustomerGroupUpdate = [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 40 })
+    .withMessage('Name muss zwischen 1 und 40 Zeichen lang sein'),
+  body('color')
+    .optional({ values: 'falsy' })
+    .matches(/^#[0-9a-fA-F]{6}$/)
+    .withMessage('Farbe muss im Format #rrggbb angegeben werden'),
+  body('emoji')
+    .optional({ values: 'falsy' })
+    .isLength({ max: 16 })
+    .withMessage('Emoji darf höchstens 16 Zeichen lang sein'),
+  body('sortOrder')
+    .optional({ values: 'falsy' })
+    .isInt()
+    .withMessage('sortOrder muss eine ganze Zahl sein'),
+  body('active')
+    .optional()
+    .isBoolean()
+    .withMessage('active muss ein Boolean sein'),
 ];
 
 // Kassenzählung: Stückelung = Objekt { "200": 0, ..., "0.01": 3 } mit nichtnegativen Ganzzahlen
@@ -402,6 +468,8 @@ module.exports = {
   validateInventory,
   validateCustomer,
   validateCustomerUpdate,
+  validateCustomerGroup,
+  validateCustomerGroupUpdate,
   validateTopUp,
   validateSale,
   validateQuickSale,
@@ -411,5 +479,3 @@ module.exports = {
 
   handleValidationErrors
 };
-
-
