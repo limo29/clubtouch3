@@ -224,9 +224,6 @@ const Customers = () => {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Kundenverwaltung
-      </Typography>
 
       {/* Statistics Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }} alignItems="stretch">

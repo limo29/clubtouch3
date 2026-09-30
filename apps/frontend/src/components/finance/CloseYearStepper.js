@@ -141,7 +141,7 @@ function StepCash({ preview, candidates, selectedId, onSelect }) {
   if (!chosen) {
     return (
       <Alert severity="warning">
-        Keine Kassenzählung im Abschlussfenster. Bitte zuerst unter „Kasse zählen" zählen und dann in Schritt 1 „Neu laden".
+        Keine Kassenzählung im Abschlussfenster. Bitte zuerst unter „Kasse & Bank" zählen und dann in Schritt 1 „Neu laden".
       </Alert>
     );
   }

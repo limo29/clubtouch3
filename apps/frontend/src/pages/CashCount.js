@@ -1,5 +1,8 @@
 /**
- * Kasse zählen: freie Kassenzählung als eigener Vorgang (jederzeit, nicht täglich).
+ * Kasse & Bank (Route /cash-count), zwei Tabs:
+ *   Kasse (Standard): freie Kassenzählung als eigener Vorgang (jederzeit, nicht täglich) + Kassenbewegungen.
+ *   Bank (?tab=bank): components/finance/BankOverview (Kontostände, Bank-Abstimmung, Bewegungen im Zeitraum).
+ * Kasse-Tab:
  * Oben die Soll-Herleitung aus /cash-counts/preview, in der Mitte der Stückelungszähler
  * (14 Nennwerte), unten die bisherigen Zählungen. Das Backend rechnet Ist/Soll/Differenz
  * selbst; hier wird nur live vorgerechnet.
@@ -9,7 +12,7 @@ import {
   Box, Card, CardContent, Typography, Grid, Table, TableBody, TableCell, TableHead, TableRow,
   Button, TextField, Alert, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
   IconButton, Chip, Divider, Skeleton, Tooltip, useTheme, useMediaQuery,
-  ToggleButtonGroup, ToggleButton, Autocomplete, Snackbar,
+  ToggleButtonGroup, ToggleButton, Autocomplete, Snackbar, Tabs, Tab,
 } from '@mui/material';
 import {
   Save, PictureAsPdf, Refresh, PointOfSale,
@@ -18,12 +21,14 @@ import {
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
+import { useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
 import { useAuth } from '../context/AuthContext';
 import QuantityStepper from '../components/common/QuantityStepper';
 import CashMovementList from '../components/finance/CashMovementList';
+import BankOverview from '../components/finance/BankOverview';
 
 export const CASH_COUNTS_QUERY_KEY = ['cash-counts'];
 
@@ -340,6 +345,9 @@ export default function CashCount() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { isAdmin, isAccountant } = useAuth();
   const canCancel = isAdmin || isAccountant;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') === 'bank' ? 'bank' : 'kasse';
+  const setTab = (v) => setSearchParams(v === 'bank' ? { tab: 'bank' } : {}, { replace: true });
 
   const [counts, setCounts] = useState(emptyCounts);
   const [note, setNote] = useState('');
@@ -413,24 +421,28 @@ export default function CashCount() {
 
   return (
     <Box>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
-        <Typography variant="h4">Kasse zählen</Typography>
-        <Tooltip title="Soll neu berechnen">
-          <span>
-            <IconButton onClick={() => refetchPreview()} disabled={isFetching} aria-label="Soll neu berechnen"><Refresh /></IconButton>
-          </span>
-        </Tooltip>
-      </Stack>
+      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: { xs: 2, md: 3 }, borderBottom: 1, borderColor: 'divider' }}>
+        <Tab value="kasse" label="Kasse" icon={<PointOfSale />} iconPosition="start" sx={{ minHeight: 48 }} />
+        <Tab value="bank" label="Bank" icon={<AccountBalance />} iconPosition="start" sx={{ minHeight: 48 }} />
+      </Tabs>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
 
+      {tab === 'bank' ? <BankOverview /> : (
       <Grid container spacing={{ xs: 2, md: 3 }}>
         {/* Soll-Herleitung + Kassenbewegung buchen (linke Spalte) */}
         <Grid size={{ xs: 12, lg: 4 }}>
           <Stack spacing={{ xs: 2, md: 3 }}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>Soll-Herleitung</Typography>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography variant="h6">Soll-Herleitung</Typography>
+                <Tooltip title="Soll neu berechnen">
+                  <span>
+                    <IconButton size="small" onClick={() => refetchPreview()} disabled={isFetching} aria-label="Soll neu berechnen"><Refresh /></IconButton>
+                  </span>
+                </Tooltip>
+              </Stack>
               <ExpectedTable preview={preview} isLoading={previewLoading} error={previewError} />
               {preview?.expenseDocs?.length > 0 && (
                 <Box sx={{ mt: 2 }}>
@@ -581,6 +593,7 @@ export default function CashCount() {
           </Card>
         </Grid>
       </Grid>
+      )}
 
       {/* Storno-Dialog */}
       <CancelMovementDialog

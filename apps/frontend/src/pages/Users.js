@@ -181,9 +181,6 @@ const Users = () => {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Benutzerverwaltung
-      </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Anmeldung mit E-Mail oder Benutzername, Groß-/Kleinschreibung egal. Das eigene Passwort ändert jeder selbst über das Benutzermenü oben rechts.
       </Typography>

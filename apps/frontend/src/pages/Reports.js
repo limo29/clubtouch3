@@ -3,6 +3,8 @@
  * Parameter werden je Bericht getrennt gehalten (State-Objekt pro Report-ID), Validierung je Bericht.
  * Die Berichtsliste kommt vom Backend (/exports, inkl. EÜR); "Kassenzählung (PDF)" ergänzt das
  * Frontend, weil sie kein Export-Endpunkt ist, sondern /cash-counts/:id/pdf.
+ * „Einnahmen & Ausgaben“ (eur) zeigt unter der Auswahl die Live-Vorschau (EurOverview) für den
+ * gewählten Zeitraum. ?report=<id> wählt einen Bericht vor (z. B. Umleitung von /profit-loss?tab=eur).
  */
 import React, { useState, useMemo } from 'react';
 import {
@@ -16,11 +18,13 @@ import {
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { format, addMonths, subMonths, startOfMonth } from 'date-fns';
 import { de } from 'date-fns/locale';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
+import EurOverview from '../components/finance/EurOverview';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
 
@@ -173,7 +177,8 @@ function DailyPreview({ data, isLoading, error }) {
 /* ------------------------------------- Seite ------------------------------------- */
 
 const Reports = () => {
-  const [selectedId, setSelectedId] = useState(null);
+  const [searchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState(() => searchParams.get('report'));
   const [paramsById, setParamsById] = useState({});
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
@@ -368,8 +373,6 @@ const Reports = () => {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>Berichte & Exporte</Typography>
-
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 5, lg: 4 }}>
           <Card>
@@ -441,6 +444,13 @@ const Reports = () => {
             </CardContent>
           </Card>
         </Grid>
+
+        {/* Live-Vorschau Einnahmen & Ausgaben über die volle Breite */}
+        {selected?.id === 'eur' && params.startDate && params.endDate && params.startDate <= params.endDate && (
+          <Grid size={{ xs: 12 }}>
+            <EurOverview startDate={ymd(params.startDate)} endDate={ymd(params.endDate)} />
+          </Grid>
+        )}
       </Grid>
 
       <Dialog open={confirmAll} onClose={() => setConfirmAll(false)} maxWidth="xs" fullWidth>

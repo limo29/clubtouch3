@@ -159,9 +159,6 @@ const Transactions = () => {
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Transaktionen
-      </Typography>
 
       {/* Daily Summary Cards */}
       {dailySummary && (

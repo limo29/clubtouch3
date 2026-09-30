@@ -366,10 +366,7 @@ export default function Invoices() {
       <Box sx={{ mb: 4 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
           <Box sx={{ minWidth: 0 }}>
-            <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: '-0.02em', fontSize: { xs: '1.6rem', sm: '2.125rem' }, overflowWrap: 'anywhere' }}>
-              Kundenrechnungen
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            <Typography variant="body2" color="text.secondary">
               Rechnungen an Mitglieder, Gäste und Vereine
             </Typography>
           </Box>

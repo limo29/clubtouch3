@@ -157,7 +157,7 @@ const Layout = () => {
             </ListItemButton>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/cash-count')} onClick={() => { navigate('/cash-count'); setMobileOpen(false); }}>
               <ListItemIcon><PointOfSale /></ListItemIcon>
-              <ListItemText primary="Kasse zählen" />
+              <ListItemText primary="Kasse & Bank" />
             </ListItemButton>
             <ListItemButton sx={{ pl: 4 }} selected={isActive('/profit-loss')} onClick={() => { navigate('/profit-loss'); setMobileOpen(false); }}>
               <ListItemIcon><AccountBalance /></ListItemIcon>
@@ -208,7 +208,7 @@ const Layout = () => {
     if (p.startsWith('/invoices')) return 'Kundenrechnungen';
     if (p.startsWith('/purchases')) return 'Einkauf';
     if (p.startsWith('/transactions')) return 'Transaktionen';
-    if (p.startsWith('/cash-count')) return 'Kasse zählen';
+    if (p.startsWith('/cash-count')) return 'Kasse & Bank';
     if (p.startsWith('/profit-loss')) return 'Kassenprüfung';
     if (p.startsWith('/reports')) return 'Berichte';
     if (p.startsWith('/articles')) return 'Artikel';

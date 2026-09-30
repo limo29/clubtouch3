@@ -563,10 +563,7 @@ const Articles = () => {
   return (
     <Box sx={{ pb: 10 }}>
       {/* --- Header Section --- */}
-      <Box mb={4}>
-        <Typography variant="h4" fontWeight={800} gutterBottom sx={{ letterSpacing: "-0.02em" }}>
-          Artikelverwaltung
-        </Typography>
+      <Box mb={3}>
         <Typography variant="body1" color="text.secondary">
           Verwalten Sie Ihren Bestand, Preise und Kategorien.
         </Typography>
