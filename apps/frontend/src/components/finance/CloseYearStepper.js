@@ -12,7 +12,7 @@ import {
   LinearProgress, Alert, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, InputAdornment,
   Chip, Radio, RadioGroup, FormControlLabel, Skeleton, Tabs, Tab, Divider, useTheme, useMediaQuery, Grid,
 } from '@mui/material';
-import { Close, Add, Delete, Search, PictureAsPdf, Refresh, OpenInNew, DoneAll, Replay } from '@mui/icons-material';
+import { Close, Add, Delete, Search, PictureAsPdf, Refresh, DoneAll, Replay } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import api from '../../services/api';
@@ -23,6 +23,7 @@ import { downloadFile, apiErrorMessage } from '../../utils/download';
 import QuantityStepper from '../common/QuantityStepper';
 import ReceiptReview from './ReceiptReview';
 import BankReconciliation from './BankReconciliation';
+import CashCountForm from './CashCountForm';
 
 const STEPS = ['Zeitraum & Kennzahlen', 'Kasse', 'Bank', 'Belege', 'Inventur', 'Prüfen & abschließen'];
 
@@ -65,7 +66,7 @@ function KeyValueTable({ rows }) {
   );
 }
 
-function StepOverview({ fy, preview, isLoading, error, onRefetch }) {
+function StepOverview({ fy, preview, isLoading, error, onRefetch, onCountNow }) {
   if (isLoading) return <Skeleton variant="rounded" height={260} />;
   if (error) return <Alert severity="error">Vorschau konnte nicht geladen werden.</Alert>;
   if (!preview) return null;
@@ -84,9 +85,9 @@ function StepOverview({ fy, preview, isLoading, error, onRefetch }) {
       </Typography>
       {needsCount && (
         <Alert severity="warning">
-          <strong>Keine Kassenzählung im Abschlussfenster.</strong> Für den Abschluss muss die Kasse zwischen dem {fmtDate(preview.cashCountWindow?.start || preview.cashCountWindow?.from)} und dem {fmtDate(preview.cashCountWindow?.end || preview.cashCountWindow?.to)} gezählt werden. Danach hier „Neu laden".
+          <strong>Keine Kassenzählung im Abschlussfenster.</strong> Für den Abschluss muss die Kasse zwischen dem {fmtDate(preview.cashCountWindow?.start || preview.cashCountWindow?.from)} und dem {fmtDate(preview.cashCountWindow?.end || preview.cashCountWindow?.to)} gezählt werden.
           <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', rowGap: 1 }}>
-            <Button color="inherit" size="small" variant="outlined" startIcon={<OpenInNew />} onClick={() => window.open('/cash-count', '_blank', 'noopener')}>Jetzt Kasse zählen</Button>
+            <Button color="inherit" size="small" variant="outlined" startIcon={<Add />} onClick={onCountNow}>Jetzt Kasse zählen</Button>
             <Button color="inherit" size="small" variant="outlined" startIcon={<Refresh />} onClick={onRefetch}>Neu laden</Button>
           </Stack>
         </Alert>
@@ -135,14 +136,50 @@ function StepOverview({ fy, preview, isLoading, error, onRefetch }) {
 
 /* ---------------------------------- Kasse --------------------------------- */
 
-function StepCash({ preview, candidates, selectedId, onSelect }) {
+/** Liegt „jetzt" im Zählfenster? Zählungen werden immer mit dem aktuellen Zeitpunkt gespeichert. */
+function countWindow(preview) {
+  const w = preview?.cashCountWindow;
+  if (!w) return { start: null, end: null, open: false };
+  const start = new Date(w.start || w.from);
+  const end = new Date(w.end || w.to);
+  const now = Date.now();
+  return { start, end, open: now >= start.getTime() && now <= end.getTime() };
+}
+
+function NewCountArea({ preview, formOpen, setFormOpen, onCounted, hasCount }) {
+  const w = countWindow(preview);
+  if (!w.open) {
+    return (
+      <Alert severity="info">
+        Eine Zählung jetzt läge außerhalb des Abschlussfensters ({fmtDate(w.start)} – {fmtDate(w.end)}) und gilt nicht für dieses Geschäftsjahr, weil Zählungen immer mit dem aktuellen Zeitpunkt gespeichert werden.
+      </Alert>
+    );
+  }
+  if (formOpen) {
+    return <CashCountForm outlined title="Neue Kassenzählung" onSaved={onCounted} onCancel={() => setFormOpen(false)} />;
+  }
+  return (
+    <Box>
+      <Button variant={hasCount ? 'outlined' : 'contained'} startIcon={<Add />} onClick={() => setFormOpen(true)}>
+        {hasCount ? 'Neue Kassenzählung' : 'Jetzt Kasse zählen'}
+      </Button>
+    </Box>
+  );
+}
+
+function StepCash({ preview, candidates, selectedId, onSelect, formOpen, setFormOpen, onCounted }) {
   if (!preview) return <Skeleton variant="rounded" height={160} />;
   const chosen = candidates.find((c) => c.id === selectedId) || preview.cashCount;
+  const newCount = <NewCountArea preview={preview} formOpen={formOpen} setFormOpen={setFormOpen} onCounted={onCounted} hasCount={!!chosen} />;
   if (!chosen) {
+    const w = countWindow(preview);
     return (
-      <Alert severity="warning">
-        Keine Kassenzählung im Abschlussfenster. Bitte zuerst unter „Kasse & Bank" zählen und dann in Schritt 1 „Neu laden".
-      </Alert>
+      <Stack spacing={2}>
+        <Alert severity="warning">
+          Keine Kassenzählung im Abschlussfenster. Für den Abschluss muss die Kasse zwischen dem {fmtDate(w.start)} und dem {fmtDate(w.end)} gezählt werden.
+        </Alert>
+        {newCount}
+      </Stack>
     );
   }
   const diff = num(chosen.difference);
@@ -177,6 +214,7 @@ function StepCash({ preview, candidates, selectedId, onSelect }) {
       <Typography variant="caption" color="text.secondary">
         Der Kassenbestand des Abschlusses ist immer der Ist-Wert dieser Zählung. Eine Korrektur ist nur über eine neue Zählung möglich.
       </Typography>
+      {newCount}
     </Stack>
   );
 }
@@ -423,13 +461,14 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
   const [banks, setBanks] = useState([emptyBank()]);
   const [counts, setCounts] = useState({});
   const [selectedCountId, setSelectedCountId] = useState(null);
+  const [countFormOpen, setCountFormOpen] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [missingReceiptNumbers, setMissingReceiptNumbers] = useState(null);
 
   useEffect(() => {
     if (!open) {
-      setActiveStep(0); setBanks([emptyBank()]); setCounts({}); setSelectedCountId(null);
+      setActiveStep(0); setBanks([emptyBank()]); setCounts({}); setSelectedCountId(null); setCountFormOpen(false);
       setError(null); setResult(null); setMissingReceiptNumbers(null);
     }
   }, [open]);
@@ -480,6 +519,12 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
       return t >= start && t <= end;
     });
   }, [preview, countsData]);
+
+  const handleCounted = (cc) => {
+    setSelectedCountId(cc.id);
+    setCountFormOpen(false);
+    refetch();
+  };
 
   const chosenCount = candidates.find((c) => c.id === selectedCountId) || preview?.cashCount || null;
 
@@ -553,8 +598,8 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
           </Stack>
         ) : (
           <>
-            {activeStep === 0 && <StepOverview fy={fy} preview={preview} isLoading={previewLoading} error={previewError} onRefetch={() => refetch()} />}
-            {activeStep === 1 && <StepCash preview={preview} candidates={candidates} selectedId={selectedCountId} onSelect={setSelectedCountId} />}
+            {activeStep === 0 && <StepOverview fy={fy} preview={preview} isLoading={previewLoading} error={previewError} onRefetch={() => refetch()} onCountNow={() => { setCountFormOpen(true); setActiveStep(1); }} />}
+            {activeStep === 1 && <StepCash preview={preview} candidates={candidates} selectedId={selectedCountId} onSelect={setSelectedCountId} formOpen={countFormOpen} setFormOpen={setCountFormOpen} onCounted={handleCounted} />}
             {activeStep === 2 && <StepBank banks={banks} setBanks={setBanks} recon={preview?.bankReconciliation || null} reconLoading={previewLoading} />}
             {activeStep === 3 && (
               <ReceiptReview

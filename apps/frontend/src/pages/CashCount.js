@@ -7,11 +7,11 @@
  * (14 Nennwerte), unten die bisherigen Zählungen. Das Backend rechnet Ist/Soll/Differenz
  * selbst; hier wird nur live vorgerechnet.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Box, Card, CardContent, Typography, Grid, Table, TableBody, TableCell, TableHead, TableRow,
   Button, TextField, Alert, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
-  IconButton, Chip, Divider, Skeleton, Tooltip, useTheme, useMediaQuery,
+  IconButton, Chip, Skeleton, Tooltip, useTheme, useMediaQuery,
   ToggleButtonGroup, ToggleButton, Autocomplete, Snackbar, Tabs, Tab,
 } from '@mui/material';
 import {
@@ -26,23 +26,14 @@ import api from '../services/api';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
 import { useAuth } from '../context/AuthContext';
-import QuantityStepper from '../components/common/QuantityStepper';
 import CashMovementList from '../components/finance/CashMovementList';
 import BankOverview from '../components/finance/BankOverview';
+import CashCountForm, { CASH_COUNTS_QUERY_KEY, TotalBox, signed, diffColor } from '../components/finance/CashCountForm';
 
-export const CASH_COUNTS_QUERY_KEY = ['cash-counts'];
+export { CASH_COUNTS_QUERY_KEY };
 
-const BILLS = [200, 100, 50, 20, 10, 5];
-const COINS = [2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01];
-const ALL_DENOMS = [...BILLS, ...COINS];
-
-const denomLabel = (d) => (d >= 1 ? `${d} €` : `${Math.round(d * 100)} ct`);
-const emptyCounts = () => Object.fromEntries(ALL_DENOMS.map((d) => [String(d), 0]));
-const roundCents = (v) => Math.round(num(v) * 100) / 100;
 const fmtDateTime = (iso) => (iso ? format(new Date(iso), 'dd.MM.yyyy HH:mm') : '—');
 const fmtDate = (iso) => (iso ? format(new Date(iso), 'dd.MM.yyyy') : '—');
-const signed = (v) => (num(v) > 0 ? '+' : '') + money(v);
-const diffColor = (v) => (Math.abs(num(v)) < 0.005 ? 'success.main' : 'error.main');
 
 /* ------------------------------ Soll-Herleitung ------------------------------ */
 
@@ -97,49 +88,6 @@ function ExpectedTable({ preview, isLoading, error }) {
         </Typography>
       )}
     </>
-  );
-}
-
-/* ------------------------------ Stückelung ------------------------------ */
-
-function DenomRow({ denom, count, onChange }) {
-  const key = String(denom);
-  return (
-    <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 0.75 }}>
-      <Typography sx={{ width: 56, fontWeight: 700, flexShrink: 0 }}>{denomLabel(denom)}</Typography>
-      <QuantityStepper
-        value={count}
-        aria-label={denomLabel(denom)}
-        showUnit={false}
-        inputWidth={52}
-        onDelta={(d) => onChange(key, Math.max(0, count + d))}
-        onSet={(v) => onChange(key, v)}
-      />
-      <Typography sx={{ ml: 'auto', minWidth: 80, textAlign: 'right', color: count > 0 ? 'text.primary' : 'text.disabled', fontVariantNumeric: 'tabular-nums' }}>
-        {money(count * denom)}
-      </Typography>
-    </Stack>
-  );
-}
-
-function DenomGroup({ title, denoms, counts, onChange }) {
-  return (
-    <Box>
-      <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 1 }}>{title}</Typography>
-      <Divider sx={{ mb: 0.5 }} />
-      {denoms.map((d) => (
-        <DenomRow key={d} denom={d} count={counts[String(d)] || 0} onChange={onChange} />
-      ))}
-    </Box>
-  );
-}
-
-function TotalBox({ label, value, color = 'text.primary', big = false, small = false }) {
-  return (
-    <Box sx={{ flex: 1, minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>{label}</Typography>
-      <Typography variant={big ? 'h4' : small ? 'h6' : 'h5'} sx={{ fontWeight: 800, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</Typography>
-    </Box>
   );
 }
 
@@ -349,8 +297,6 @@ export default function CashCount() {
   const tab = searchParams.get('tab') === 'bank' ? 'bank' : 'kasse';
   const setTab = (v) => setSearchParams(v === 'bank' ? { tab: 'bank' } : {}, { replace: true });
 
-  const [counts, setCounts] = useState(emptyCounts);
-  const [note, setNote] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
@@ -384,32 +330,7 @@ export default function CashCount() {
     onError: async (err) => setError(await apiErrorMessage(err, 'Storno fehlgeschlagen.')),
   });
 
-  const countedTotal = useMemo(
-    () => roundCents(ALL_DENOMS.reduce((s, d) => s + (counts[String(d)] || 0) * d, 0)),
-    [counts]
-  );
-  const expectedTotal = num(preview?.expectedTotal);
-  const difference = roundCents(countedTotal - expectedTotal);
-  const pieces = ALL_DENOMS.reduce((s, d) => s + (counts[String(d)] || 0), 0);
-
-  const setCount = (key, value) => setCounts((prev) => ({ ...prev, [key]: Math.max(0, Math.trunc(num(value))) }));
-
-  const save = useMutation({
-    mutationFn: async () => (await api.post('/cash-counts', { denominations: counts, note: note.trim() || undefined })).data,
-    onSuccess: (data) => {
-      setError(null);
-      setResult(data.cashCount);
-      qc.invalidateQueries({ queryKey: CASH_COUNTS_QUERY_KEY });
-    },
-    onError: async (err) => setError(await apiErrorMessage(err, 'Zählung konnte nicht gespeichert werden.')),
-  });
-
-  const resetForm = () => {
-    setCounts(emptyCounts());
-    setNote('');
-    setResult(null);
-    setError(null);
-  };
+  const resetForm = () => setResult(null);
 
   const downloadPdf = async (cc) => {
     try {
@@ -467,53 +388,7 @@ export default function CashCount() {
 
         {/* Stückelung */}
         <Grid size={{ xs: 12, lg: 8 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>Stückelung</Typography>
-              <Grid container spacing={{ xs: 2, sm: 4 }}>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <DenomGroup title="Scheine" denoms={BILLS} counts={counts} onChange={setCount} />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <DenomGroup title="Münzen" denoms={COINS} counts={counts} onChange={setCount} />
-                </Grid>
-              </Grid>
-
-              <Divider sx={{ my: 2 }} />
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
-                <TotalBox label="Ist gezählt" value={money(countedTotal)} big />
-                <TotalBox label="Soll" value={preview ? money(expectedTotal) : '…'} />
-                <TotalBox label="Differenz" value={preview ? signed(difference) : '…'} color={preview ? diffColor(difference) : 'text.disabled'} />
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-                {pieces} Scheine/Münzen gezählt
-              </Typography>
-
-              <TextField
-                label="Notiz (optional)"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                fullWidth
-                multiline
-                minRows={isMobile ? 2 : 1}
-                sx={{ mb: 2 }}
-              />
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="flex-end">
-                <Button onClick={resetForm} disabled={save.isPending || pieces === 0}>Zurücksetzen</Button>
-                <Button
-                  variant="contained"
-                  size="large"
-                  startIcon={<Save />}
-                  onClick={() => save.mutate()}
-                  disabled={save.isPending || !preview}
-                >
-                  {save.isPending ? 'Speichert…' : 'Zählung speichern'}
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
+          <CashCountForm onSaved={setResult} />
         </Grid>
 
         {/* Kassenbewegungen Liste */}
