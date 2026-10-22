@@ -11,10 +11,11 @@ router.get('/profit-loss', authorize('ADMIN','ACCOUNTANT','CASHIER'), accounting
 router.get('/bank-reconciliation', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.bankReconciliation);
 
 router.get('/fiscal-years', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.listFiscalYears);
-router.post('/fiscal-years', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.createFiscalYear);
+// Anlegen und Abschließen sind Sache von Vorstand/Kassenprüfung, nicht der Theke
+router.post('/fiscal-years', authorize('ADMIN','ACCOUNTANT'), accountingController.createFiscalYear);
 
 router.get('/fiscal-years/:id/preview', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.fiscalYearPreview);
-router.post('/fiscal-years/:id/close', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.closeFiscalYear);
+router.post('/fiscal-years/:id/close', authorize('ADMIN','ACCOUNTANT'), accountingController.closeFiscalYear);
 
 router.get('/fiscal-years/:id/bank-reconciliation', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.fiscalYearBankReconciliation);
 

@@ -57,7 +57,7 @@ router.put('/:id',
 
 // NEU: Rechnung löschen (stornieren oder hard delete)
 router.delete('/:id',
-  authorize('ADMIN', 'CASHIER'),
+  authorize('ADMIN', 'ACCOUNTANT'), // Löschen nicht an der Theke; Storno läuft über den Status
   invoiceController.deleteInvoice
 );
 module.exports = router;

@@ -20,6 +20,7 @@ import ReceiptReview from '../components/finance/ReceiptReview';
 import { fmtDate, signedMoney } from '../components/finance/FinanceBits';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
+import { useAuth } from '../context/AuthContext';
 
 /* ------------------------------- Geschäftsjahre ------------------------------- */
 
@@ -39,7 +40,7 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew, onReceipts }) 
 
   const actions = (fy) => (
     <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
-      {!fy.closed && <Button size="small" variant="contained" startIcon={<Lock />} onClick={() => onClose(fy)}>Abschließen</Button>}
+      {!fy.closed && onClose && <Button size="small" variant="contained" startIcon={<Lock />} onClick={() => onClose(fy)}>Abschließen</Button>}
       <Button size="small" variant="outlined" startIcon={<ReceiptLong />} onClick={() => onReceipts(fy)}>Belege</Button>
       <Button size="small" variant="outlined" startIcon={<PictureAsPdf />} onClick={() => downloadReport(fy)}>{fy.closed ? 'PDF' : 'Entwurf-PDF'}</Button>
     </Stack>
@@ -53,7 +54,7 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew, onReceipts }) 
           Ein Geschäftsjahr wird mit Kassenzählung, Bankständen, Belegprüfung und Inventur abgeschlossen und eingefroren.
           Laufende Zahlen: Berichte → „Einnahmen &amp; Ausgaben“, Kontostand und Bank-Abstimmung: Kasse &amp; Bank.
         </Typography>
-        <Button variant="contained" startIcon={<Add />} onClick={onNew} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>Neues Jahr</Button>
+        {onNew && <Button variant="contained" startIcon={<Add />} onClick={onNew} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>Neues Jahr</Button>}
       </Stack>
       {error && <Alert severity="error">Fehler beim Laden der Geschäftsjahre.</Alert>}
       {dlError && <Alert severity="error" onClose={() => setDlError(null)}>{dlError}</Alert>}
@@ -116,6 +117,8 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew, onReceipts }) 
 /* ---------------------------------- Seite ---------------------------------- */
 
 export default function ProfitLoss() {
+  const { can } = useAuth();
+  const canManage = can('manageFiscalYears');
   const qc = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -159,7 +162,12 @@ export default function ProfitLoss() {
 
   return (
     <Box>
-      <FiscalYearsSection fiscalYears={fiscalYears} error={fyError} onClose={setCloseTarget} onNew={() => setOpenNew(true)} onReceipts={setReceiptsFy} />
+      {/* Anlegen und Abschließen nur Admin/Buchhaltung; ohne Recht fehlen die Knöpfe */}
+      <FiscalYearsSection
+        fiscalYears={fiscalYears} error={fyError} onReceipts={setReceiptsFy}
+        onClose={canManage ? setCloseTarget : undefined}
+        onNew={canManage ? () => setOpenNew(true) : undefined}
+      />
 
       <Dialog open={!!receiptsFy} onClose={() => setReceiptsFy(null)} maxWidth="xl" fullWidth fullScreen={isMobile}>
         <Box sx={{ p: { xs: 2, sm: 3 }, display: 'flex', flexDirection: 'column', minHeight: isMobile ? '100vh' : '80vh' }}>

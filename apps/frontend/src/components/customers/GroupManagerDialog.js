@@ -162,7 +162,9 @@ function EmojiPicker({ value, onChange }) {
 export default function GroupManagerDialog({ open, onClose }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
+  const canEdit = can('editCustomers');
+  const canDelete = can('deleteGroups');
   const queryClient = useQueryClient();
 
   // Ansicht: 'list' | 'form'
@@ -323,15 +325,17 @@ export default function GroupManagerDialog({ open, onClose }) {
   const listView = (
     <>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}>
-        <Typography variant="h6" fontWeight={700}>Gruppen verwalten</Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          size="small"
-          onClick={openCreate}
-        >
-          Neue Gruppe
-        </Button>
+        <Typography variant="h6" fontWeight={700}>{canEdit ? 'Gruppen verwalten' : 'Gruppen'}</Typography>
+        {canEdit && (
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            size="small"
+            onClick={openCreate}
+          >
+            Neue Gruppe
+          </Button>
+        )}
       </DialogTitle>
       <DialogContent dividers sx={{ p: 0 }}>
         {isLoading ? (
@@ -369,10 +373,12 @@ export default function GroupManagerDialog({ open, onClose }) {
                       {grp.memberCount ?? 0} Mitglieder · Reihenfolge {grp.sortOrder}
                     </Typography>
                   </Box>
-                  <IconButton size="small" aria-label={`${grp.name} bearbeiten`} onClick={() => openEdit(grp)}>
-                    <Edit fontSize="small" />
-                  </IconButton>
-                  {isAdmin && (
+                  {canEdit && (
+                    <IconButton size="small" aria-label={`${grp.name} bearbeiten`} onClick={() => openEdit(grp)}>
+                      <Edit fontSize="small" />
+                    </IconButton>
+                  )}
+                  {canDelete && (
                     <IconButton
                       size="small"
                       color="error"

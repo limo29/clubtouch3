@@ -64,6 +64,7 @@ import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
 import { useArticles } from '../hooks/useArticles';
+import { useAuth } from '../context/AuthContext';
 
 /* ----------------------------- Helper Components ----------------------------- */
 
@@ -133,7 +134,8 @@ const StockIndicator = ({ stock, minStock, unit, purchaseUnit, unitsPerPurchase 
 
 
 
-const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus }) => {
+// readOnly: Rolle ohne Schreibrecht (Buchhaltung) – kein Schalter, keine Aktionen
+const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus, readOnly }) => {
   const theme = useTheme();
 
 
@@ -197,6 +199,7 @@ const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus }) => {
             <Tooltip title={article.active ? "Artikel ist aktiv" : "Artikel ist inaktiv"}>
               <Switch
                 checked={article.active}
+                disabled={readOnly}
                 onChange={() => onToggleStatus(article.id)}
                 color="success"
                 size="small"
@@ -228,6 +231,7 @@ const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus }) => {
       </Box>
 
       {/* Integrated Actions */}
+      {!readOnly && (
       <Box sx={{ p: 2, pt: 0, display: 'flex', gap: 1 }}>
         <Button
           size="small"
@@ -253,11 +257,12 @@ const ArticleCard = ({ article, onEdit, onExpired, onToggleStatus }) => {
           Bearbeiten
         </Button>
       </Box>
+      )}
     </Card >
   );
 };
 
-const SortableArticleItem = ({ article, onEdit, onExpired, onToggleStatus, isReordering }) => {
+const SortableArticleItem = ({ article, onEdit, onExpired, onToggleStatus, isReordering, readOnly }) => {
   const {
     attributes,
     listeners,
@@ -283,6 +288,7 @@ const SortableArticleItem = ({ article, onEdit, onExpired, onToggleStatus, isReo
           onEdit={onEdit}
           onExpired={onExpired}
           onToggleStatus={onToggleStatus}
+          readOnly={readOnly}
         />
         {isReordering && (
           <Box
@@ -314,6 +320,8 @@ const Articles = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const fullScreenDialog = useMediaQuery(theme.breakpoints.down('sm')); // Artikel-Dialog auf dem Handy als Vollbild
   const queryClient = useQueryClient();
+  const { can } = useAuth();
+  const canEdit = can('editArticles');
 
   // State
   const [openDialog, setOpenDialog] = useState(false);
@@ -633,7 +641,7 @@ const Articles = () => {
               sx: { borderRadius: 1.5 }
             }}
           />
-          {isReordering ? (
+          {canEdit && (isReordering ? (
             <Button
               variant="contained"
               color="success"
@@ -657,8 +665,9 @@ const Articles = () => {
             >
               Reihenfolge ändern
             </Button>
-          )}
+          ))}
 
+          {canEdit && (
           <Button
             variant="contained"
             startIcon={<Add />}
@@ -669,6 +678,7 @@ const Articles = () => {
           >
             Neuer Artikel
           </Button>
+          )}
         </Stack>
         {isReordering && (
           <Alert severity="info" sx={{ mx: 1, mb: 1 }}>
@@ -702,6 +712,7 @@ const Articles = () => {
                   onExpired={handleOpenExpiredDialog}
                   onToggleStatus={(id) => toggleStatusMutation.mutate(id)}
                   isReordering={isReordering}
+                  readOnly={!canEdit}
                 />
               ))}
             </Grid>

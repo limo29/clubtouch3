@@ -59,8 +59,9 @@ import GroupManagerDialog from '../components/customers/GroupManagerDialog';
 
 const Customers = () => {
   const queryClient = useQueryClient();
-  const { isAdmin, isAccountant } = useAuth();
-  const canSeeContact = isAdmin || isAccountant;
+  const { can } = useAuth();
+  const canSeeContact = can('customerContact');
+  const canEdit = can('editCustomers');
   const [openDialog, setOpenDialog] = useState(false);
   const [openTopUpDialog, setOpenTopUpDialog] = useState(false);
   const [openDetailDialog, setOpenDetailDialog] = useState(false);
@@ -358,15 +359,17 @@ const Customers = () => {
               Gruppen
             </Button>
           </Grid>
-          <Grid>
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={() => handleOpenDialog()}
-            >
-              Neuer Kunde
-            </Button>
-          </Grid>
+          {canEdit && (
+            <Grid>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => handleOpenDialog()}
+              >
+                Neuer Kunde
+              </Button>
+            </Grid>
+          )}
         </Grid>
       </Paper>
 
@@ -436,6 +439,7 @@ const Customers = () => {
                         <Switch
                           size="small"
                           checked={customer.active !== false}
+                          disabled={!canEdit}
                           onChange={() => toggleClientStatus.mutate(customer)}
                           color="primary"
                         />
@@ -461,15 +465,18 @@ const Customers = () => {
                   {new Date(customer.createdAt).toLocaleDateString('de-DE')}
                 </TableCell>}
                 <TableCell align="right">
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleOpenDialog(customer);
-                    }}
-                  >
-                    <Edit />
-                  </IconButton>
+                  {canEdit && (
+                    <IconButton
+                      size="small"
+                      aria-label="Bearbeiten"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenDialog(customer);
+                      }}
+                    >
+                      <Edit />
+                    </IconButton>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -936,9 +943,11 @@ const Customers = () => {
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => handleOpenTopUpDialog(selectedCustomer)}>
-            Guthaben aufladen
-          </Button>
+          {canEdit && (
+            <Button onClick={() => handleOpenTopUpDialog(selectedCustomer)}>
+              Guthaben aufladen
+            </Button>
+          )}
           <Button onClick={handleCloseDetailDialog}>Schließen</Button>
         </DialogActions>
       </Dialog>

@@ -64,7 +64,7 @@ const Layout = () => {
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('lg'));
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, can } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const [pwOpen, setPwOpen] = useState(false);
@@ -107,12 +107,14 @@ const Layout = () => {
       <Divider />
       <List component="nav">
         {/* TOP LEVEL: Most Used */}
-        <ListItem disablePadding>
-          <ListItemButton selected={location.pathname === '/sales'} onClick={() => { navigate('/sales'); setMobileOpen(false); }}>
-            <ListItemIcon><ShoppingCart /></ListItemIcon>
-            <ListItemText primary="Verkauf" />
-          </ListItemButton>
-        </ListItem>
+        {can('sell') && (
+          <ListItem disablePadding>
+            <ListItemButton selected={location.pathname === '/sales'} onClick={() => { navigate('/sales'); setMobileOpen(false); }}>
+              <ListItemIcon><ShoppingCart /></ListItemIcon>
+              <ListItemText primary="Verkauf" />
+            </ListItemButton>
+          </ListItem>
+        )}
         <ListItem disablePadding>
           <ListItemButton selected={location.pathname === '/dashboard'} onClick={() => { navigate('/dashboard'); setMobileOpen(false); }}>
             <ListItemIcon><Dashboard /></ListItemIcon>
@@ -125,12 +127,14 @@ const Layout = () => {
             <ListItemText primary="Clubscore" />
           </ListItemButton>
         </ListItem>
-        <ListItem disablePadding>
-          <ListItemButton selected={location.pathname === '/ads'} onClick={() => { navigate('/ads'); setMobileOpen(false); }}>
-            <ListItemIcon><Campaign /></ListItemIcon>
-            <ListItemText primary="Werbung" />
-          </ListItemButton>
-        </ListItem>
+        {can('ads') && (
+          <ListItem disablePadding>
+            <ListItemButton selected={location.pathname === '/ads'} onClick={() => { navigate('/ads'); setMobileOpen(false); }}>
+              <ListItemIcon><Campaign /></ListItemIcon>
+              <ListItemText primary="Werbung" />
+            </ListItemButton>
+          </ListItem>
+        )}
 
         <Divider sx={{ my: 1 }} />
 
@@ -218,7 +222,7 @@ const Layout = () => {
   })();
 
   const ThemeIcon = resolvedMode === 'dark' ? DarkModeIcon : LightModeIcon;
-  const showCenterSalesBtn = !location.pathname.startsWith('/sales');
+  const showCenterSalesBtn = can('sell') && !location.pathname.startsWith('/sales');
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>

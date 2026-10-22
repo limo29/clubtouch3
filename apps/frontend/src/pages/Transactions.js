@@ -44,6 +44,7 @@ import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import KPICard from '../components/common/KPICard';
 import { invalidate } from '../utils/invalidate';
+import { useAuth } from '../context/AuthContext';
 
 // Stornierbar sind Verkäufe und die geldlosen Buchungen (Eigenverbrauch, Abgelaufen).
 // Ein REFUND ist selbst schon der Storno und wird nie storniert.
@@ -56,6 +57,8 @@ const cancelCopy = (t) => {
 };
 
 const Transactions = () => {
+  const { can } = useAuth();
+  const canCancel = can('sell'); // Storno wie Verkauf: Admin und Kasse
   const queryClient = useQueryClient();
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [detailDialog, setDetailDialog] = useState(false);
@@ -331,7 +334,7 @@ const Transactions = () => {
                       <Info />
                     </IconButton>
                   </Tooltip>
-                  {!transaction.cancelled && CANCELLABLE_TYPES.includes(transaction.type) && (
+                  {canCancel && !transaction.cancelled && CANCELLABLE_TYPES.includes(transaction.type) && (
                     <Tooltip title={transaction.type === 'SALE' ? 'Stornieren' : 'Buchung stornieren (Bestand zurückbuchen)'}>
                       <IconButton
                         size="small"

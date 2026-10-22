@@ -1,16 +1,17 @@
 const customerService = require('../services/customerService');
 const prisma = require('../utils/prisma');
 
-// Kontaktfelder, die nur ADMIN und ACCOUNTANT sehen dürfen
+// Kontaktfelder und die Rollen, die sie sehen und ändern dürfen
 const CONTACT_FIELDS = ['company', 'street', 'zip', 'city', 'phone', 'email'];
+const CONTACT_ROLES = ['ADMIN', 'ACCOUNTANT', 'CASHIER'];
 
 /**
- * Entfernt Kontaktdaten aus einem Kundenobjekt, wenn die Rolle
- * kein Leserecht dafür hat (nur ADMIN und ACCOUNTANT dürfen sie sehen).
+ * Entfernt Kontaktdaten aus einem Kundenobjekt, wenn die Rolle kein Leserecht dafür hat.
+ * Socket und /api/public bekommen sie unabhängig davon nie (CUSTOMER_BASIC_SELECT).
  */
 function stripContact(customer, role) {
   if (!customer) return customer;
-  if (role === 'ADMIN' || role === 'ACCOUNTANT') return customer;
+  if (CONTACT_ROLES.includes(role)) return customer;
   const stripped = { ...customer };
   for (const f of CONTACT_FIELDS) {
     delete stripped[f];
@@ -56,10 +57,10 @@ class CustomerController {
   // Neuen Kunden erstellen
   async createCustomer(req, res) {
     try {
-      // CASHIER darf Kontaktdaten nicht setzen – diese Felder werden ignoriert
+      // Rollen ohne Kontaktrecht dürfen Kontaktdaten nicht setzen – diese Felder werden ignoriert
       const role = req.user?.role;
       const data = { ...req.body };
-      if (role !== 'ADMIN' && role !== 'ACCOUNTANT') {
+      if (!CONTACT_ROLES.includes(role)) {
         for (const f of CONTACT_FIELDS) delete data[f];
       }
       const customer = await customerService.createCustomer(data);
@@ -97,10 +98,10 @@ class CustomerController {
   async updateCustomer(req, res) {
     try {
       const { id } = req.params;
-      // CASHIER darf Kontaktdaten nicht setzen – diese Felder werden ignoriert
+      // Rollen ohne Kontaktrecht dürfen Kontaktdaten nicht setzen – diese Felder werden ignoriert
       const role = req.user?.role;
       const data = { ...req.body };
-      if (role !== 'ADMIN' && role !== 'ACCOUNTANT') {
+      if (!CONTACT_ROLES.includes(role)) {
         for (const f of CONTACT_FIELDS) delete data[f];
       }
 

@@ -41,8 +41,8 @@ export default function Highscore() {
   const isXs = useMediaQuery(theme.breakpoints.down('sm'));
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const queryClient = useQueryClient();
-  const { user, isAdmin } = useAuth();
-  const canEdit = ['ADMIN', 'CASHIER'].includes(user?.role);
+  const { isAdmin, can } = useAuth();
+  const canEdit = can('editClubscore');
 
   const hs = useHighscoreLogic();
   const { data, display, setDisplay } = hs;
