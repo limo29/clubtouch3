@@ -16,7 +16,7 @@ router.get('/ads', publicController.getAds);
 // Speisekarte für Slides (Menü-Element): nur aktive Artikel, nur Name/Preis/Kategorie
 router.get('/articles', publicController.getMenuArticles);
 
-// Customer Balance
-router.get('/customer/balance', publicController.checkBalance);
+// Guthaben-Abfrage mit gemeinsamem PIN (POST, damit der PIN nicht in URL und Logs landet)
+router.post('/customer/balance', publicController.checkBalance);
 
 module.exports = router;

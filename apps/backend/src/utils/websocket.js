@@ -88,14 +88,19 @@ function emitHighscoreDisplay(display) {
   }
 }
 
-// Neuer Verkauf Event
+// Werbung geändert: /public/ads lädt sofort neu statt erst beim nächsten Polling
+function emitAdsUpdate() {
+  if (io) {
+    io.emit('ads:update', { at: new Date().toISOString() });
+  }
+}
+
+// Neuer Verkauf Event. Der Raum ist auch für anonyme Verbindungen offen (Kiosk),
+// deshalb ohne Kundenname und Betrag.
 function emitNewSale(transaction) {
   if (io) {
     io.to('highscore').emit('sale:new', {
       transactionId: transaction.id,
-      customerId: transaction.customerId,
-      customerName: transaction.customer?.name,
-      amount: transaction.totalAmount,
       timestamp: transaction.createdAt
     });
   }
@@ -106,5 +111,6 @@ module.exports = {
   getIO,
   emitHighscoreUpdate,
   emitHighscoreDisplay,
+  emitAdsUpdate,
   emitNewSale
 };

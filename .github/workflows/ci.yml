@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Use Node.js 18.x
+    - name: Use Node.js 22.x
       uses: actions/setup-node@v3
       with:
-        node-version: 18.x
+        node-version: 22.x
     - name: Install Backend Dependencies
       working-directory: ./apps/backend
       run: npm install
@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Use Node.js 18.x
+    - name: Use Node.js 22.x
       uses: actions/setup-node@v3
       with:
-        node-version: 18.x
+        node-version: 22.x
     - name: Install Frontend Dependencies
       working-directory: ./apps/frontend
       run: npm install

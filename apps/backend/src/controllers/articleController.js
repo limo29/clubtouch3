@@ -12,6 +12,15 @@ const sanitizeUrl = (url) => {
   return url.replace(/^http:\/\/(backend|localhost):\d+/, '');
 };
 
+// Bildpfade setzt nur der Upload selbst. Aus dem Body übernommen könnte man sonst einen beliebigen
+// Upload (z.B. einen Belegnachweis) eintragen, der beim nächsten Bildwechsel gelöscht wird.
+const IMAGE_FIELDS = ['imageUrl', 'imageThumbnail', 'imageSmall', 'imageMedium', 'imageLarge'];
+const withoutImageFields = (body) => {
+  const data = { ...body };
+  for (const key of IMAGE_FIELDS) delete data[key];
+  return data;
+};
+
 const sanitizeArticle = (article) => {
   if (!article) return article;
   return {
@@ -55,7 +64,7 @@ class ArticleController {
     console.log('[articles] req.file?', !!req.file, req.headers['content-type']);
 
     try {
-      const articleData = { ...req.body };
+      const articleData = withoutImageFields(req.body);
 
       // Zahlen normalisieren
       articleData.price = toDecimalString(articleData.price);
@@ -102,7 +111,7 @@ class ArticleController {
 
     try {
       const { id } = req.params;
-      const updateData = { ...req.body };
+      const updateData = withoutImageFields(req.body);
 
       // Zahlen normalisieren
       updateData.price = toDecimalString(updateData.price);

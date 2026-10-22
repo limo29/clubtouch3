@@ -23,6 +23,11 @@ const cashMovementRoutes = require('./routes/cashMovements');
 
 const app = express();
 
+// Hinter nginx/Railway steht die Client-IP in X-Forwarded-For. Nur private Proxys (Docker-Netz,
+// Railway intern) sind vertrauenswürdig, sonst ließe sich die IP per Header fälschen. Ohne diese
+// Einstellung sieht req.ip nur den Proxy und die Login-Bremse sperrt eine Kennung für alle.
+app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -32,7 +37,10 @@ const fs = require('fs');
 
 
 console.log('Serving uploads from:', uploadsPath);
-app.use('/uploads', express.static(uploadsPath));
+// nosniff: Uploads nie anhand des Inhalts als HTML/Skript interpretieren lassen
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff')
+}));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -85,8 +93,10 @@ app.use((req, res) => {
 // Error Handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(err.status || 500).json({
-    error: err.message || 'Etwas ist schiefgelaufen!',
+  const status = err.status || err.statusCode || 500;
+  // Interne Fehlermeldungen (Prisma, Dateisystem …) nicht an den Client geben
+  res.status(status).json({
+    error: status < 500 && err.message ? err.message : 'Etwas ist schiefgelaufen!',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });

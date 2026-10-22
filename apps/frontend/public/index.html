@@ -22,6 +22,10 @@
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
     <title>Clubtouch</title>
+    <script>
+      // Öffentliche Anzeigen (TV im dunklen Clubraum): schon vor dem App-Bundle schwarz statt weiß
+      if (location.pathname.indexOf('/public/') === 0) document.documentElement.style.background = '#000';
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

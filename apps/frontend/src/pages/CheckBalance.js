@@ -11,27 +11,33 @@ import api from '../services/api';
 
 const money = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
 
+// Der PIN ist für alle gleich; nach einer erfolgreichen Abfrage merkt sich das Gerät ihn
+const PIN_KEY = 'checkBalancePin';
+const loadPin = () => { try { return localStorage.getItem(PIN_KEY) || ''; } catch { return ''; } };
+const savePin = (pin) => { try { localStorage.setItem(PIN_KEY, pin); } catch { /* egal */ } };
+
 export default function CheckBalance() {
     const navigate = useNavigate();
     const [name, setName] = useState('');
+    const [pin, setPin] = useState(loadPin);
     const [loading, setLoading] = useState(false);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
 
     const handleCheck = async (e) => {
         e.preventDefault();
-        if (!name.trim()) return;
+        if (!name.trim() || !pin.trim()) return;
 
         setLoading(true);
         setError(null);
         setData(null);
 
         try {
-            const res = await api.get(`/public/customer/balance?name=${encodeURIComponent(name)}`);
+            const res = await api.post('/public/customer/balance', { name: name.trim(), pin: pin.trim() });
             setData(res.data);
+            savePin(pin.trim());
         } catch (err) {
-            console.error(err);
-            setError('Kunde nicht gefunden oder Fehler aufgetreten.');
+            setError(err.response?.data?.error || 'Abfrage fehlgeschlagen. Bitte später erneut versuchen.');
         } finally {
             setLoading(false);
         }
@@ -56,7 +62,7 @@ export default function CheckBalance() {
                             </Box>
                             <Typography variant="h4" fontWeight="bold" textAlign="center">Guthaben prüfen</Typography>
                             <Typography variant="body1" color="text.secondary" textAlign="center">
-                                Gib deinen Namen ein, um deinen aktuellen Kontostand und die letzten Transaktionen zu sehen.
+                                Gib deinen Namen und den PIN von der Theke ein, um deinen Kontostand und die letzten Buchungen zu sehen.
                             </Typography>
                         </Stack>
 
@@ -70,12 +76,21 @@ export default function CheckBalance() {
                                     onChange={(e) => setName(e.target.value)}
                                     autoFocus
                                 />
+                                <TextField
+                                    label="PIN"
+                                    type="password"
+                                    fullWidth
+                                    variant="outlined"
+                                    value={pin}
+                                    onChange={(e) => setPin(e.target.value)}
+                                    slotProps={{ htmlInput: { inputMode: 'numeric', autoComplete: 'off' } }}
+                                />
                                 <Button
                                     type="submit"
                                     variant="contained"
                                     size="large"
                                     fullWidth
-                                    disabled={loading || !name.trim()}
+                                    disabled={loading || !name.trim() || !pin.trim()}
                                     sx={{ py: 1.5, fontSize: '1.1rem' }}
                                 >
                                     {loading ? <CircularProgress size={24} /> : 'Prüfen'}

@@ -6,7 +6,7 @@
  *
  * Props: mode ('sale'|'purchase'|'invoice'), lines, onChange, showCrates, showPrice,
  * editablePrice, allowFreeLines, showStock, sidebar/sidebarLabel, linesLabel,
- * linesHeader, linesFooter, mobileTab/onMobileTabChange, columns, height.
+ * linesHeader, linesFooter, mobileTab/onMobileTabChange, mobileBar, columns, height.
  *
  * `lines`/`onChange`: Zeilenmodell aus hooks/useArticleLines. `onChange` MUSS eine
  * Updater-Funktion akzeptieren (wie setState), damit Doppeltipps nichts verlieren –
@@ -16,15 +16,19 @@
  *   • Wisch nach links auf einer Warenkorb-Zeile → „Entfernen" (via SwipeableLine).
  *   • Rückgängig-Snackbar nach jeder Zeilenlöschung (5 s, nur letzte Löschung).
  *   • Langer Touch (~500 ms) auf Artikel-Kachel → Mengenauswahl-Dialog.
+ *
+ * `mobileBar({ openSidebar, openLines, count })` (unter `md`): statt Tabs bleiben die Artikel immer
+ * sichtbar, darunter steht die Leiste der Seite; Seitenleiste und Positionen öffnen sich als Blatt
+ * von unten. mobileTab 0 = Seitenleiste offen, 1 = kein Blatt, 2 = Positionen offen.
  */
 import React, { useMemo, useRef, useState } from 'react';
 import {
   Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
-  DialogTitle, IconButton, InputAdornment, Snackbar, Stack, Tab, Tabs, TextField,
+  DialogTitle, Drawer, IconButton, InputAdornment, Snackbar, Stack, Tab, Tabs, TextField,
   Typography, useMediaQuery,
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
-import { Add, DeleteOutline, Inventory2Outlined, LocalBar, Search, ShoppingCart } from '@mui/icons-material';
+import { Add, Close, DeleteOutline, Inventory2Outlined, LocalBar, Search, ShoppingCart } from '@mui/icons-material';
 import QuantityStepper from '../common/QuantityStepper';
 import SwipeableLine from './SwipeableLine';
 import { useArticles } from '../../hooks/useArticles';
@@ -307,6 +311,30 @@ export function LinesPane({ lines, update, title, mode, showCrates, showPrice, e
   );
 }
 
+/* ---------------------------- Blatt (Handy) ---------------------------- */
+
+/** Blatt von unten für die Handy-Ansicht mit mobileBar; der Inhalt füllt die Höhe. */
+function BottomSheet({ open, onClose, title, children }) {
+  return (
+    <Drawer
+      anchor="bottom" open={open} onClose={onClose} ModalProps={{ keepMounted: true }}
+      PaperProps={{
+        sx: {
+          height: '85vh', '@supports (height: 100dvh)': { height: '85dvh' },
+          borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: 'hidden',
+          display: 'flex', flexDirection: 'column', pb: 'env(safe-area-inset-bottom, 0px)',
+        },
+      }}
+    >
+      <Stack direction="row" alignItems="center" sx={{ pl: 2, pr: 1, pt: 1, flexShrink: 0 }}>
+        <Typography variant="h6" fontWeight={800} sx={{ flex: 1 }}>{title}</Typography>
+        <IconButton aria-label="Schließen" onClick={onClose}><Close /></IconButton>
+      </Stack>
+      <Box sx={{ flex: 1, minHeight: 0 }}>{children}</Box>
+    </Drawer>
+  );
+}
+
 /* ------------------------------ Shell --------------------------------- */
 
 export default function ArticleLinePicker({
@@ -327,6 +355,7 @@ export default function ArticleLinePicker({
   emptyText = mode === 'sale' ? 'Leer' : 'Noch keine Positionen',
   mobileTab: mobileTabProp,
   onMobileTabChange,
+  mobileBar,
   columns = { md: '280px 1fr 300px', lg: '340px 1fr 340px' },
   height = '100%',
 }) {
@@ -414,14 +443,27 @@ export default function ArticleLinePicker({
   const badge = mode === 'sale' ? linesTotalQty(lines) : lines.length;
   const hasSidebar = Boolean(sidebar);
   const tabIndex = (i) => (hasSidebar ? i : i - 1); // ohne Sidebar: Artikel=0, Positionen=1
-  const show = (i) => !isMobile || mobileTab === tabIndex(i);
+  // Handy mit mobileBar: Blätter statt Tabs, die Artikel bleiben stehen
+  const sheets = isMobile && typeof mobileBar === 'function';
+  const closeSheet = () => setMobileTab(tabIndex(1));
+  const show = (i) => !isMobile || (sheets ? i === 1 : mobileTab === tabIndex(i));
 
   const gridCols = hasSidebar ? columns : { md: `1fr ${columns.md.split(' ').pop()}`, lg: `1fr ${columns.lg.split(' ').pop()}` };
+
+  const linesPane = (
+    <LinesPane
+      lines={lines} update={update} title={linesLabel} mode={mode}
+      showCrates={showCrates} showPrice={showPrice} editablePrice={editablePrice} allowFreeLines={allowFreeLines}
+      header={linesHeader} footer={linesFooter} emptyText={emptyText}
+      showSummary={mode !== 'sale'}
+      onSwipeRemove={handleSwipeRemove}
+    />
+  );
 
   return (
     <>
       <Box sx={{ height, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        {isMobile && (
+        {isMobile && !sheets && (
           <Tabs value={mobileTab} onChange={(e, v) => setMobileTab(v)} variant="fullWidth" indicatorColor="primary" textColor="primary"
             sx={{ mb: 1.5, bgcolor: 'background.paper', borderRadius: 2, boxShadow: 1, flexShrink: 0, '& .MuiTab-root': { fontWeight: 700 } }}>
             {hasSidebar && <Tab label={sidebarLabel} />}
@@ -430,24 +472,34 @@ export default function ArticleLinePicker({
           </Tabs>
         )}
         <Box sx={{ flex: 1, minHeight: 0, display: isMobile ? 'block' : 'grid', gap: 2, gridTemplateColumns: gridCols, overflow: 'hidden' }}>
-          {hasSidebar && (
+          {hasSidebar && !sheets && (
             <Box sx={{ display: show(0) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>{sidebar}</Box>
           )}
           <Box sx={{ display: show(1) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
             <ArticlePane articles={articles} lines={lines} showPrice={showPrice} showStock={showStock}
               showCrates={showCrates} onTap={onTap} onCrate={onCrate} onLongPress={onLongPress} />
           </Box>
-          <Box sx={{ display: show(2) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-            <LinesPane
-              lines={lines} update={update} title={linesLabel} mode={mode}
-              showCrates={showCrates} showPrice={showPrice} editablePrice={editablePrice} allowFreeLines={allowFreeLines}
-              header={linesHeader} footer={linesFooter} emptyText={emptyText}
-              showSummary={mode !== 'sale'}
-              onSwipeRemove={handleSwipeRemove}
-            />
-          </Box>
+          {!sheets && (
+            <Box sx={{ display: show(2) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>{linesPane}</Box>
+          )}
         </Box>
+        {sheets && (
+          <Box sx={{ flexShrink: 0, pt: 1 }}>
+            {mobileBar({
+              openSidebar: hasSidebar ? () => setMobileTab(tabIndex(0)) : undefined,
+              openLines: () => setMobileTab(tabIndex(2)),
+              count: badge,
+            })}
+          </Box>
+        )}
       </Box>
+
+      {sheets && hasSidebar && (
+        <BottomSheet open={mobileTab === tabIndex(0)} onClose={closeSheet} title={sidebarLabel}>{sidebar}</BottomSheet>
+      )}
+      {sheets && (
+        <BottomSheet open={mobileTab === tabIndex(2)} onClose={closeSheet}>{linesPane}</BottomSheet>
+      )}
 
       {/* Rückgängig-Snackbar – oben mittig, damit der Kassenbereich unten frei bleibt */}
       <Snackbar
