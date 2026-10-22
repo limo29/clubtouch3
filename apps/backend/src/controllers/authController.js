@@ -46,16 +46,16 @@ class AuthController {
         return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
       }
 
-      if (!user.active) {
-        return res.status(401).json({ error: 'Benutzer ist deaktiviert' });
-      }
-
-      // Prüfe Passwort
+      // Erst das Passwort prüfen: sonst verrät „deaktiviert“ ohne Passwort, dass das Konto existiert
       const isValid = await comparePassword(password, user.password);
 
       if (!isValid) {
         noteFailure(key);
         return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
+      }
+
+      if (!user.active) {
+        return res.status(401).json({ error: 'Benutzer ist deaktiviert' });
       }
       failedLogins.delete(key);
 

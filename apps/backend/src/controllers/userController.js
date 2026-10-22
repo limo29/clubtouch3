@@ -108,6 +108,12 @@ class UserController {
       if (updateData.role && req.user.role !== 'ADMIN') {
         delete updateData.role;
       }
+
+      // Eigenes Passwort ohne Admin-Rolle nur über /auth/change-password (aktuelles Passwort nötig),
+      // sonst reicht ein abgegriffener Token, um das Konto dauerhaft zu übernehmen
+      if (updateData.password && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Bitte „Passwort ändern“ im Benutzermenü verwenden' });
+      }
       
       // Verhindere dass der letzte Admin sich selbst die Admin-Rolle entziehen kann
       if (existingUser.role === 'ADMIN' && updateData.role && updateData.role !== 'ADMIN') {

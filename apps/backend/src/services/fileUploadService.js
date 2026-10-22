@@ -63,9 +63,9 @@ class FileUploadService {
     }),
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     fileFilter: (req, file, cb) => {
-      const allowed = /jpeg|jpg|png|pdf/;
-      const extOk = allowed.test(path.extname(file.originalname).toLowerCase());
-      const mimeOk = allowed.test(file.mimetype);
+      // Endung und Typ exakt prüfen (vorher genügte ein Teilstring): die Datei wird unverändert ausgeliefert
+      const extOk = /^\.(jpe?g|png|pdf)$/.test(path.extname(file.originalname).toLowerCase());
+      const mimeOk = /^(image\/(p?jpe?g|png)|application\/pdf)$/.test(file.mimetype);
       return (extOk && mimeOk) ? cb(null, true) : cb(new Error('Nur JPEG, PNG und PDF Dateien sind erlaubt'));
     },
   });

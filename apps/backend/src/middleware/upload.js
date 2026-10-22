@@ -19,8 +19,13 @@ const storage = multer.diskStorage({
     }
 });
 
+// Die Datei wird unter /uploads/ads/ mit ihrer Endung ausgeliefert. Der MIME-Typ kommt vom Client,
+// deshalb zusätzlich die Endung prüfen (sonst ginge z.B. eine .html- oder .svg-Datei mit Skript durch).
+const ALLOWED_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm', '.ogg', '.mov', '.m4v'];
+
 const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+    const extOk = ALLOWED_EXT.includes(path.extname(file.originalname || '').toLowerCase());
+    if (extOk && (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/'))) {
         cb(null, true);
     } else {
         cb(new Error('Nur Bilder und Videos sind erlaubt!'), false);

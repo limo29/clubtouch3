@@ -1,6 +1,29 @@
 const prisma = require('../utils/prisma');
 const highscoreController = require('./highscoreController');
 
+/**
+ * Gemeinsamer PIN für die öffentliche Guthaben-Abfrage (hängt z.B. an der Theke aus), damit nicht
+ * jeder im Internet per Name Kontostände abrufen kann. Fehlversuche werden je IP gebremst
+ * (In-Memory wie die Login-Bremse in authController).
+ */
+const BALANCE_PIN = String(process.env.PUBLIC_BALANCE_PIN || '666');
+const MAX_PIN_FAILS = 10;
+const PIN_WINDOW_MS = 15 * 60 * 1000;
+const pinFails = new Map();
+function isPinThrottled(ip) {
+    const entry = pinFails.get(ip);
+    if (!entry) return false;
+    if (Date.now() - entry.first > PIN_WINDOW_MS) { pinFails.delete(ip); return false; }
+    return entry.count >= MAX_PIN_FAILS;
+}
+function notePinFailure(ip) {
+    const now = Date.now();
+    const entry = pinFails.get(ip);
+    if (!entry || now - entry.first > PIN_WINDOW_MS) pinFails.set(ip, { first: now, count: 1 });
+    else entry.count += 1;
+    if (pinFails.size > 5000) pinFails.clear();
+}
+
 class PublicController {
     // Clubscore: dieselben Handler wie /api/highscore (dort mit Fehlerbehandlung)
     getHighscore(req, res) {
@@ -58,12 +81,21 @@ class PublicController {
         }
     }
 
-    // Check Balance by Name
+    // Guthaben per Name + gemeinsamem PIN. Falscher PIN und unbekannter Name zählen als Fehlversuch.
     async checkBalance(req, res) {
         try {
-            const { name } = req.query;
-            if (!name) {
-                return res.status(400).json({ error: 'Name ist erforderlich' });
+            const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+            const pin = typeof req.body?.pin === 'string' ? req.body.pin.trim() : '';
+            if (!name || !pin) {
+                return res.status(400).json({ error: 'Name und PIN sind erforderlich' });
+            }
+            if (isPinThrottled(req.ip)) {
+                return res.status(429).json({ error: 'Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.' });
+            }
+            // 403 statt 401: bei 401 versucht das Frontend einen Token-Refresh und leitet zum Login
+            if (pin !== BALANCE_PIN) {
+                notePinFailure(req.ip);
+                return res.status(403).json({ error: 'PIN ist falsch' });
             }
 
             // Case-insensitive search
@@ -95,6 +127,7 @@ class PublicController {
             });
 
             if (!customer) {
+                notePinFailure(req.ip);
                 return res.status(404).json({ error: 'Kunde nicht gefunden' });
             }
 
