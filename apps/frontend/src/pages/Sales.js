@@ -3,13 +3,13 @@ import {
   Box, Grid, Card, CardContent, TextField, InputAdornment, Typography,
   Avatar, Stack, IconButton, List, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, Chip, useMediaQuery, Divider, Collapse,
-  Snackbar, Alert
+  Snackbar, Alert, Badge, ButtonBase
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
   Search, AttachMoney,
   History, AccountBalanceWallet, LocalBar,
-  Close, TrendingUp, TrendingDown, RestoreFromTrash
+  Close, TrendingUp, TrendingDown, RestoreFromTrash, ExpandLess, ShoppingCart
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
@@ -72,7 +72,7 @@ const Sales = () => {
   const [bookingTarget, setBookingTarget] = useState({ type: 'CASH' });
 
   // Mobile Tab State
-  const [mobileTab, setMobileTab] = useState(1); // Default to Products on mobile
+  const [mobileTab, setMobileTab] = useState(1); // Handy: 0 = Blatt „Wer zahlt?“, 1 = Artikel, 2 = Blatt Warenkorb
 
   const [overdraftDialog, setOverdraftDialog] = useState({ open: false, type: 'WARNING', balance: 0, newBalance: 0, amount: 0, limit: 10 });
   const [showOwnerConfirm, setShowOwnerConfirm] = useState(false);
@@ -136,9 +136,30 @@ const Sales = () => {
     onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); setShowTopUp(false); setTopUpAmount(''); }
   });
 
+  // Letzter Verkauf für „Rückgängig“ (5 s): storniert ihn und legt den Warenkorb wieder hin
+  const [lastSale, setLastSale] = useState(null); // { id, total, lines, target } | null
+
   const quickSaleMutation = useMutation({
     mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
-    onSuccess: () => { invalidate(queryClient, 'customers', 'stock', 'sales', 'finance'); clearCart(); setShowChangeCalc(false); }
+    onMutate: () => ({ lines, total, target: bookingTarget }),
+    onSuccess: (res, _data, ctx) => {
+      invalidate(queryClient, 'customers', 'stock', 'sales', 'finance');
+      clearCart(); setShowChangeCalc(false); setMobileTab(1);
+      const id = res.data?.transaction?.id;
+      if (id && ctx) setLastSale({ id, ...ctx });
+    }
+  });
+
+  const undoSaleMutation = useMutation({
+    mutationFn: async (sale) => api.post(`/transactions/${sale.id}/cancel`),
+    onSuccess: (_res, sale) => {
+      invalidate(queryClient, 'customers', 'stock', 'sales', 'finance');
+      // Nur in einen leeren Warenkorb zurücklegen, eine schon begonnene Bestellung bleibt
+      setLines(prev => (prev.length ? prev : sale.lines));
+      setBookingTarget(sale.target);
+      showFeedback('Verkauf storniert', 'info');
+    },
+    onError: (err) => showFeedback(err.response?.data?.error || 'Storno fehlgeschlagen', 'error')
   });
 
   /* Logic & Actions */
@@ -223,8 +244,9 @@ const Sales = () => {
   };
 
   // Targets
-  const setTargetCash = () => { setBookingTarget({ type: 'CASH' }); if (isMobile) setMobileTab(2); };
-  const setTargetOwner = () => { setBookingTarget({ type: 'OWNER' }); if (isMobile) setMobileTab(2); };
+  // Handy: nach der Wahl schließt sich das Blatt „Wer zahlt?“
+  const setTargetCash = () => { setBookingTarget({ type: 'CASH' }); if (isMobile) setMobileTab(1); };
+  const setTargetOwner = () => { setBookingTarget({ type: 'OWNER' }); if (isMobile) setMobileTab(1); };
   const setTargetCustomer = (c) => { setBookingTarget({ type: 'CUSTOMER', data: c }); if (isMobile) setMobileTab(1); };
 
   const isTargetSelected = (type, id) => {
@@ -365,7 +387,7 @@ const Sales = () => {
             </Box>
           ))}
         </Stack>
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5, pb: { xs: 10, md: 1.5 } }}>
+        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
           {todayCustomers.length > 0 && (
             <>
               <SectionLabel>Heute an der Theke ({todayCustomers.length})</SectionLabel>
@@ -399,6 +421,22 @@ const Sales = () => {
     </Card>
   ) : null;
 
+  /* Buchen-Knopf: Farbe und Text je Zahlungsziel (Warenkorb-Fuß und Handy-Leiste) */
+  const targetCustomer = bookingTarget.type === 'CUSTOMER' ? bookingTarget.data : null;
+  const newBalance = targetCustomer ? targetCustomer.balance - total : null;
+  const bookColor = bookingTarget.type === 'CUSTOMER'
+    ? (newBalance !== null && newBalance < 0 ? (newBalance < -10 ? 'error' : 'warning') : 'primary')
+    : bookingTarget.type === 'OWNER' ? 'warning' : 'success';
+  const bookLabel = (() => {
+    if (bookingTarget.type === 'CASH') return 'Bar bezahlen';
+    if (bookingTarget.type === 'OWNER') return 'Auf Wirt buchen';
+    if (!targetCustomer) return 'Kunde?';
+    const name = targetCustomer.nickname || targetCustomer.name.split(' ')[0];
+    if (newBalance < -10) return `Limit überschritten (${money(newBalance)})`;
+    if (newBalance < 0) return `Überziehen: ${name}`;
+    return `Buchen: ${name}`;
+  })();
+
   /* Kassenbereich: Wechselgeld, Gesamt, Buchen-Button, Hinweise (unverändert) */
   const cartFooter = (
     <>
@@ -415,26 +453,11 @@ const Sales = () => {
         variant="contained"
         size="large"
         disabled={!lines.length}
-        color={
-          bookingTarget.type === 'CUSTOMER'
-            ? (bookingTarget.data && (bookingTarget.data.balance - total < 0)
-              ? (bookingTarget.data.balance - total < -10 ? 'error' : 'warning')
-              : 'primary')
-            : bookingTarget.type === 'OWNER' ? 'warning' : 'success'
-        }
+        color={bookColor}
         onClick={handleBooking}
         sx={{ py: 2, fontWeight: 800, fontSize: '1.2rem', boxShadow: 6, borderRadius: 2 }}
       >
-        {bookingTarget.type === 'CASH' && 'Bar bezahlen'}
-        {bookingTarget.type === 'OWNER' && 'Auf Wirt buchen'}
-        {bookingTarget.type === 'CUSTOMER' && (() => {
-          if (!bookingTarget.data) return 'Kunde?';
-          const newBal = bookingTarget.data.balance - total;
-          const name = bookingTarget.data.nickname || bookingTarget.data.name.split(' ')[0];
-          if (newBal < -10) return `Limit überschritten (${money(newBal)})`;
-          if (newBal < 0) return `Überziehen: ${name}`;
-          return `Buchen: ${name}`;
-        })()}
+        {bookLabel}
       </Button>
       {bookingTarget.type === 'CUSTOMER' && bookingTarget.data && (bookingTarget.data.balance - total < 0) && (
         <Typography variant="caption" color="error" display="block" textAlign="center" sx={{ mt: 1, fontWeight: 'bold' }}>
@@ -449,19 +472,67 @@ const Sales = () => {
     </>
   );
 
+  /* Handy: feste Leiste unter den Artikeln – wer zahlt, Warenkorb, Buchen */
+  const barBorder = { border: '1px solid', borderColor: 'divider', borderRadius: 2 };
+  const mobileBar = ({ openSidebar, openLines, count }) => (
+    <Card sx={{ p: 1, pb: 'calc(8px + env(safe-area-inset-bottom, 0px))', boxShadow: 6 }}>
+      <Stack direction="row" alignItems="stretch" spacing={1} sx={{ mb: 1 }}>
+        <ButtonBase onClick={openSidebar} sx={{ ...barBorder, flex: 1, minWidth: 0, justifyContent: 'flex-start', gap: 1, px: 1, py: 0.75 }}>
+          {targetCustomer ? (
+            <Avatar sx={{ width: 32, height: 32, fontSize: '0.95rem', fontWeight: 800, bgcolor: 'primary.main' }}>
+              {(targetCustomer.nickname?.[0] || targetCustomer.name?.[0] || '?').toUpperCase()}
+            </Avatar>
+          ) : bookingTarget.type === 'OWNER'
+            ? <LocalBar color="warning" />
+            : <AttachMoney color="success" />}
+          <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>Wer zahlt?</Typography>
+            <Typography fontWeight={800} sx={{ lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+              {targetCustomer ? (targetCustomer.nickname || targetCustomer.name) : bookingTarget.type === 'OWNER' ? 'Auf den Wirt' : 'Bar'}
+            </Typography>
+          </Box>
+          {targetCustomer && (
+            <Typography fontWeight={800} color={targetCustomer.balance < 0 ? 'error.main' : 'success.main'} sx={{ flexShrink: 0 }}>
+              {money(targetCustomer.balance)}
+            </Typography>
+          )}
+          <ExpandLess color="action" />
+        </ButtonBase>
+        {targetCustomer && (
+          <>
+            <IconButton aria-label="Verlauf" onClick={() => handleOpenHistory(targetCustomer)} sx={barBorder}><History /></IconButton>
+            <IconButton aria-label="Aufladen" onClick={() => setShowTopUp(true)} sx={barBorder}><AccountBalanceWallet /></IconButton>
+          </>
+        )}
+      </Stack>
+      <Stack direction="row" spacing={1}>
+        <Button variant="outlined" onClick={openLines} aria-label={`Warenkorb öffnen, ${count} Artikel`}
+          startIcon={<Badge badgeContent={count} max={99} color="error"><ShoppingCart /></Badge>}
+          sx={{ flexShrink: 0, px: 2, fontWeight: 800, fontSize: '1rem', borderRadius: 2 }}>
+          {money(total)}
+        </Button>
+        <Button variant="contained" color={bookColor} disabled={!lines.length} onClick={handleBooking}
+          sx={{ flex: 1, minWidth: 0, py: 1.5, fontWeight: 800, fontSize: '1.05rem', borderRadius: 2, lineHeight: 1.2 }}>
+          {bookLabel}
+        </Button>
+      </Stack>
+    </Card>
+  );
+
   return (
-    <Box sx={{ pb: 0, height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ pb: 0, height: 'calc(100vh - 80px)', '@supports (height: 100dvh)': { height: 'calc(100dvh - 80px)' }, display: 'flex', flexDirection: 'column' }}>
       <ArticleLinePicker
         mode="sale"
         lines={lines}
         onChange={setLines}
         sidebar={customersSidebar}
-        sidebarLabel="Kunden"
+        sidebarLabel="Wer zahlt?"
         linesLabel="Warenkorb"
         linesHeader={cartHeader}
         linesFooter={cartFooter}
         mobileTab={mobileTab}
         onMobileTabChange={setMobileTab}
+        mobileBar={mobileBar}
         columns={{ md: '280px 1fr 280px', lg: '340px 1fr 320px' }}
         height="100%"
       />
@@ -787,7 +858,21 @@ const Sales = () => {
           </Button>
         </DialogActions>
       </Dialog>
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+      <Snackbar
+        open={Boolean(lastSale)}
+        autoHideDuration={5000}
+        onClose={(e, reason) => { if (reason !== 'clickaway') setLastSale(null); }}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        sx={{ top: { xs: 72, sm: 80 } }}
+        message={lastSale ? `Verkauft: ${money(lastSale.total)} ${lastSale.target.type === 'CASH' ? 'bar' : lastSale.target.type === 'OWNER' ? 'auf den Wirt' : `auf ${lastSale.target.data?.nickname || lastSale.target.data?.name || 'Kunde'}`}` : ''}
+        action={
+          <Button color="inherit" size="small" disabled={undoSaleMutation.isPending} sx={{ fontWeight: 800 }}
+            onClick={() => { undoSaleMutation.mutate(lastSale); setLastSale(null); }}>
+            RÜCKGÄNGIG
+          </Button>
+        }
+      />
+      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} sx={{ top: { xs: 72, sm: 80 } }}>
         <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%', fontWeight: 'bold', boxShadow: 6 }} variant="filled">
           {snackbar.message}
         </Alert>
