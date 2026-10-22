@@ -16,12 +16,13 @@
  *   • Wisch nach links auf einer Warenkorb-Zeile → „Entfernen" (via SwipeableLine).
  *   • Rückgängig-Snackbar nach jeder Zeilenlöschung (5 s, nur letzte Löschung).
  *   • Langer Touch (~500 ms) auf Artikel-Kachel → Mengenauswahl-Dialog.
+ *   • Unter `md`: schwebender Warenkorb-Button unten rechts mit Stückzahl, springt in den Warenkorb-Tab.
  */
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
-  DialogTitle, IconButton, InputAdornment, Snackbar, Stack, Tab, Tabs, TextField,
-  Typography, useMediaQuery,
+  Badge, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
+  DialogTitle, Fab, IconButton, InputAdornment, Snackbar, Stack, Tab, Tabs, TextField,
+  Typography, Zoom, useMediaQuery,
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { Add, DeleteOutline, Inventory2Outlined, LocalBar, Search, ShoppingCart } from '@mui/icons-material';
@@ -210,7 +211,7 @@ function LineRow({ line, showCrates, showPrice, editablePrice, allowFreeLines, u
 
 /* ---------------------------- Artikel-Pane ---------------------------- */
 
-export function ArticlePane({ articles, lines, showPrice, showStock, showCrates, onTap, onCrate, onLongPress }) {
+export function ArticlePane({ articles, lines, showPrice, showStock, showCrates, onTap, onCrate, onLongPress, bottomInset = 0 }) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const categories = useMemo(() => ['all', ...new Set(articles.map((a) => a.category).filter(Boolean))], [articles]);
@@ -241,7 +242,7 @@ export function ArticlePane({ articles, lines, showPrice, showStock, showCrates,
             <Typography>Keine Artikel gefunden</Typography>
           </Box>
         ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: { xs: 1.5, sm: 2 }, pb: 2 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: { xs: 1.5, sm: 2 }, pb: 2 + bottomInset }}>
             {filtered.map((a) => (
               <ArticleTile key={a.id} article={a} qtyInLines={qtyByArticle.get(a.id) || 0}
                 showPrice={showPrice} showStock={showStock} showCrates={showCrates}
@@ -417,6 +418,8 @@ export default function ArticleLinePicker({
   const show = (i) => !isMobile || mobileTab === tabIndex(i);
 
   const gridCols = hasSidebar ? columns : { md: `1fr ${columns.md.split(' ').pop()}`, lg: `1fr ${columns.lg.split(' ').pop()}` };
+  // Verkauf am Handy: Warenkorb-Button überall außer im Warenkorb selbst
+  const showCartFab = mode === 'sale' && isMobile && mobileTab !== tabIndex(2);
 
   return (
     <>
@@ -435,7 +438,8 @@ export default function ArticleLinePicker({
           )}
           <Box sx={{ display: show(1) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
             <ArticlePane articles={articles} lines={lines} showPrice={showPrice} showStock={showStock}
-              showCrates={showCrates} onTap={onTap} onCrate={onCrate} onLongPress={onLongPress} />
+              showCrates={showCrates} onTap={onTap} onCrate={onCrate} onLongPress={onLongPress}
+              bottomInset={mode === 'sale' && isMobile ? 8 : 0} />
           </Box>
           <Box sx={{ display: show(2) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
             <LinesPane
@@ -448,6 +452,25 @@ export default function ArticleLinePicker({
           </Box>
         </Box>
       </Box>
+
+      <Zoom in={showCartFab} unmountOnExit>
+        <Fab
+          color="primary"
+          aria-label={`${linesLabel} öffnen, ${badge} Artikel`}
+          onClick={() => setMobileTab(tabIndex(2))}
+          sx={{
+            position: 'fixed', right: 16, bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+            zIndex: (t) => t.zIndex.speedDial, width: 64, height: 64,
+          }}
+        >
+          <Badge
+            badgeContent={badge} max={99} color="error"
+            sx={{ '& .MuiBadge-badge': { fontWeight: 900, fontSize: '0.85rem', height: 24, minWidth: 24, borderRadius: 12, top: -4, right: -6 } }}
+          >
+            <ShoppingCart sx={{ fontSize: 30 }} />
+          </Badge>
+        </Fab>
+      </Zoom>
 
       {/* Rückgängig-Snackbar – oben mittig, damit der Kassenbereich unten frei bleibt */}
       <Snackbar

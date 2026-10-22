@@ -316,11 +316,11 @@ const Sales = () => {
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Stack direction="row" alignItems="center" spacing={0.5}>
               {customer.group && <GroupBadge group={customer.group} size={18} tooltip={false} />}
-              <Typography noWrap variant="body1" sx={{ fontWeight: 600, fontSize: '1rem' }}>{customer.nickname || customer.name}</Typography>
+              <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '1rem', lineHeight: 1.25, overflowWrap: 'anywhere' }}>{customer.nickname || customer.name}</Typography>
             </Stack>
             {customer._specialActive
-              ? (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.nickname ? `${customer.name} · ` : ''}zuletzt {timeLabel(customer.lastActivity)}</Typography>)
-              : customer.nickname && (<Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{customer.name}</Typography>)}
+              ? (<Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{customer.nickname ? `${customer.name} · ` : ''}zuletzt {timeLabel(customer.lastActivity)}</Typography>)
+              : customer.nickname && (<Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{customer.name}</Typography>)}
           </Box>
           <Typography variant="body1" fontWeight={800} color={customer.balance < 5 ? 'error' : 'success.main'} sx={{ flexShrink: 0 }}>
             {money(customer.balance)}
@@ -365,7 +365,7 @@ const Sales = () => {
             </Box>
           ))}
         </Stack>
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
+        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5, pb: { xs: 10, md: 1.5 } }}>
           {todayCustomers.length > 0 && (
             <>
               <SectionLabel>Heute an der Theke ({todayCustomers.length})</SectionLabel>

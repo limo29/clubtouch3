@@ -25,7 +25,8 @@ import TvStage from '../components/highscore/TvStage';
 import { buildTickerItems } from '../components/highscore/tickerItems';
 import { VIEW_LABELS, dateDE, timeHM } from '../components/highscore/format';
 
-const BG = '#0b0d12';
+// Reines Schwarz: auf Fernsehern im dunklen Clubraum wirkt jedes Grau wie eine leuchtende Fläche
+const BG = '#000';
 const DAY_EMPTY = 'Heute noch keine Wertung – der erste Kauf zählt!';
 const YEAR_EMPTY = 'In diesem Jahr noch keine Wertung – der erste Kauf zählt!';
 const TEAM_EMPTY = 'Noch keine Team-Wertung – der erste Kauf eines Teams zählt!';
@@ -37,7 +38,8 @@ const darkTheme = createTheme({
   palette: {
     mode: 'dark',
     primary: { main: '#90caf9' },
-    background: { default: BG, paper: '#141821' },
+    background: { default: BG, paper: BG },
+    divider: 'rgba(255,255,255,0.10)',
   },
 });
 
@@ -126,7 +128,7 @@ function Content() {
     const m = view === 'count' ? 'count' : 'amount';
     return (
       <Board key={kind} title={title} subtitle={subtitle} board={data[scope]?.[m]} mode={m.toUpperCase()}
-        marks={marks} marksKey={`${scope}.${m}`} now={now} size={size} fill={lg}
+        marks={marks} marksKey={`${scope}.${m}`} now={now} size={size} fill={lg} minimal
         columns={lg ? (single ? 3 : 2) : 1} podiumHeight={lg ? (hasGoals ? (single ? 240 : 178) : (single ? 320 : 270)) : 190} minRow={lg ? 34 : 36}
         emptyText={isDay ? DAY_EMPTY : YEAR_EMPTY} />
     );

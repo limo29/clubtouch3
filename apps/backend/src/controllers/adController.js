@@ -5,6 +5,7 @@ const path = require('path');
 const UPLOAD_PREFIX = '/uploads/ads/';
 const { UPLOADS_DIR } = require('../utils/uploadsDir');
 const ADS_DIR = path.join(UPLOADS_DIR, 'ads');
+const { emitAdsUpdate } = require('../utils/websocket');
 
 /** Dauer in Sekunden: 1..3600, sonst null (→ 400); undefined = nicht angegeben */
 function parseDuration(raw) {
@@ -73,6 +74,7 @@ class AdController {
                     slideData: req.body.slideData ? JSON.parse(req.body.slideData) : undefined
                 }
             });
+            emitAdsUpdate();
             res.json(ad);
         } catch (error) {
             console.error(error);
@@ -122,6 +124,7 @@ class AdController {
             if (updateData.imageUrl && updateData.imageUrl !== existing.imageUrl) {
                 await removeUploadIfUnused(existing.imageUrl, id);
             }
+            emitAdsUpdate();
             res.json(ad);
         } catch (error) {
             console.error(error);
@@ -137,6 +140,7 @@ class AdController {
             if (!existing) return res.status(404).json({ error: 'Werbung nicht gefunden' });
             await prisma.adSlide.delete({ where: { id } });
             await removeUploadIfUnused(existing.imageUrl);
+            emitAdsUpdate();
             res.json({ success: true });
         } catch (error) {
             console.error(error);
@@ -160,6 +164,7 @@ class AdController {
             );
 
             await prisma.$transaction(updates);
+            emitAdsUpdate();
             res.json({ success: true });
         } catch (error) {
             console.error(error);

@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, CssBaseline, Typography, Fade, Slide, Zoom } from '@mui/material';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
+import { io } from 'socket.io-client';
 import api from '../services/api';
+import { WS_URL } from '../config/api';
 import SlideRenderer from '../components/ads/SlideRenderer';
 
 /**
  * Öffentliches Werbe-Display (/public/ads), läuft ohne Login auf dem Bildschirm im Clubraum.
- * - holt die aktiven Slides alle 60 s; die Rotation läuft nur dann neu an, wenn sich wirklich etwas geändert hat
+ * - lädt sofort neu, wenn der Server per Socket „ads:update“ meldet (Werbung angelegt/geändert/sortiert/gelöscht),
+ *   zusätzlich alle 60 s als Rückfall; die Rotation läuft nur dann neu an, wenn sich wirklich etwas geändert hat
  * - nach einem Fehler oder einer leeren Liste wird nach 20 s erneut versucht
  * - Videos wechseln beim Ende weiter (spätestens nach der eingestellten Dauer)
  * - fehlende Medien (404) werden nach kurzer Zeit übersprungen statt als kaputtes Bild zu stehen
@@ -99,6 +102,18 @@ export default function PublicAds() {
         };
         tick();
         return () => { cancelled = true; clearTimeout(timer); };
+    }, [fetchAds]);
+
+    // Live: Änderungen im Admin sofort übernehmen; nach einem Verbindungsabbruch einmal nachladen
+    useEffect(() => {
+        const socket = io(WS_URL);
+        let connectedBefore = false;
+        socket.on('connect', () => {
+            if (connectedBefore) fetchAds();
+            connectedBefore = true;
+        });
+        socket.on('ads:update', () => { fetchAds(); });
+        return () => { socket.disconnect(); };
     }, [fetchAds]);
 
     const currentAd = ads[currentIndex];
