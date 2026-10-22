@@ -74,7 +74,7 @@ router.patch('/:id',
   purchaseDocumentController.updateDocument
 );
 router.delete('/:id',
-  authorize('ADMIN', 'CASHIER'), // Oder nur ADMIN?
+  authorize('ADMIN', 'ACCOUNTANT'), // Löschen nicht an der Theke
   purchaseDocumentController.deleteDocument
 );
 module.exports = router;

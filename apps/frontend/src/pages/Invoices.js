@@ -67,7 +67,7 @@ const paymentOf = (pm) => PAYMENT[pm] || null;
 /** Status-Chip; Klick öffnet den Statuswechsel (wie der Bezahlt-Chip im Einkauf) */
 function StatusChip({ inv, onClick, disabled }) {
   const st = statusOf(inv.status);
-  const canChange = !disabled && inv.status !== 'CANCELLED';
+  const canChange = !disabled && Boolean(onClick) && inv.status !== 'CANCELLED';
   const pay = inv.status === 'PAID' ? paymentOf(inv.paymentMethod) : null;
   const tip = pay
     ? `${pay.long}${inv.paidAt ? ` am ${fmtDate(inv.paidAt)}` : ''}${canChange ? ' · Klicken, um den Status zu ändern' : ''}`
@@ -149,7 +149,7 @@ function CompactInvoiceCard({ inv, onStatus, onEdit, onPdf }) {
           <Tooltip title="PDF herunterladen">
             <IconButton size="small" onClick={onPdf} aria-label="PDF herunterladen"><Download fontSize="small" /></IconButton>
           </Tooltip>
-          {inv.status === 'DRAFT' && (
+          {inv.status === 'DRAFT' && onEdit && (
             <Tooltip title="Bearbeiten">
               <IconButton size="small" color="primary" onClick={onEdit} aria-label="Bearbeiten"><Edit fontSize="small" /></IconButton>
             </Tooltip>
@@ -182,8 +182,10 @@ export default function Invoices() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));   // Anlegen: Vollbild-Dialog statt Drawer
   const isCompact = useMediaQuery(theme.breakpoints.down('md'));  // Liste: Karten statt Tabelle
-  const { isAdmin, isAccountant } = useAuth();
-  const canSeeContact = isAdmin || isAccountant;
+  const { isAdmin, can } = useAuth();
+  const canSeeContact = can('customerContact');
+  // Buchhaltung sieht Rechnungen und PDFs, ändert aber nichts
+  const canEdit = can('editInvoices');
 
   // Tabelle / Filter
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -409,19 +411,21 @@ export default function Invoices() {
             </Tooltip>
           )}
         </Stack>
-        <Stack spacing={2} sx={{ mt: 3, display: { xs: 'flex', md: 'none' } }}>
-          <Button
-            variant="contained"
-            color="primary"
-            fullWidth
-            size="large"
-            startIcon={<Add />}
-            onClick={openCreate}
-            sx={{ py: 1.5, fontWeight: 700, boxShadow: theme.shadows[4] }}
-          >
-            Neue Kundenrechnung
-          </Button>
-        </Stack>
+        {canEdit && (
+          <Stack spacing={2} sx={{ mt: 3, display: { xs: 'flex', md: 'none' } }}>
+            <Button
+              variant="contained"
+              color="primary"
+              fullWidth
+              size="large"
+              startIcon={<Add />}
+              onClick={openCreate}
+              sx={{ py: 1.5, fontWeight: 700, boxShadow: theme.shadows[4] }}
+            >
+              Neue Kundenrechnung
+            </Button>
+          </Stack>
+        )}
       </Box>
 
       {/* KPI-Kacheln + Desktop-Aktion */}
@@ -441,15 +445,17 @@ export default function Invoices() {
         <Grid size={{ xs: 6, md: 3 }}>
           <KPICard title="Bezahlt" value={stats.paid.count} icon={CheckCircle} color="success" subTitle={money(stats.paid.sum)} />
         </Grid>
-        <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: 'block', md: 'none' } }}>
+        <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: 'block', md: canEdit ? 'none' : 'block' } }}>
           <KPICard title="Entwürfe" value={stats.drafts.count} icon={Drafts} color="default" subTitle="In Bearbeitung" />
         </Grid>
-        <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: 'none', md: 'block' } }}>
-          <Button variant="contained" color="primary" fullWidth onClick={openCreate} sx={bigActionSx}>
-            <Add fontSize="large" />
-            Neue Kundenrechnung
-          </Button>
-        </Grid>
+        {canEdit && (
+          <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: 'none', md: 'block' } }}>
+            <Button variant="contained" color="primary" fullWidth onClick={openCreate} sx={bigActionSx}>
+              <Add fontSize="large" />
+              Neue Kundenrechnung
+            </Button>
+          </Grid>
+        )}
       </Grid>
 
       {/* Filter */}
@@ -507,8 +513,8 @@ export default function Invoices() {
               <CompactInvoiceCard
                 key={inv.id}
                 inv={inv}
-                onStatus={() => openStatusSheet(inv)}
-                onEdit={() => openEdit(inv)}
+                onStatus={canEdit ? () => openStatusSheet(inv) : undefined}
+                onEdit={canEdit ? () => openEdit(inv) : undefined}
                 onPdf={() => handleDownloadPDF(inv.id)}
               />
             ))}
@@ -568,7 +574,7 @@ export default function Invoices() {
                         <Typography variant="body2" fontWeight={700}>{money(inv.totalAmount)}</Typography>
                       </TableCell>
                       <TableCell>
-                        <StatusChip inv={inv} onClick={() => openStatusSheet(inv)} disabled={updateStatusMutation.isPending} />
+                        <StatusChip inv={inv} onClick={canEdit ? () => openStatusSheet(inv) : undefined} disabled={updateStatusMutation.isPending} />
                       </TableCell>
                       <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
                         <Tooltip title="PDF herunterladen">
@@ -576,7 +582,7 @@ export default function Invoices() {
                             <Download fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        {inv.status === 'DRAFT' && (
+                        {canEdit && inv.status === 'DRAFT' && (
                           <Tooltip title="Bearbeiten">
                             <IconButton size="small" color="primary" onClick={() => openEdit(inv)} aria-label="Bearbeiten">
                               <Edit fontSize="small" />

@@ -29,6 +29,7 @@ import PublicHighscore from './pages/PublicHighscore';
 import PublicAds from './pages/PublicAds';
 import AdminAds from './pages/AdminAds';
 import CheckBalance from './pages/CheckBalance';
+import { PERMISSIONS } from './config/permissions';
 
 // React Query Client
 const queryClient = new QueryClient({
@@ -60,7 +61,7 @@ function App() {
             >
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
-              <Route path="sales" element={<Sales />} />
+              <Route path="sales" element={<ProtectedRoute roles={PERMISSIONS.sell}><Sales /></ProtectedRoute>} />
               <Route path="articles" element={<Articles />} />
               <Route path="customers" element={<Customers />} />
               <Route path="transactions" element={<Transactions />} />
@@ -75,12 +76,12 @@ function App() {
               />
               <Route path="reports" element={<Reports />} />
               <Route path="purchases" element={<PurchaseDocuments />} />
-              <Route path="purchases/create" element={<PurchaseDocumentsCreate />} />
+              <Route path="purchases/create" element={<ProtectedRoute roles={PERMISSIONS.editPurchases}><PurchaseDocumentsCreate /></ProtectedRoute>} />
               <Route path="cash-count" element={<CashCount />} />
               <Route path="profit-loss" element={<ProfitLoss />} />
               <Route path="invoices" element={<Invoices />} />
-              <Route path="purchases/edit/:id" element={<PurchaseDocumentEdit />} />
-              <Route path="ads" element={<AdminAds />} />
+              <Route path="purchases/edit/:id" element={<ProtectedRoute roles={PERMISSIONS.editPurchases}><PurchaseDocumentEdit /></ProtectedRoute>} />
+              <Route path="ads" element={<ProtectedRoute roles={PERMISSIONS.ads}><AdminAds /></ProtectedRoute>} />
             </Route>
 
             {/* Public Routes */}

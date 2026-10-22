@@ -291,8 +291,8 @@ export default function CashCount() {
   const qc = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const { isAdmin, isAccountant } = useAuth();
-  const canCancel = isAdmin || isAccountant;
+  const { can } = useAuth();
+  const canCancel = can('cancelCashMovements');
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get('tab') === 'bank' ? 'bank' : 'kasse';
   const setTab = (v) => setSearchParams(v === 'bank' ? { tab: 'bank' } : {}, { replace: true });

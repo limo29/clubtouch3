@@ -255,7 +255,10 @@ class ExportController {
         }
       ];
 
-      res.json({ exports });
+      // Nur Berichte anbieten, die die Rolle auch abrufen darf (siehe routes/exports.js)
+      const FINANCE_ONLY = ['customers', 'monthly-summary', 'eur'];
+      const financeRole = ['ADMIN', 'ACCOUNTANT'].includes(req.user?.role);
+      res.json({ exports: financeRole ? exports : exports.filter((e) => !FINANCE_ONLY.includes(e.id)) });
     } catch (error) {
       console.error('List exports error:', error);
       res.status(500).json({ error: 'Fehler beim Abrufen der Export-Liste' });

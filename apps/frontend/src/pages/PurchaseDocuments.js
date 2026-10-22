@@ -45,6 +45,7 @@ import MobileDocumentCard from '../components/common/MobileDocumentCard';
 import { summarizeItems } from "../utils/purchaseDocs";
 import { invalidate } from '../utils/invalidate';
 import MarkPaidDialog from '../components/purchases/MarkPaidDialog';
+import { useAuth } from '../context/AuthContext';
 import { paymentMethodShort } from '../components/purchases/ReimbursementCustomerField';
 
 /* ---------------- helpers ---------------- */
@@ -148,7 +149,7 @@ function NachweisIcon({ nachweisUrl, onClickUpload }) {
         <CheckIcon fontSize="small" />
       </IconButton>
     </Tooltip>
-  ) : (
+  ) : onClickUpload ? (
     <Tooltip title="Nachweis direkt hochladen">
       <IconButton
         size="small"
@@ -158,6 +159,10 @@ function NachweisIcon({ nachweisUrl, onClickUpload }) {
       >
         <UploadIcon fontSize="small" />
       </IconButton>
+    </Tooltip>
+  ) : (
+    <Tooltip title="Kein Nachweis">
+      <span><IconButton size="small" disabled aria-label="Kein Nachweis"><UploadIcon fontSize="small" /></IconButton></span>
     </Tooltip>
   );
 }
@@ -180,6 +185,10 @@ export default function PurchaseDocuments() {
   const suppliers = suppliersData?.suppliers || [];
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [deletingId, setDeletingId] = useState(null);
+  // Buchhaltung: ansehen, bezahlt markieren, verknüpfen, löschen – aber nicht anlegen/ändern
+  const { can } = useAuth();
+  const canEdit = can('editPurchases');
+  const canDelete = can('deletePurchases');
   const [uploadDocId, setUploadDocId] = useState(null);
   const [payingDoc, setPayingDoc] = useState(null);
   const fileInputRef = React.useRef(null);
@@ -381,16 +390,20 @@ export default function PurchaseDocuments() {
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Stack direction="row" spacing={1} alignItems="center">
               <StatusChip document={doc} onToggle={() => togglePaidStatus(doc)} disabled={isAnyMutating || !!deletingId} />
-              <NachweisIcon nachweisUrl={doc.nachweisUrl} onClickUpload={() => handleUploadTrigger(doc.id)} />
+              <NachweisIcon nachweisUrl={doc.nachweisUrl} onClickUpload={canEdit ? () => handleUploadTrigger(doc.id) : undefined} />
             </Stack>
 
             <Stack direction="row" spacing={0}>
-              <IconButton size="small" onClick={() => edit(doc.id)} disabled={isAnyMutating || !!deletingId}>
-                <EditIcon fontSize="small" />
-              </IconButton>
-              <IconButton size="small" color="error" onClick={() => removeDoc(doc)} disabled={isAnyMutating || !!deletingId}>
-                {deletingId === doc.id ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
-              </IconButton>
+              {canEdit && (
+                <IconButton size="small" onClick={() => edit(doc.id)} disabled={isAnyMutating || !!deletingId}>
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              )}
+              {canDelete && (
+                <IconButton size="small" color="error" onClick={() => removeDoc(doc)} disabled={isAnyMutating || !!deletingId}>
+                  {deletingId === doc.id ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
+                </IconButton>
+              )}
             </Stack>
           </Stack>
 
@@ -417,10 +430,12 @@ export default function PurchaseDocuments() {
                       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
                         <Typography variant="caption" color="text.secondary">{summarizeItems(ls.items) || ls.supplier}</Typography>
                         <Stack direction="row" spacing={1}>
-                          <NachweisIcon nachweisUrl={ls.nachweisUrl} onClickUpload={() => handleUploadTrigger(ls.id)} />
-                          <IconButton size="small" sx={{ p: 0.5 }} onClick={() => edit(ls.id)}>
-                            <EditIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
+                          <NachweisIcon nachweisUrl={ls.nachweisUrl} onClickUpload={canEdit ? () => handleUploadTrigger(ls.id) : undefined} />
+                          {canEdit && (
+                            <IconButton size="small" sx={{ p: 0.5 }} onClick={() => edit(ls.id)}>
+                              <EditIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          )}
                         </Stack>
                       </Stack>
                     </Box>
@@ -450,6 +465,7 @@ export default function PurchaseDocuments() {
         </Stack>
 
         {/* Mobile Action Buttons (visible only on mobile) */}
+        {canEdit && (
         <Stack spacing={2} sx={{ mt: 3, display: { xs: "flex", md: "none" } }}>
           <Button
             variant="contained"
@@ -473,6 +489,7 @@ export default function PurchaseDocuments() {
             Neuer Lieferschein
           </Button>
         </Stack>
+        )}
       </Box>
 
       {/* Quick Stats & Actions Grid */}
@@ -495,6 +512,7 @@ export default function PurchaseDocuments() {
         </Grid>
 
         {/* Desktop Action Buttons: Visible only on md+ */}
+        {canEdit && (<>
         <Grid size={{ xs: 6, md: 3 }} sx={{ display: { xs: "none", md: "block" } }}>
           <Button
             variant="contained"
@@ -549,6 +567,7 @@ export default function PurchaseDocuments() {
             Lieferschein
           </Button>
         </Grid>
+        </>)}
       </Grid>
 
       {/* Filters */}
@@ -651,7 +670,7 @@ export default function PurchaseDocuments() {
                           </TableCell>
                           <TableCell>{doc.supplier}</TableCell>
                           <TableCell align="center">
-                            <NachweisIcon nachweisUrl={doc.nachweisUrl} onClickUpload={() => handleUploadTrigger(doc.id)} />
+                            <NachweisIcon nachweisUrl={doc.nachweisUrl} onClickUpload={canEdit ? () => handleUploadTrigger(doc.id) : undefined} />
                           </TableCell>
                           <TableCell align="right">
                             {doc.type === "RECHNUNG" ? (
@@ -667,12 +686,16 @@ export default function PurchaseDocuments() {
                           </TableCell>
                           <TableCell>{fmtDate(doc.documentDate)}</TableCell>
                           <TableCell align="center">
-                            <IconButton size="small" color="primary" onClick={() => edit(doc.id)} sx={{ mr: 1 }}>
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                            <IconButton size="small" color="error" onClick={() => removeDoc(doc)}>
-                              {isRowDeleting ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
-                            </IconButton>
+                            {canEdit && (
+                              <IconButton size="small" color="primary" onClick={() => edit(doc.id)} sx={{ mr: 1 }}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            )}
+                            {canDelete && (
+                              <IconButton size="small" color="error" onClick={() => removeDoc(doc)}>
+                                {isRowDeleting ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
+                              </IconButton>
+                            )}
                           </TableCell>
                         </TableRow>
 
@@ -691,10 +714,10 @@ export default function PurchaseDocuments() {
                                 <Stack direction="row" spacing={1} alignItems="center">
                                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mr: 4 }}>
                                     <Typography variant="caption">Nachweis:</Typography>
-                                    <NachweisIcon nachweisUrl={ls.nachweisUrl} onClickUpload={() => handleUploadTrigger(ls.id)} />
+                                    <NachweisIcon nachweisUrl={ls.nachweisUrl} onClickUpload={canEdit ? () => handleUploadTrigger(ls.id) : undefined} />
                                   </Stack>
-                                  <IconButton size="small" onClick={() => edit(ls.id)} sx={{ padding: 0.5 }}><EditIcon sx={{ fontSize: 18 }} /></IconButton>
-                                  <IconButton size="small" color="error" onClick={() => removeDoc(ls)} sx={{ padding: 0.5 }}><DeleteIcon sx={{ fontSize: 18 }} /></IconButton>
+                                  {canEdit && <IconButton size="small" onClick={() => edit(ls.id)} sx={{ padding: 0.5 }}><EditIcon sx={{ fontSize: 18 }} /></IconButton>}
+                                  {canDelete && <IconButton size="small" color="error" onClick={() => removeDoc(ls)} sx={{ padding: 0.5 }}><DeleteIcon sx={{ fontSize: 18 }} /></IconButton>}
                                 </Stack>
                               </Box>
                             </TableCell>

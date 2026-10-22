@@ -7,7 +7,7 @@ const upload = require('../middleware/upload');
 
 // All routes require Auth and Admin role
 router.use(authenticate);
-router.use(authorize('ADMIN'));
+router.use(authorize('ADMIN', 'CASHIER'));
 
 router.get('/', adController.listAds);
 router.post('/', upload.single('image'), adController.createAd);

@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import api, { setTokens, clearTokens, getToken } from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
+import { can as roleCan } from '../config/permissions';
 
 const AuthContext = createContext(null);
 
@@ -74,6 +75,8 @@ export const AuthProvider = ({ children }) => {
     isAdmin: user?.role === 'ADMIN',
     isCashier: user?.role === 'CASHIER',
     isAccountant: user?.role === 'ACCOUNTANT',
+    // Rechte aus config/permissions.js, z.B. can('sell')
+    can: (permission) => roleCan(user?.role, permission),
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
