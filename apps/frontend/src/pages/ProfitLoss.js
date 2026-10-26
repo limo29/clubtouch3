@@ -26,7 +26,8 @@ import { useAuth } from '../context/AuthContext';
 
 function FiscalYearsSection({ fiscalYears, error, onClose, onNew, onReceipts }) {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  // Karten auch am Tablet hochkant: die Tabelle braucht rund 750 px und wurde darunter abgeschnitten
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [dlError, setDlError] = useState(null);
 
   const downloadReport = async (fy) => {
@@ -81,7 +82,7 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew, onReceipts }) 
           ))}
         </Stack>
       ) : (
-        <Card>
+        <Card sx={{ overflowX: 'auto' }}>
           <Table size="small">
             <TableHead>
               <TableRow>

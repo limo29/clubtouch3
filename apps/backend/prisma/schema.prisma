@@ -284,6 +284,8 @@ model PurchaseDocument {
   documentDate   DateTime // Datum des Belegs
   nachweisUrl    String? // URL zum Scan (PDF/Bild)
   description    String?
+  // Wer den Beleg eingetragen hat (frei wählbar: am Gemeinschafts-Tablet ist das Konto nicht die Person)
+  enteredBy      String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

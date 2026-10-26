@@ -8,6 +8,12 @@ function userError(message) {
   return err;
 }
 
+// „Eingetragen von“: freier Name, gekürzt; leer = null
+function cleanEnteredBy(value) {
+  const name = typeof value === 'string' ? value.trim().slice(0, 80) : '';
+  return name || null;
+}
+
 /**
  * Auslage: Ein Kunde hat eine Lieferantenrechnung aus eigener Tasche bezahlt (paymentMethod = ACCOUNT).
  * Der volle Rechnungsbetrag wird seinem Kundenkonto als AccountTopUp mit method = REIMBURSEMENT
@@ -101,6 +107,7 @@ class PurchaseDocumentService {
       supplier,
       documentDate,
       description,
+      enteredBy,
       totalAmount,
       paid,
       dueDate,
@@ -121,6 +128,7 @@ class PurchaseDocumentService {
           supplier,
           documentDate: new Date(documentDate),
           description,
+          enteredBy: cleanEnteredBy(enteredBy),
           nachweisUrl,
           totalAmount: totalAmount ? new Prisma.Decimal(totalAmount) : null,
           paid: paid || false,
@@ -369,6 +377,20 @@ class PurchaseDocumentService {
     // Wir wollen nur den Namen
     return suppliers.map(s => s.supplier);
   }
+
+  /**
+   * Namen, die schon Belege eingetragen haben (häufigste zuerst) – Auswahl für „Eingetragen von“.
+   */
+  async getEnteredByNames() {
+    const rows = await prisma.purchaseDocument.groupBy({
+      by: ['enteredBy'],
+      where: { enteredBy: { not: null } },
+      _count: { enteredBy: true },
+      orderBy: { _count: { enteredBy: 'desc' } },
+      take: 50,
+    });
+    return rows.map((r) => r.enteredBy);
+  }
   /**
    * Markiert eine Rechnung als bezahlt.
    */
@@ -513,6 +535,7 @@ class PurchaseDocumentService {
       supplier,
       documentDate,
       description,
+      enteredBy,
       totalAmount,
       paid,
       dueDate,
@@ -651,6 +674,7 @@ class PurchaseDocumentService {
       if (supplier !== undefined) updateData.supplier = supplier;
       if (documentDate !== undefined) updateData.documentDate = new Date(documentDate);
       if (description !== undefined) updateData.description = description;
+      if (enteredBy !== undefined) updateData.enteredBy = cleanEnteredBy(enteredBy);
 
       if (newItemCreations !== undefined) {
         updateData.items = {

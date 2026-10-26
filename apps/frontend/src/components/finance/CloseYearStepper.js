@@ -42,6 +42,10 @@ export const describeBase = (total, article) => {
   return `${crates}${baseQty > 0 ? ` + ${qtyShort(baseQty, article.unit)}` : ''} (${t})`;
 };
 
+/** Inventur-Differenz = gezählt − laut App: Plus = mehr da als gebucht, Minus = fehlt */
+const diffHint = (diff) => (diff > 0 ? 'mehr da als gebucht' : diff < 0 ? 'fehlt gegenüber den Buchungen' : 'stimmt');
+const diffColorOf = (diff) => (diff > 0 ? 'info.main' : diff < 0 ? 'error.main' : 'success.main');
+
 /** Differenz in Kisten+Stück mit Vorzeichen: "−2 Kisten + 3 Fl. (−43)" */
 const describeDiff = (diff, article) => {
   if (diff === 0) return '±0';
@@ -264,7 +268,7 @@ function InventoryRow({ article, systemStock, counted, onChange, onSystem }) {
   const total = counted ? toBaseUnits(c.crateQty, c.baseQty, factor) : null;
   const diff = counted ? total - systemStock : null;
   const diffValue = diff === null ? 0 : diff * num(article.price);
-  const diffColor = diff === null ? 'text.disabled' : diff === 0 ? 'success.main' : 'error.main';
+  const diffColor = diff === null ? 'text.disabled' : diffColorOf(diff);
   const set = (patch) => onChange({ crateQty: c.crateQty, baseQty: c.baseQty, ...patch });
 
   return (
@@ -273,7 +277,7 @@ function InventoryRow({ article, systemStock, counted, onChange, onSystem }) {
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography fontWeight={700} sx={{ lineHeight: 1.25 }}>{article.name}</Typography>
           <Typography variant="caption" color="text.secondary">
-            System: {describeBase(systemStock, article)}{crate && ` · 1 ${article.purchaseUnit} = ${qty(factor, article.unit)}`}
+            Laut App: {describeBase(systemStock, article)}{crate && ` · 1 ${article.purchaseUnit} = ${qty(factor, article.unit)}`}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 1 }}>
@@ -289,13 +293,13 @@ function InventoryRow({ article, systemStock, counted, onChange, onSystem }) {
             onDelta={(d) => set({ baseQty: Math.max(0, c.baseQty + d) })}
             onSet={(v) => set({ baseQty: v })}
           />
-          <Button size="small" onClick={onSystem} startIcon={<Replay fontSize="small" />} sx={{ whiteSpace: 'nowrap' }}>wie System</Button>
+          <Button size="small" onClick={onSystem} startIcon={<Replay fontSize="small" />} sx={{ whiteSpace: 'nowrap' }}>wie App</Button>
         </Stack>
         <Box sx={{ minWidth: { md: 200 }, textAlign: { md: 'right' } }}>
           {counted ? (
             <>
-              <Typography variant="body2" fontWeight={700} color={diffColor}>{describeDiff(diff, article)}</Typography>
-              <Typography variant="caption" color={diffColor}>{signedMoney(diffValue)} · gezählt {total}</Typography>
+              <Typography variant="body2" fontWeight={700} color={diffColor}>{describeDiff(diff, article)} · {diffHint(diff)}</Typography>
+              <Typography variant="caption" color={diffColor}>{signedMoney(diffValue)} zum VK · gezählt {total}</Typography>
             </>
           ) : (
             <Chip size="small" variant="outlined" label="nicht gezählt" />
@@ -324,13 +328,30 @@ function StepInventory({ articles, systemStockById, counts, setCounts }) {
 
   return (
     <Stack spacing={1.5}>
+      <Alert severity="info">
+        <Typography variant="body2">
+          Zähle, was wirklich da ist. Daneben steht, was laut App da sein müsste (Einkäufe minus Verkäufe,
+          „Auf den Wirt“ und „Abgelaufen“). Die Differenz ist <b>gezählt − laut App</b>:
+        </Typography>
+        <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5, typography: 'body2' }}>
+          <li>
+            <b>Plus – mehr da als gebucht:</b> z.B. eine geschenkte Kiste oder ein Einkauf, der nicht als
+            Lieferschein oder Lieferantenrechnung eingetragen wurde.
+          </li>
+          <li>
+            <b>Minus – es fehlt etwas:</b> z.B. getrunken, verschenkt oder weggeschüttet, ohne es als „Auf den Wirt“
+            oder „Abgelaufen“ zu buchen, oder ein Verkauf wurde nicht gebucht.
+          </li>
+        </Box>
+        <Typography variant="body2" sx={{ mt: 0.5 }}>Der Euro-Betrag ist die Differenz zum Verkaufspreis.</Typography>
+      </Alert>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
         <TextField
           placeholder="Artikel suchen…" size="small" value={search} onChange={(e) => setSearch(e.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
           sx={{ flex: 1 }}
         />
-        <Button variant="outlined" startIcon={<DoneAll />} onClick={() => takeSystem(articles)} sx={{ whiteSpace: 'nowrap' }}>Alle wie System übernehmen</Button>
+        <Button variant="outlined" startIcon={<DoneAll />} onClick={() => takeSystem(articles)} sx={{ whiteSpace: 'nowrap' }}>Alle wie App übernehmen</Button>
       </Stack>
       <Tabs value={categories.includes(category) ? category : 'all'} onChange={(e, v) => setCategory(v)} variant="scrollable" scrollButtons="auto" sx={{ minHeight: 40, '& .MuiTab-root': { minHeight: 40 } }}>
         {categories.map((c) => <Tab key={c} value={c} label={c === 'all' ? 'Alle' : c} />)}
@@ -413,14 +434,14 @@ function StepReview({ fy, preview, chosenCount, banks, articles, systemStockById
             Inventur: {inventoryRows.length} gezählt, {deviations.length} Abweichung{deviations.length === 1 ? '' : 'en'}{uncounted > 0 ? `, ${uncounted} nicht gezählt` : ''}
           </Typography>
           {deviations.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">Keine Abweichungen zum Systembestand.</Typography>
+            <Typography variant="body2" color="text.secondary">Keine Abweichungen zum Bestand laut App.</Typography>
           ) : (
             <Box sx={{ overflowX: 'auto' }}>
               <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell>Artikel</TableCell>
-                    <TableCell align="right">System</TableCell>
+                    <TableCell align="right">Laut App</TableCell>
                     <TableCell align="right">Gezählt</TableCell>
                     <TableCell align="right">Differenz</TableCell>
                     <TableCell align="right">Wert (VK)</TableCell>
@@ -428,11 +449,14 @@ function StepReview({ fy, preview, chosenCount, banks, articles, systemStockById
                 </TableHead>
                 <TableBody>
                   {deviations.map((r) => (
-                    <TableRow key={r.a.id} sx={{ '& td': { color: 'error.main', fontWeight: 600 } }}>
+                    <TableRow key={r.a.id} sx={{ '& td': { color: diffColorOf(r.diff), fontWeight: 600 } }}>
                       <TableCell>{r.a.name}</TableCell>
                       <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{describeBase(r.system, r.a)}</TableCell>
                       <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{describeBase(r.counted, r.a)}</TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{describeDiff(r.diff, r.a)}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                        {describeDiff(r.diff, r.a)}
+                        <Typography variant="caption" sx={{ display: 'block', color: 'inherit' }}>{diffHint(r.diff)}</Typography>
+                      </TableCell>
                       <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{signedMoney(r.value)}</TableCell>
                     </TableRow>
                   ))}

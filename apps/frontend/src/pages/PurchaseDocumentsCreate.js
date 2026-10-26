@@ -37,6 +37,8 @@ import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
 import { invalidate } from '../utils/invalidate';
 import ReimbursementCustomerField, { PAYMENT_METHOD_LABELS } from "../components/purchases/ReimbursementCustomerField";
+import EnteredByField from "../components/purchases/EnteredByField";
+import { useAuth } from "../context/AuthContext";
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentCreate             */
@@ -47,6 +49,7 @@ export default function PurchaseDocumentCreate() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const documentType =
     location.state?.type === "LIEFERSCHEIN" ? "LIEFERSCHEIN" : "RECHNUNG";
@@ -61,6 +64,8 @@ export default function PurchaseDocumentCreate() {
       documentDate: new Date(),
       supplier: null,
       description: "",
+      // Vorschlag: Name des angemeldeten Kontos; am Gemeinschafts-Tablet die Person auswählen
+      enteredBy: user?.name || "",
       totalAmount: "",
       paid: false,
       paymentMethod: "TRANSFER",
@@ -144,6 +149,7 @@ export default function PurchaseDocumentCreate() {
     formData.append("documentDate", data.documentDate.toISOString());
     formData.append("supplier", supplierValue);
     formData.append("description", data.description || "");
+    formData.append("enteredBy", data.enteredBy || "");
 
     if (isRechnung) {
       formData.append("totalAmount", data.totalAmount || "0");
@@ -360,6 +366,12 @@ export default function PurchaseDocumentCreate() {
             )}
           </>
         )}
+
+        <Controller
+          name="enteredBy"
+          control={control}
+          render={({ field }) => <EnteredByField value={field.value} onChange={field.onChange} />}
+        />
 
         <Controller
           name="description"

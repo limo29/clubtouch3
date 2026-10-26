@@ -19,6 +19,11 @@ router.get('/suppliers',
   purchaseDocumentController.getSuppliers
 );
 // NEU: Holt ungebundene Lieferscheine
+router.get('/entered-by',
+  authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
+  purchaseDocumentController.getEnteredByNames
+);
+
 router.get('/unassigned',
   authorize('ADMIN', 'CASHIER', 'ACCOUNTANT'),
   purchaseDocumentController.getUnassigned

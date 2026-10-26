@@ -361,6 +361,11 @@ export default function PurchaseDocuments() {
               <Typography variant="body2" fontWeight={500} color="text.primary">
                 {doc.supplier}
               </Typography>
+              {doc.enteredBy && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                  eingetragen von {doc.enteredBy}
+                </Typography>
+              )}
               {hasChildren && (
                 <Chip
                   size="small"
@@ -668,7 +673,14 @@ export default function PurchaseDocuments() {
                               </Box>
                             </Stack>
                           </TableCell>
-                          <TableCell>{doc.supplier}</TableCell>
+                          <TableCell>
+                            {doc.supplier}
+                            {doc.enteredBy && (
+                              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                eingetragen von {doc.enteredBy}
+                              </Typography>
+                            )}
+                          </TableCell>
                           <TableCell align="center">
                             <NachweisIcon nachweisUrl={doc.nachweisUrl} onClickUpload={canEdit ? () => handleUploadTrigger(doc.id) : undefined} />
                           </TableCell>

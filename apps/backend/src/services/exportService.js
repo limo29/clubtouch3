@@ -1350,11 +1350,11 @@ class ExportService {
         });
 
         // ---------- WARENBESTAND ----------
-        this._section(doc, theme, 'Warenbestand zum Stichtag (System / gezählt / Differenz)', headerInfo);
+        this._section(doc, theme, 'Warenbestand zum Stichtag (laut App / gezählt / Differenz)', headerInfo);
         this._table(doc, theme, {
           columns: [
             { header: 'Artikel', width: 150, render: r => r.name },
-            { header: 'System', width: 110, align: 'right', render: r => this._fmtQty(r.systemStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Laut App', width: 110, align: 'right', render: r => this._fmtQty(r.systemStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
             { header: 'Gezählt', width: 110, align: 'right', render: r => this._fmtQty(r.physicalStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
             { header: 'Differenz', width: 110, align: 'right', render: r => this._fmtQty(r.diff, r.unit, r.purchaseUnit, r.unitsPerPurchase), color: r => r.diff < 0 ? theme.color.danger : (r.diff > 0 ? theme.color.success : theme.color.text) },
             { header: 'Wert gezählt', width: 80, align: 'right', render: r => this._fmtEUR(r.physicalValue) },
@@ -1365,9 +1365,15 @@ class ExportService {
           emptyHint: 'Keine Bestandsdaten.',
           headerInfo
         });
+        // Lesehilfe für die Kassenprüfung: was Plus und Minus bedeuten
+        doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
+          .text('Differenz = gezählt minus laut App. Plus: mehr da als gebucht (z. B. geschenkte Ware oder Einkauf ohne Lieferschein/Rechnung). '
+            + 'Minus: fehlt gegenüber den Buchungen (z. B. getrunken, verschenkt oder weggeschüttet ohne Buchung „Auf den Wirt“/„Abgelaufen“, nicht gebuchter Verkauf). '
+            + 'Werte zum Verkaufspreis.', theme.page.margin, doc.y, { width: pageW });
+        doc.moveDown(0.5);
         if (draft) {
           doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
-            .text('Im Entwurf entspricht der gezählte Bestand dem Systembestand; die Inventur wird erst beim Abschluss erfasst.', theme.page.margin, doc.y, { width: pageW });
+            .text('Im Entwurf entspricht der gezählte Bestand dem Bestand laut App; die Inventur wird erst beim Abschluss erfasst.', theme.page.margin, doc.y, { width: pageW });
           doc.moveDown(1);
         }
 

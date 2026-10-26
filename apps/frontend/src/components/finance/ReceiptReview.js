@@ -161,6 +161,9 @@ function PreviewHeader({ doc, onClose, hasPrev, hasNext, onPrev, onNext }) {
           <Typography variant="body2" color="text.secondary" noWrap>
             {doc.supplier || '—'} · {fmtDate(doc.documentDate)}
           </Typography>
+          {doc.enteredBy && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>eingetragen von {doc.enteredBy}</Typography>
+          )}
           {doc.type === 'RECHNUNG' && (
             <Typography variant="body2">
               {money(doc.totalAmount)} · {PAYMENT_LABELS[doc.paymentMethod] || '—'}
@@ -212,6 +215,7 @@ function MobileDocCard({ doc, selected, onClick }) {
             </Stack>
             <Typography variant="body2" color="text.secondary">
               {fmtDate(doc.documentDate)} · {doc.supplier || '—'}
+              {doc.enteredBy && ` · eingetragen von ${doc.enteredBy}`}
             </Typography>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5, flexWrap: 'wrap' }}>
               {doc.type === 'RECHNUNG' && (
@@ -430,6 +434,7 @@ export default function ReceiptReview({ fetchUrl, zipUrl, params, title, onSumma
                       <TableCell>Typ</TableCell>
                       <TableCell>Datum</TableCell>
                       <TableCell>Lieferant</TableCell>
+                      <TableCell>Eingetragen von</TableCell>
                       <TableCell align="right">Betrag</TableCell>
                       <TableCell>Bezahlt</TableCell>
                       <TableCell>Zahlungsart</TableCell>
@@ -464,6 +469,7 @@ export default function ReceiptReview({ fetchUrl, zipUrl, params, title, onSumma
                         >
                           {doc.supplier || '—'}
                         </TableCell>
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{doc.enteredBy || '—'}</TableCell>
                         <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                           {doc.type === 'LIEFERSCHEIN' ? '–' : money(doc.totalAmount)}
                         </TableCell>

@@ -23,7 +23,7 @@ Stand der Beschreibung: Oktober 2026. Technische Details für Entwickler stehen 
 - Bestand wird durch Verkauf, Einkauf, Rechnungen, „Abgelaufen“ und „Auf den Wirt“ gebucht; negativer Bestand ist erlaubt (Warnung).
 
 ### Finanzen
-- **Einkauf:** Lieferantenrechnungen und Lieferscheine mit Nachweis (Foto/PDF); Lieferscheine lassen sich einer Rechnung zuordnen. Hat ein Mitglied privat bezahlt („Auslage“), wird der Betrag seinem Konto gutgeschrieben.
+- **Einkauf:** Lieferantenrechnungen und Lieferscheine mit Nachweis (Foto/PDF) und „Eingetragen von“ (vorbelegt mit dem Kontonamen, am Gemeinschafts-Tablet die Person auswählen); Lieferscheine lassen sich einer Rechnung zuordnen. Hat ein Mitglied privat bezahlt („Auslage“), wird der Betrag seinem Konto gutgeschrieben.
 - **Kundenrechnungen:** Rechnungen an Mitglieder, Gäste oder Vereine mit PDF, Status und Zahlungsart.
 - **Kasse & Bank:** Kassenzählung nach Scheinen und Münzen mit Soll/Ist, Kassenbewegungen (Einzahlung zur Bank, sonstige Einnahmen/Ausgaben), Bank-Abstimmung.
 - **Kassenprüfung:** Geschäftsjahre mit geführtem Abschluss (Zeitraum, Kasse, Bank, Belege, Inventur, Prüfen), Belegliste als ZIP und Jahresabschluss-PDF.

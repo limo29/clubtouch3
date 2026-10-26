@@ -127,6 +127,17 @@ class PurchaseDocumentController {
       res.status(500).json({ error: 'Fehler beim Abrufen der Lieferanten' });
     }
   }
+  // GET /entered-by – Namen für die Auswahl „Eingetragen von“
+  async getEnteredByNames(req, res) {
+    try {
+      const names = await purchaseDocumentService.getEnteredByNames();
+      res.json({ names });
+    } catch (error) {
+      console.error('Get entered-by names error:', error);
+      res.status(500).json({ error: 'Fehler beim Laden der Namen' });
+    }
+  }
+
   // GET /unassigned?supplier=...
   async getUnassigned(req, res) {
     try {

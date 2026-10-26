@@ -46,6 +46,7 @@ import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
 import { invalidate } from '../utils/invalidate';
 import ReimbursementCustomerField, { PAYMENT_METHOD_LABELS } from "../components/purchases/ReimbursementCustomerField";
+import EnteredByField from "../components/purchases/EnteredByField";
 
 /* -------------------------------------------------------------------------- */
 /*                         Main Component: PurchaseDocumentEdit               */
@@ -72,6 +73,7 @@ export default function PurchaseDocumentEdit() {
       documentDate: null,
       supplier: null,
       description: "",
+      enteredBy: "",
       totalAmount: "",
       paid: false,
       paymentMethod: "TRANSFER",
@@ -131,6 +133,7 @@ export default function PurchaseDocumentEdit() {
       documentDate: new Date(documentData.documentDate),
       supplier: documentData.supplier,
       description: documentData.description || "",
+      enteredBy: documentData.enteredBy || "",
       totalAmount: documentData.totalAmount || "",
       paid: documentData.paid || false,
       paymentMethod: documentData.paymentMethod || "TRANSFER",
@@ -180,6 +183,7 @@ export default function PurchaseDocumentEdit() {
     formData.append("documentDate", data.documentDate.toISOString());
     formData.append("supplier", data.supplier);
     formData.append("description", data.description || "");
+    formData.append("enteredBy", data.enteredBy || "");
 
     if (documentData?.type === "RECHNUNG") {
       formData.append("totalAmount", data.totalAmount || "0");
@@ -320,6 +324,7 @@ export default function PurchaseDocumentEdit() {
             )}
           </>
         )}
+        <Controller name="enteredBy" control={control} render={({ field }) => <EnteredByField value={field.value} onChange={field.onChange} />} />
         <Controller name="description" control={control} render={({ field }) => <TextField {...field} label="Kommentar / Beschreibung" multiline minRows={2} size="small" fullWidth />} />
 
         {/* Lieferschein, der schon zu einer Rechnung gehört */}

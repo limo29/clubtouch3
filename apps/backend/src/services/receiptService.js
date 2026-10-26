@@ -112,6 +112,7 @@ class ReceiptService {
         documentNumber: d.documentNumber,
         type:           d.type,
         supplier:       d.supplier,
+        enteredBy:      d.enteredBy,
         documentDate:   d.documentDate,
         totalAmount:    d.type === 'LIEFERSCHEIN' ? null : (d.totalAmount !== null ? Number(d.totalAmount) : null),
         paid:           d.paid,
@@ -248,13 +249,14 @@ class ReceiptService {
       return fn;
     };
 
-    const header = 'Belegnummer;Typ;Datum;Lieferant;Betrag;Bezahlt;Zahlungsart;Nachweis-Datei';
+    const header = 'Belegnummer;Typ;Datum;Lieferant;Eingetragen von;Betrag;Bezahlt;Zahlungsart;Nachweis-Datei';
     const rows = documents.map(doc =>
       [
         doc.documentNumber,
         typeLabel(doc.type),
         fmtDate(doc.documentDate),
         doc.supplier || '',
+        doc.enteredBy || '',
         fmtEur(doc.totalAmount),
         paidLabel(doc),
         doc.paymentMethod ? _paymentLabel(doc.paymentMethod) : '',
@@ -337,7 +339,9 @@ class ReceiptService {
             { header: 'Belegnr.',  width: 70,  render: r => r.documentNumber },
             { header: 'Typ',       width: 59,  render: r => r.type === 'RECHNUNG' ? 'Rechnung' : 'Lieferschein' },
             { header: 'Datum',     width: 55,  render: r => fmtDate(r.documentDate) },
-            { header: 'Lieferant', width: 85,  render: r => r.supplier || '' },
+            // „Eingetragen von“ unter dem Lieferanten, eine eigene Spalte wäre zu schmal
+            { header: 'Lieferant', width: 85,  render: r => (r.supplier || '') + (r.enteredBy ? `
+erfasst: ${r.enteredBy}` : '') },
             { header: 'Bezahlt',   width: 64,  render: r => paidLabel(r), color: r => (r.type === 'RECHNUNG' && !r.paid) ? th.color.warning : th.color.text },
             { header: 'Betrag',    width: 55,  align: 'right', render: r => r.totalAmount !== null ? fmtEUR(r.totalAmount) : '–' },
             {
