@@ -44,6 +44,12 @@ function HistoryRow({ entry: e }) {
     sub = storno || e.method === 'MIGRATION' ? null : e.reference;
     if (!storno && e.method === 'MIGRATION' && e.reference) sub = e.reference.replace(/^Übernahme Clubtouch 2\.0 /, 'Altsystem ');
     color = e.amount >= 0 ? 'success.main' : 'error.main';
+  } else if (e.txType === 'REFUND') {
+    // Gegenbuchung eines stornierten Kaufs: Betrag geht zurück aufs Konto
+    Icon = Undo;
+    const names = (e.items || []).map((i) => i.article?.name).filter(Boolean);
+    title = `Storno${names.length ? `: ${names.slice(0, 2).join(', ')}${names.length > 2 ? ' …' : ''}` : ''}`;
+    color = 'success.main';
   } else {
     Icon = ReceiptLong;
     const items = (e.items || []).map((i) => `${num(i.quantity)}× ${i.article?.name || 'Artikel'}`);
@@ -52,7 +58,7 @@ function HistoryRow({ entry: e }) {
     strike = e.cancelled;
     color = e.cancelled || e.method === 'CASH' ? 'text.secondary' : 'text.primary';
   }
-  const shown = e.type === 'TOPUP' ? e.amount : -(e.originalAmount ?? Math.abs(e.amount));
+  const shown = e.type === 'TOPUP' ? e.amount : e.txType === 'REFUND' ? Math.abs(e.amount) : -(e.originalAmount ?? Math.abs(e.amount));
   return (
     <Stack direction="row" spacing={1.5} alignItems="center" sx={{ py: 1.25, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 'none' } }}>
       <Avatar sx={{ width: 36, height: 36, bgcolor: 'action.hover', color: 'text.secondary' }}><Icon fontSize="small" /></Avatar>

@@ -83,10 +83,15 @@ class TransactionController {
       };
       
       const transactions = await transactionService.listTransactions(filters);
-      
+      // Optional: Kontoaufladungen im selben Zeitraum (getrennt, sie sind kein Umsatz)
+      const topUps = req.query.includeTopUps === 'true'
+        ? await transactionService.listTopUps({ ...filters, includeMigration: req.query.includeMigration === 'true' })
+        : undefined;
+
       res.json({
         transactions,
-        count: transactions.length
+        count: transactions.length,
+        ...(topUps ? { topUps } : {}),
       });
     } catch (error) {
       console.error('List transactions error:', error);

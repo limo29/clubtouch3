@@ -275,6 +275,25 @@ class TransactionService {
   }
 
   // Liste Transaktionen
+  // Kontoaufladungen im Zeitraum (eigene Tabelle AccountTopUp, keine Transaktionen).
+  // Übernahme-Buchungen aus Clubtouch 2.0 (MIGRATION) nur auf Wunsch.
+  async listTopUps(filters = {}) {
+    const { startDate, endDate, customerId, includeMigration = false } = filters;
+    const where = {};
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = parseLocalDate(startDate);
+      if (endDate) where.createdAt.lte = endOfLocalDay(endDate);
+    }
+    if (customerId) where.customerId = customerId;
+    if (!includeMigration) where.method = { not: 'MIGRATION' };
+    return prisma.accountTopUp.findMany({
+      where,
+      include: { customer: { select: CUSTOMER_BASIC_SELECT } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async listTransactions(filters = {}) {
     const { startDate, endDate, customerId, paymentMethod, includeItems = false } = filters;
 

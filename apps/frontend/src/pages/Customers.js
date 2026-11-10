@@ -3,7 +3,8 @@
  * Desktop: Tabelle mit „Aufladen“ je Zeile. Handy/Tablet: kompakte Kartenliste.
  * Zeile antippen öffnet das Kunden-Panel (Konto mit Verlauf · Daten).
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Avatar, Box, Button, Card, Chip, Fab, Grid, InputAdornment, ListItemIcon, Menu, MenuItem, Skeleton,
   Stack, Switch, TextField, Tooltip, Typography, useMediaQuery,
@@ -161,6 +162,15 @@ export default function Customers() {
   const [sortAnchor, setSortAnchor] = useState(null);
   const [panel, setPanel] = useState({ open: false, id: null, tab: 'account' });
   const [groupManager, setGroupManager] = useState(false);
+
+  // Aufruf mit ?kunde=<id> (z. B. aus Transaktionen): Panel dieses Kunden öffnen, Parameter danach entfernen
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedId = searchParams.get('kunde');
+  useEffect(() => {
+    if (!linkedId) return;
+    setPanel({ open: true, id: linkedId, tab: 'account' });
+    setSearchParams({}, { replace: true });
+  }, [linkedId, setSearchParams]);
 
   const { data: groupsData } = useQuery({ queryKey: ['customer-groups'], queryFn: async () => (await api.get(API_ENDPOINTS.CUSTOMER_GROUPS)).data });
   const groups = groupsData?.groups || [];

@@ -282,10 +282,11 @@ class CustomerService {
         include: { group: GROUP_SELECT },
       }),
 
-      // Gesamtausgaben
+      // Gesamtausgaben – nur echte Verkäufe (REFUND ist die Gegenbuchung eines Stornos, kein Kauf)
       prisma.transaction.aggregate({
         where: {
           customerId,
+          type: 'SALE',
           cancelled: false,
         },
         _sum: {
@@ -293,10 +294,11 @@ class CustomerService {
         },
       }),
 
-      // Anzahl Transaktionen
+      // Anzahl Käufe
       prisma.transaction.count({
         where: {
           customerId,
+          type: 'SALE',
           cancelled: false,
         },
       }),
@@ -313,6 +315,7 @@ class CustomerService {
         JOIN "Transaction" t ON ti."transactionId" = t.id
         JOIN "Article" a ON ti."articleId" = a.id
         WHERE t."customerId" = ${customerId}
+          AND t.type = 'SALE'
           AND t.cancelled = false
         GROUP BY a.id, a.name, a.category
         ORDER BY total_quantity DESC
@@ -478,6 +481,7 @@ class CustomerService {
     const combined = [
       ...transactions.map((t) => ({
         type: 'TRANSACTION',
+        txType: t.type, // SALE | REFUND (Gegenbuchung eines Stornos) | …
         id: t.id,
         date: t.createdAt,
         amount: t.cancelled ? 0 : -Number(t.totalAmount), // Ausgaben sind negativ

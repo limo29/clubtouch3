@@ -2,6 +2,8 @@
  * Transaktionen: nach Tagen gruppierte Liste mit Tagessumme.
  * Leiste (sticky): Zeitraum-Chips (Heute · 7 Tage · 30 Tage · Alles · Zeitraum…) und Art-Chips (Bar · Kundenkonto · Auf den Wirt · Storniert).
  * Ein aktiver Chip lässt sich abwählen. Zeile antippen öffnet die Details, dort auch „Stornieren“.
+ * Kontoaufladungen (eigene Tabelle, kein Umsatz) stehen mit in der Liste; antippen öffnet ihre Details.
+ * Übernahme-Buchungen aus Clubtouch 2.0 nur über den Chip „Übernahme“.
  */
 import React, { useMemo, useState } from 'react';
 import {
@@ -10,8 +12,10 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
-  AccountBalanceWallet, AttachMoney, Cancel, ChevronRight, DeleteOutline, EventBusy, LocalBar, ReceiptLong, Undo,
+  AccountBalance, AccountBalanceWallet, AttachMoney, Cancel, ChevronRight, DeleteOutline, EventBusy, LocalAtm, LocalBar,
+  ReceiptLong, SettingsBackupRestore, Undo,
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, startOfDay, subDays, isToday, isYesterday } from 'date-fns';
@@ -46,11 +50,30 @@ const KINDS = [
   { key: 'ACCOUNT', label: 'Kundenkonto', test: (t) => t.type === 'SALE' && t.paymentMethod === 'ACCOUNT' },
   { key: 'OWNER_USE', label: 'Auf den Wirt', test: (t) => t.type === 'OWNER_USE' },
   { key: 'EXPIRED', label: 'Bruch', test: (t) => t.type === 'EXPIRED' },
-  { key: 'CANCELLED', label: 'Storniert', test: (t) => t.cancelled || t.type === 'REFUND', color: 'error' },
+  { key: 'TOPUP', label: 'Aufladung', test: (t) => t.type === 'TOPUP' && t.method !== 'MIGRATION' },
+  { key: 'CANCELLED', label: 'Storniert', test: (t) => t.cancelled || t.type === 'REFUND' || (t.type === 'TOPUP' && t.storno), color: 'error' },
+  { key: 'MIGRATION', label: 'Übernahme', test: (t) => t.type === 'TOPUP' && t.method === 'MIGRATION', hideEmpty: true },
 ];
+
+const TOPUP_KIND = {
+  CASH: { Icon: LocalAtm, title: 'Aufladung bar' },
+  TRANSFER: { Icon: AccountBalance, title: 'Aufladung Überweisung' },
+  REIMBURSEMENT: { Icon: ReceiptLong, title: 'Auslage (Einkauf)' },
+  MIGRATION: { Icon: SettingsBackupRestore, title: 'Übernahme Clubtouch 2.0' },
+};
+/** Aufladung in dieselbe Form wie eine Transaktion bringen */
+const fromTopUp = (u) => ({
+  // Storno nur über die Referenz erkennen: negative Übernahmen (Schulden aus Clubtouch 2.0) sind kein Storno
+  ...u, type: 'TOPUP', storno: String(u.reference || '').startsWith('STORNO:'),
+});
 
 /** Darstellung je Buchung: Symbol, Titel, Farbe des Betrags */
 const describe = (t) => {
+  if (t.type === 'TOPUP') {
+    if (t.storno) return { Icon: Undo, title: 'Storno einer Aufladung', who: t.customer?.name || 'Kunde' };
+    const k = TOPUP_KIND[t.method] || TOPUP_KIND.CASH;
+    return { Icon: k.Icon, title: k.title, who: t.customer?.name || 'Kunde' };
+  }
   if (t.type === 'REFUND') return { Icon: Undo, title: 'Storno', who: t.customer?.name || 'Bar' };
   if (t.type === 'OWNER_USE') return { Icon: LocalBar, title: 'Auf den Wirt', who: 'Auf den Wirt' };
   if (t.type === 'EXPIRED') return { Icon: EventBusy, title: 'Abschreibung', who: 'Abgelaufen / Bruch' };
@@ -58,10 +81,15 @@ const describe = (t) => {
   return { Icon: AttachMoney, title: 'Bar', who: t.customer?.name || 'Bar' };
 };
 const itemsText = (t, max = 3) => {
+  if (t.type === 'TOPUP') {
+    const ref = t.storno ? '' : String(t.reference || '').replace(/^Übernahme Clubtouch 2\.0 /, 'Altsystem ');
+    return [describe(t).title, ref].filter(Boolean).join(' · ');
+  }
   const parts = (t.items || []).map((i) => `${num(i.quantity)}× ${i.article?.name || 'Artikel'}`);
   return parts.length ? parts.slice(0, max).join(', ') + (parts.length > max ? ` +${parts.length - max}` : '') : '–';
 };
 const moneyFlows = (t) => t.type === 'SALE' && !t.cancelled; // zählt zum Umsatz
+const topUpFlows = (t) => t.type === 'TOPUP' && t.method !== 'MIGRATION'; // echte Aufladungen (inkl. Storno)
 const dayLabel = (d) => (isToday(d) ? 'Heute' : isYesterday(d) ? 'Gestern' : format(d, 'EEEE, d. MMMM yyyy', { locale: de }));
 
 const COLS = '64px minmax(160px, 1.2fr) minmax(200px, 2fr) 120px 110px 24px';
@@ -69,8 +97,12 @@ const COLS = '64px minmax(160px, 1.2fr) minmax(200px, 2fr) 120px 110px 24px';
 function Row({ t, onOpen, compact }) {
   const d = describe(t);
   const crossed = t.cancelled;
-  const amount = t.type === 'REFUND' ? -Math.abs(num(t.totalAmount)) : num(t.totalAmount);
-  const amountColor = crossed ? 'text.disabled' : t.type === 'REFUND' ? 'error.main' : t.type === 'SALE' ? 'text.primary' : 'text.secondary';
+  const isTopUp = t.type === 'TOPUP';
+  const amount = isTopUp ? num(t.amount) : t.type === 'REFUND' ? -Math.abs(num(t.totalAmount)) : num(t.totalAmount);
+  const amountColor = crossed ? 'text.disabled'
+    : isTopUp ? (amount < 0 ? 'error.main' : 'success.main')
+    : t.type === 'REFUND' ? 'error.main' : t.type === 'SALE' ? 'text.primary' : 'text.secondary';
+  const shown = isTopUp && amount > 0 ? `+${money(amount)}` : money(amount);
   const status = crossed ? <Chip size="small" color="error" variant="outlined" label="storniert" /> : null;
   const rowSx = {
     cursor: 'pointer', borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 'none' },
@@ -86,7 +118,7 @@ function Row({ t, onOpen, compact }) {
           <Typography variant="body2" color="text.secondary" noWrap>{format(new Date(t.createdAt), 'HH:mm')} · {itemsText(t, 2)}</Typography>
         </Box>
         <Stack alignItems="flex-end" spacing={0.25}>
-          <Typography fontWeight={800} sx={{ color: amountColor, textDecoration: crossed ? 'line-through' : 'none', whiteSpace: 'nowrap' }}>{money(amount)}</Typography>
+          <Typography fontWeight={800} sx={{ color: amountColor, textDecoration: crossed ? 'line-through' : 'none', whiteSpace: 'nowrap' }}>{shown}</Typography>
           {status}
         </Stack>
       </Box>
@@ -103,8 +135,10 @@ function Row({ t, onOpen, compact }) {
           <Typography variant="body2" color="text.secondary" noWrap>{[d.title !== d.who && d.title, t.user?.name].filter(Boolean).join(' · ') || ' '}</Typography>
         </Box>
       </Stack>
-      <Typography noWrap color={crossed ? 'text.secondary' : 'text.primary'}>{itemsText(t)}</Typography>
-      <Typography fontWeight={800} sx={{ textAlign: 'right', color: amountColor, textDecoration: crossed ? 'line-through' : 'none' }}>{money(amount)}</Typography>
+      <Typography noWrap color={crossed || isTopUp ? 'text.secondary' : 'text.primary'}>
+        {isTopUp ? (t.storno ? 'Gegenbuchung' : String(t.reference || '').replace(/^Übernahme Clubtouch 2\.0 /, 'Altsystem ') || '–') : itemsText(t)}
+      </Typography>
+      <Typography fontWeight={800} sx={{ textAlign: 'right', color: amountColor, textDecoration: crossed ? 'line-through' : 'none' }}>{shown}</Typography>
       <Box>{status}</Box>
       <ChevronRight sx={{ color: 'text.disabled' }} />
     </Box>
@@ -123,11 +157,14 @@ export default function Transactions() {
   const [range, setRange] = useState({ start: null, end: null });
   const [kind, setKind] = useState('all');
   const [selected, setSelected] = useState(null);
+  const [topUp, setTopUp] = useState(null); // gewählte Aufladung (Detail-Fenster)
+  const [confirmTopUpCancel, setConfirmTopUpCancel] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const navigate = useNavigate();
 
   // Zeitraum -> Abfrage (ohne Auswahl: alles)
   const params = useMemo(() => {
-    const p = { includeItems: true };
+    const p = { includeItems: true, includeTopUps: true, includeMigration: true };
     const def = PERIODS.find((x) => x.key === period);
     if (def?.days !== undefined) p.startDate = format(subDays(startOfDay(new Date()), def.days), 'yyyy-MM-dd');
     if (period === 'custom') {
@@ -146,20 +183,23 @@ export default function Transactions() {
     queryFn: async () => (await api.get(API_ENDPOINTS.DAILY_SUMMARY)).data,
   });
 
-  const all = useMemo(() => data?.transactions || [], [data]);
+  const all = useMemo(() => [...(data?.transactions || []), ...(data?.topUps || []).map(fromTopUp)], [data]);
   const counts = useMemo(() => Object.fromEntries(KINDS.map((k) => [k.key, all.filter(k.test).length])), [all]);
   const visible = useMemo(() => {
     const k = KINDS.find((x) => x.key === kind);
-    return [...all].filter((t) => !k || k.test(t)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // ohne Filter keine Übernahme-Buchungen – sonst stünde der Importtag mit 151 Einträgen in der Liste
+    const migration = KINDS.find((x) => x.key === 'MIGRATION');
+    return [...all].filter((t) => (k ? k.test(t) : !migration.test(t))).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [all, kind]);
   const days = useMemo(() => {
     const m = new Map();
     for (const t of visible) {
       const key = format(new Date(t.createdAt), 'yyyy-MM-dd');
-      if (!m.has(key)) m.set(key, { date: startOfDay(new Date(t.createdAt)), items: [], revenue: 0 });
+      if (!m.has(key)) m.set(key, { date: startOfDay(new Date(t.createdAt)), items: [], revenue: 0, topUps: 0, hasTopUps: false });
       const g = m.get(key);
       g.items.push(t);
       if (moneyFlows(t)) g.revenue += num(t.totalAmount);
+      if (topUpFlows(t)) { g.topUps += num(t.amount); g.hasTopUps = true; }
     }
     return [...m.values()];
   }, [visible]);
@@ -176,6 +216,20 @@ export default function Transactions() {
   const s = dailySummary?.summary;
   const sel = selected ? describe(selected) : null;
   const selCancellable = selected && canCancel && !selected.cancelled && CANCELLABLE_TYPES.includes(selected.type);
+
+  // Aufladung stornieren: nur echte Bar-/Überweisungs-Aufladungen, die noch nicht storniert sind
+  // (Übernahme und Auslagen sind gesperrt, Gegenbuchungen werden nicht erneut storniert)
+  const topUpReversed = topUp && all.some((e) => e.type === 'TOPUP' && e.reference === `STORNO:${topUp.id}`);
+  const topUpCancellable = topUp && canCancel && !topUp.storno && ['CASH', 'TRANSFER'].includes(topUp.method) && !topUpReversed;
+  const cancelTopUp = useMutation({
+    mutationFn: async (u) => (await api.post(`${API_ENDPOINTS.CUSTOMERS}/${u.customerId}/topup/${u.id}/cancel`)).data,
+    onSuccess: () => {
+      invalidate(queryClient, 'customers', 'finance', 'sales');
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      setConfirmTopUpCancel(false);
+      setTopUp(null);
+    },
+  });
 
   return (
     <Box sx={{ pb: 6 }}>
@@ -200,7 +254,8 @@ export default function Transactions() {
             </Stack>
           )}
           <FilterChips value={kind} onChange={setKind}
-            options={KINDS.map((k) => ({ key: k.key, label: k.label, count: counts[k.key], color: k.color }))} />
+            options={KINDS.filter((k) => !k.hideEmpty || counts[k.key] > 0 || kind === k.key)
+              .map((k) => ({ key: k.key, label: k.label, count: counts[k.key], color: k.color }))} />
         </Stack>
       </StickyToolbar>
 
@@ -216,13 +271,18 @@ export default function Transactions() {
         <Stack spacing={2}>
           {days.map((g) => (
             <Card key={g.date.toISOString()}>
-              <Stack direction="row" alignItems="baseline" justifyContent="space-between" sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'action.hover' }}>
+              <Stack direction="row" alignItems="baseline" justifyContent="space-between"
+                sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'action.hover', flexWrap: 'wrap', columnGap: 2, rowGap: 0.25 }}>
                 <Typography fontWeight={800}>{dayLabel(g.date)}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {g.items.length} {g.items.length === 1 ? 'Buchung' : 'Buchungen'} · Umsatz <Box component="strong" sx={{ color: 'text.primary' }}>{money(g.revenue)}</Box>
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{g.items.length} {g.items.length === 1 ? 'Buchung' : 'Buchungen'} · </Box>Umsatz <Box component="strong" sx={{ color: 'text.primary' }}>{money(g.revenue)}</Box>
+                  {g.hasTopUps && <> · Aufladungen <Box component="strong" sx={{ color: 'success.main' }}>{money(g.topUps)}</Box></>}
                 </Typography>
               </Stack>
-              {g.items.map((t) => <Row key={t.id} t={t} onOpen={setSelected} compact={compact} />)}
+              {g.items.map((t) => (
+                <Row key={`${t.type}-${t.id}`} t={t} compact={compact}
+                  onOpen={(x) => (x.type === 'TOPUP' ? setTopUp(x) : setSelected(x))} />
+              ))}
             </Card>
           ))}
         </Stack>
@@ -274,6 +334,72 @@ export default function Transactions() {
             </DialogActions>
           </>
         )}
+      </Dialog>
+
+      {/* Details einer Aufladung */}
+      <Dialog open={!!topUp && !confirmTopUpCancel} onClose={() => setTopUp(null)} maxWidth="xs" fullWidth fullScreen={isMobile}>
+        {topUp && (() => {
+          const d = describe(topUp);
+          const amount = num(topUp.amount);
+          const ref = topUp.storno ? null : String(topUp.reference || '').replace(/^Übernahme Clubtouch 2\.0 /, 'Altsystem ');
+          const row = (label, value, color) => (
+            <Stack direction="row" justifyContent="space-between" spacing={2} sx={{ py: 1.25, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 'none' } }}>
+              <Typography color="text.secondary">{label}</Typography>
+              <Typography fontWeight={600} sx={{ textAlign: 'right', color }}>{value}</Typography>
+            </Stack>
+          );
+          return (
+            <>
+              <DialogTitle sx={{ pb: 1 }}>
+                <Stack direction="row" spacing={1.5} alignItems="center">
+                  <Avatar sx={{ bgcolor: 'action.hover', color: 'text.secondary' }}><d.Icon /></Avatar>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="h6" noWrap>{d.who}</Typography>
+                    <Typography variant="body2" color="text.secondary">{d.title}</Typography>
+                  </Box>
+                  <Typography variant="h5" sx={{ fontWeight: 800, color: amount < 0 ? 'error.main' : 'success.main', whiteSpace: 'nowrap' }}>
+                    {amount > 0 ? '+' : ''}{money(amount)}
+                  </Typography>
+                </Stack>
+              </DialogTitle>
+              <DialogContent>
+                <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2 }}>
+                  {row('Zeitpunkt', format(new Date(topUp.createdAt), "EEEE, d. MMMM yyyy 'um' HH:mm", { locale: de }))}
+                  {row('Art', d.title)}
+                  {ref && row('Bemerkung', ref)}
+                  {topUp.customer && row('Guthaben jetzt', money(topUp.customer.balance), num(topUp.customer.balance) < 0 ? 'error.main' : undefined)}
+                </Box>
+                {topUpReversed && <Alert severity="info" sx={{ mt: 2 }}>Diese Aufladung wurde bereits storniert.</Alert>}
+                {topUp.method === 'MIGRATION' && <Alert severity="info" sx={{ mt: 2 }}>Startguthaben aus Clubtouch 2.0 – kann nicht storniert werden.</Alert>}
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>Aufladungen sind kein Umsatz. Bar-Aufladungen zählen zum Kassenbestand.</Typography>
+              </DialogContent>
+              <DialogActions sx={{ px: 3, pb: { xs: 'calc(16px + env(safe-area-inset-bottom, 0px))', sm: 2 }, flexWrap: 'wrap', gap: 1 }}>
+                {topUpCancellable && (
+                  <Button color="error" startIcon={<DeleteOutline />} onClick={() => setConfirmTopUpCancel(true)} sx={{ mr: 'auto' }}>Stornieren</Button>
+                )}
+                <Button color="inherit" onClick={() => navigate(`/customers?kunde=${topUp.customerId}`)}>Zum Kunden</Button>
+                <Button variant="contained" onClick={() => setTopUp(null)}>Schließen</Button>
+              </DialogActions>
+            </>
+          );
+        })()}
+      </Dialog>
+
+      {/* Aufladung stornieren bestätigen */}
+      <Dialog open={confirmTopUpCancel} onClose={() => setConfirmTopUpCancel(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Aufladung stornieren</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {topUp ? `${money(topUp.amount)} bei ${topUp.customer?.name || 'diesem Kunden'} stornieren? Das Guthaben wird um diesen Betrag verringert.` : ''}
+          </Typography>
+          {cancelTopUp.isError && <Alert severity="error" sx={{ mt: 2 }}>{cancelTopUp.error?.response?.data?.error || 'Stornieren fehlgeschlagen'}</Alert>}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button color="inherit" onClick={() => setConfirmTopUpCancel(false)}>Zurück</Button>
+          <Button color="error" variant="contained" disabled={cancelTopUp.isPending} onClick={() => cancelTopUp.mutate(topUp)}>
+            {cancelTopUp.isPending ? 'Storniere…' : 'Stornieren'}
+          </Button>
+        </DialogActions>
       </Dialog>
 
       {/* Storno bestätigen */}
