@@ -39,6 +39,11 @@ router.get('/', h(articleController.listArticles));
 // Reorder Items
 router.put('/reorder', authorize('ADMIN', 'CASHIER'), h(articleController.reorderArticles));
 
+// Kategorien: Liste mit Reihenfolge, Reihenfolge speichern, umbenennen/zusammenführen
+router.get('/categories', h(articleController.listCategories));
+router.put('/categories/order', authorize('ADMIN', 'CASHIER'), h(articleController.saveCategoryOrder));
+router.put('/categories/rename', authorize('ADMIN', 'CASHIER'), h(articleController.renameCategory));
+
 // Bestandswarnungen
 router.get('/low-stock', h(articleController.checkLowStock));
 

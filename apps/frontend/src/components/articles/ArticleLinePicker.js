@@ -32,6 +32,7 @@ import { Add, Close, DeleteOutline, Inventory2Outlined, LocalBar, Search, Shoppi
 import QuantityStepper from '../common/QuantityStepper';
 import SwipeableLine from './SwipeableLine';
 import { useArticles } from '../../hooks/useArticles';
+import { useArticleCategories, sortByCategory, sortCategoryNames, ALL_TAB } from '../../hooks/useArticleCategories';
 import {
   addArticle, adjustLine, setLineQty, setLinePrice, setLineName, removeLine, addFreeLine,
   lineTotalQty, lineAmount, linesTotalQty,
@@ -216,12 +217,26 @@ function LineRow({ line, showCrates, showPrice, editablePrice, allowFreeLines, u
 
 export function ArticlePane({ articles, lines, showPrice, showStock, showCrates, onTap, onCrate, onLongPress }) {
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('all');
-  const categories = useMemo(() => ['all', ...new Set(articles.map((a) => a.category).filter(Boolean))], [articles]);
+  // null = noch nichts gewählt -> erster Reiter. Reiter in festgelegter Reihenfolge, „Alles“ an seiner Position (Standard: am Ende).
+  const [category, setCategory] = useState(null);
+  const { names: categoryOrder, tabs: serverTabs, isLoading: tabsLoading } = useArticleCategories();
+  const categories = useMemo(() => {
+    // Reiter vom Server, beschränkt auf Kategorien, die es hier gibt; noch unbekannte hinten an
+    const present = new Set(articles.map((a) => a.category).filter(Boolean));
+    const known = serverTabs.filter((t) => t === ALL_TAB || present.has(t)).map((t) => (t === ALL_TAB ? 'all' : t));
+    const extra = sortCategoryNames([...present].filter((n) => !serverTabs.includes(n)));
+    return [...known, ...extra];
+  }, [articles, serverTabs]);
+  const current = categories.includes(category) ? category : categories[0];
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return articles.filter((a) => (category === 'all' || a.category === category) && (!s || a.name.toLowerCase().includes(s)));
-  }, [articles, search, category]);
+    // Suche läuft immer über alle Kategorien, sonst findet man Artikel aus anderen Reitern nicht
+    // Bis die Reiter-Reihenfolge da ist nichts anzeigen – sonst springt der gewählte Reiter beim Laden
+    if (tabsLoading) return [];
+    if (s) return sortByCategory(articles.filter((a) => a.name.toLowerCase().includes(s)), categoryOrder);
+    if (current === 'all') return sortByCategory(articles, categoryOrder);
+    return articles.filter((a) => a.category === current);
+  }, [articles, search, current, categoryOrder, tabsLoading]);
   const qtyByArticle = useMemo(() => {
     const m = new Map();
     for (const l of lines) if (l.articleId && !l.isFree) m.set(l.articleId, (m.get(l.articleId) || 0) + lineTotalQty(l));
@@ -233,13 +248,13 @@ export function ArticlePane({ articles, lines, showPrice, showStock, showCrates,
       <Box sx={{ p: { xs: 1.5, sm: 2 }, borderBottom: '1px solid', borderColor: 'divider' }}>
         <TextField placeholder="Artikel suchen…" size="small" fullWidth value={search} onChange={(e) => setSearch(e.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }} />
-        <Tabs value={categories.includes(category) ? category : 'all'} onChange={(e, v) => setCategory(v)} variant="scrollable" scrollButtons="auto"
+        <Tabs value={search.trim() ? false : current} onChange={(e, v) => { setCategory(v); setSearch(''); }} variant="scrollable" scrollButtons="auto"
           sx={{ mt: 1, minHeight: 44, '& .MuiTab-root': { minHeight: 44, fontWeight: 600 } }}>
-          {categories.map((c) => <Tab key={c} value={c} label={c === 'all' ? 'Alle' : c} />)}
+          {categories.map((c) => <Tab key={c} value={c} label={c === 'all' ? 'Alles' : c} />)}
         </Tabs>
       </Box>
       <Box sx={{ p: { xs: 1.5, sm: 2 }, overflowY: 'auto', flex: 1 }}>
-        {filtered.length === 0 ? (
+        {tabsLoading ? null : filtered.length === 0 ? (
           <Box sx={{ textAlign: 'center', mt: 6, opacity: 0.5 }}>
             <Inventory2Outlined sx={{ fontSize: 56, mb: 1 }} />
             <Typography>Keine Artikel gefunden</Typography>

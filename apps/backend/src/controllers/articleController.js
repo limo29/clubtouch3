@@ -12,6 +12,9 @@ const sanitizeUrl = (url) => {
   return url.replace(/^http:\/\/(backend|localhost):\d+/, '');
 };
 
+// Formulardaten kommen als Text: "true"/"false" -> Boolean, sonst undefined (= unverändert)
+const toBool = (v) => (v === true || v === 'true' ? true : v === false || v === 'false' ? false : undefined);
+
 // Bildpfade setzt nur der Upload selbst. Aus dem Body übernommen könnte man sonst einen beliebigen
 // Upload (z.B. einen Belegnachweis) eintragen, der beim nächsten Bildwechsel gelöscht wird.
 const IMAGE_FIELDS = ['imageUrl', 'imageThumbnail', 'imageSmall', 'imageMedium', 'imageLarge'];
@@ -72,6 +75,7 @@ class ArticleController {
       articleData.minStock = toDecimalString(articleData.minStock);
 
       articleData.unitsPerPurchase = toDecimalString(articleData.unitsPerPurchase);
+      articleData.countsForHighscore = toBool(articleData.countsForHighscore);
       if (articleData.order) articleData.order = parseInt(articleData.order, 10);
       if (articleData.purchaseUnit === '') articleData.purchaseUnit = undefined;
 
@@ -118,10 +122,20 @@ class ArticleController {
       updateData.minStock = toDecimalString(updateData.minStock);
 
       updateData.unitsPerPurchase = toDecimalString(updateData.unitsPerPurchase);
+      updateData.countsForHighscore = toBool(updateData.countsForHighscore);
+      updateData.active = toBool(updateData.active);
+      const removeImage = toBool(updateData.removeImage) === true;
+      delete updateData.removeImage;
       if (updateData.order) updateData.order = parseInt(updateData.order, 10);
       if (updateData.purchaseUnit === '') updateData.purchaseUnit = undefined;
       const currentArticle = await articleService.findById(id);
       if (!currentArticle) return res.status(404).json({ error: 'Artikel nicht gefunden' });
+
+      // Bild entfernen (ohne neues Bild)
+      const replaceImage = !!req.file || removeImage;
+      if (removeImage && !req.file) {
+        for (const key of IMAGE_FIELDS) updateData[key] = null;
+      }
 
       // Neues Bild?
       if (req.file) {
@@ -131,18 +145,20 @@ class ArticleController {
         updateData.imageSmall = imagePaths.small;
         updateData.imageMedium = imagePaths.medium;
         updateData.imageLarge = imagePaths.large;
+      }
 
-        // Alte Bilder löschen (best-effort)
+      const article = await articleService.updateArticle(id, updateData);
+
+      // Alte Bilddateien erst löschen, wenn die Datenbank nicht mehr auf sie zeigt (best-effort)
+      if (replaceImage && currentArticle.imageUrl) {
         await fileUploadService.deleteArticleImages({
           original: currentArticle.imageUrl,
           thumbnail: currentArticle.imageThumbnail,
           small: currentArticle.imageSmall,
           medium: currentArticle.imageMedium,
           large: currentArticle.imageLarge,
-        });
+        }).catch((err) => console.error('Alte Artikelbilder löschen fehlgeschlagen:', err));
       }
-
-      const article = await articleService.updateArticle(id, updateData);
 
       // Audit
       await prisma.auditLog.create({
@@ -211,13 +227,42 @@ class ArticleController {
     }
   }
 
-  // Reorder
+  async listCategories(req, res) {
+    res.json(await articleService.categoryOverview());
+  }
+
+  async saveCategoryOrder(req, res) {
+    const { order } = req.body || {};
+    if (!Array.isArray(order)) return res.status(400).json({ error: 'order muss eine Liste von Kategorienamen sein' });
+    const overview = await articleService.saveCategoryOrder(order);
+    await prisma.auditLog.create({
+      data: { userId: req.user.id, action: 'REORDER_CATEGORIES', entityType: 'Article', entityId: 'categories', changes: { tabs: overview.tabs } },
+    });
+    res.json(overview);
+  }
+
+  async renameCategory(req, res) {
+    const { from, to } = req.body || {};
+    try {
+      const result = await articleService.renameCategory(from, to);
+      await prisma.auditLog.create({
+        data: { userId: req.user.id, action: 'RENAME_CATEGORY', entityType: 'Article', entityId: String(from), changes: { from, to, ...result } },
+      });
+      res.json({ ...result, ...(await articleService.categoryOverview()) });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
   async reorderArticles(req, res) {
     try {
       const { items } = req.body;
       if (!Array.isArray(items)) return res.status(400).json({ error: 'Invalid data' });
 
       await articleService.reorderArticles(items);
+      await prisma.auditLog.create({
+        data: { userId: req.user.id, action: 'REORDER_ARTICLES', entityType: 'Article', entityId: 'order', changes: { items } },
+      });
       res.json({ message: 'Sortierung aktualisiert' });
     } catch (error) {
       console.error('Reorder articles error:', error);
