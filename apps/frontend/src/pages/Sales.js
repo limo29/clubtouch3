@@ -181,6 +181,18 @@ const Sales = () => {
 
   /* Logic & Actions */
 
+  // Doppeltipp-Schutz: solange eine Buchung unterwegs ist, wird ein zweiter Tipp verworfen. Die Sperre
+  // ist ein Ref, weil zwei Tipps im selben Moment schneller sind als das Neuzeichnen mit isPending.
+  const bookingBusyRef = useRef(false);
+  const guardedMutate = (mutation) => (data) => {
+    if (bookingBusyRef.current) return;
+    bookingBusyRef.current = true;
+    mutation.mutate(data, { onSettled: () => { bookingBusyRef.current = false; } });
+  };
+  const bookSale = guardedMutate(quickSaleMutation);
+  const bookTopUp = guardedMutate(topUpMutation);
+  const bookingBusy = quickSaleMutation.isPending || topUpMutation.isPending;
+
   const handleBooking = () => {
     if (!lines.length) return;
     // Backend-Vertrag unverändert: [{ articleId, quantity }]
@@ -189,7 +201,7 @@ const Sales = () => {
     // Offline wie online: Überziehungsprüfung gegen das lokal fortgeschriebene Guthaben, die Buchung
     // landet über submitBooking in der Warteschlange
     if (bookingTarget.type === 'CASH') {
-      quickSaleMutation.mutate({ paymentMethod: 'CASH', items });
+      bookSale({ paymentMethod: 'CASH', items });
     } else if (bookingTarget.type === 'CARD') {
       setShowCardConfirm(true); // erst am SumUp-Terminal kassieren, dann bestätigen
     } else if (bookingTarget.type === 'CUSTOMER' && bookingTarget.data) {
@@ -219,13 +231,13 @@ const Sales = () => {
           amount: amount,
           limit: allowedOverdraft,
           onConfirm: () => {
-            quickSaleMutation.mutate({ paymentMethod: 'ACCOUNT', customerId: bookingTarget.data.id, items });
+            bookSale({ paymentMethod: 'ACCOUNT', customerId: bookingTarget.data.id, items });
             setOverdraftDialog(prev => ({ ...prev, open: false }));
           }
         });
         return;
       }
-      quickSaleMutation.mutate({ paymentMethod: 'ACCOUNT', customerId: bookingTarget.data.id, items });
+      bookSale({ paymentMethod: 'ACCOUNT', customerId: bookingTarget.data.id, items });
     } else if (bookingTarget.type === 'OWNER') {
       setShowOwnerConfirm(true);
     }
@@ -449,7 +461,7 @@ const Sales = () => {
         fullWidth
         variant="contained"
         size="large"
-        disabled={!lines.length}
+        disabled={!lines.length || bookingBusy}
         color={bookColor}
         onClick={handleBooking}
         sx={{ py: 2, fontWeight: 800, fontSize: '1.2rem', boxShadow: 6, borderRadius: 2 }}
@@ -509,7 +521,7 @@ const Sales = () => {
           sx={{ flexShrink: 0, px: 2, fontWeight: 800, fontSize: '1rem', borderRadius: 2 }}>
           {money(total)}
         </Button>
-        <Button variant="contained" color={bookColor} disabled={!lines.length} onClick={handleBooking}
+        <Button variant="contained" color={bookColor} disabled={!lines.length || bookingBusy} onClick={handleBooking}
           sx={{ flex: 1, minWidth: 0, py: 1.5, fontWeight: 800, fontSize: '1.05rem', borderRadius: 2, lineHeight: 1.2 }}>
           {bookLabel}
         </Button>
@@ -640,9 +652,9 @@ const Sales = () => {
             variant="contained"
             fullWidth
             size="large"
-            disabled={!num(topUpAmount) || num(topUpAmount) <= 0}
+            disabled={!num(topUpAmount) || num(topUpAmount) <= 0 || bookingBusy}
             onClick={() => {
-              topUpMutation.mutate({ customerId: bookingTarget.data.id, amount: num(topUpAmount), method: topUpMethod });
+              bookTopUp({ customerId: bookingTarget.data.id, amount: num(topUpAmount), method: topUpMethod });
             }}
             sx={{ py: 1.5, fontWeight: 800, borderRadius: 2, boxShadow: 4 }}
           >
@@ -825,7 +837,7 @@ const Sales = () => {
           <Button variant="outlined" color="inherit" fullWidth onClick={() => setShowCardConfirm(false)}>Abbrechen</Button>
           <Button variant="contained" color="info" fullWidth sx={{ fontWeight: 800 }}
             onClick={() => {
-              quickSaleMutation.mutate({ paymentMethod: 'CARD', items: toSalePayload(lines) });
+              bookSale({ paymentMethod: 'CARD', items: toSalePayload(lines) });
               setShowCardConfirm(false);
             }}>
             Zahlung erfolgreich
@@ -851,7 +863,7 @@ const Sales = () => {
             color="warning"
             fullWidth
             onClick={() => {
-              quickSaleMutation.mutate({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items: toSalePayload(lines) });
+              bookSale({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items: toSalePayload(lines) });
               setShowOwnerConfirm(false);
             }}
             sx={{ fontWeight: 800 }}

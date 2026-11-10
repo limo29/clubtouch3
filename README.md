@@ -143,8 +143,8 @@ Siehe [`docker/readme.md`](docker/readme.md): `docker/manage.sh start` (Linux/Ma
 
 ## Betrieb auf Railway
 
-`railway.toml` beschreibt zwei Dienste (Backend und Frontend mit nginx). Wichtig:
-- **Volume** für das Backend unter `/app/uploads` anlegen, sonst sind Artikelbilder, Belegnachweise und Werbung nach jedem Deploy weg (Anleitung als Kommentar in `railway.toml`).
+`.railway/railway.ts` beschreibt die Dienste (Backend, Frontend mit nginx, Postgres) und die Volumes; Variablen und Secrets stehen nur im Railway-Dashboard. Änderungen daran mit `railway config plan` ansehen und mit `railway config apply` anwenden (vorher einmalig `npm install` in `.railway/`). Jeder Push auf `main` deployt automatisch. Wichtig:
+- **Volume** für das Backend unter `/app/uploads` anlegen, sonst sind Artikelbilder, Belegnachweise und Werbung nach jedem Deploy weg (in `.railway/railway.ts` als `backend-volume` eingetragen).
 - `JWT_SECRET` und `JWT_REFRESH_SECRET` auf eigene zufällige Werte setzen (mindestens 32 Zeichen).
 - `PUBLIC_BALANCE_PIN` setzen, wenn nicht `666` gelten soll.
 - `BACKEND_URL` im Frontend-Dienst auf die interne Backend-Adresse setzen.
@@ -164,7 +164,7 @@ clubtouch3/
 ├── docker/                 Docker-Compose und Verwaltungsskripte
 ├── docs/                   Audit und Recherche (historisch)
 ├── CLAUDE.md               technische Doku für Entwickler
-└── railway.toml            Deployment
+└── .railway/railway.ts     Deployment (Railway, Infrastruktur als Code)
 ```
 
 Gearbeitet wird auf den Branches `dev` / `public-dev`, gemergt nach `main` per Pull Request.

@@ -5,8 +5,8 @@
 const path = require('path');
 const fs = require('fs');
 const fsPromises = require('fs').promises;
-// archiver 7.x (CommonJS). Version 8 ist reines ESM und lässt sich unter Node 18 (Docker-Image) nicht per require laden.
-const archiver = require('archiver');
+// archiver 8 ist ein ES-Modul; require() dafür braucht Node >= 22.12 (Docker-Image: node:22-alpine)
+const { ZipArchive } = require('archiver');
 const prisma = require('../utils/prisma');
 const fileUploadService = require('./fileUploadService');
 const exportService = require('./exportService');
@@ -211,7 +211,7 @@ class ReceiptService {
     const nameSlug = _supplierSlug(name).replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 40) || 'Zeitraum';
     const filename = `nachweise_${nameSlug}_${fmtYMD(start)}_${fmtYMD(end)}.zip`;
 
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
 
     // Dateien hinzufügen
     for (const doc of list.documents) {

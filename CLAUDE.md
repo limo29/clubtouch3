@@ -8,7 +8,7 @@ ClubTouch3 is a German-language web POS ("Kassensystem") for a club bar: touch s
 
 Monorepo with two independent npm projects (no root package.json, no workspaces):
 
-- `apps/backend` – Express 5 + Prisma 6 + PostgreSQL 15 + Socket.io, plain CommonJS JS (no build step; the TypeScript devDependencies are unused).
+- `apps/backend` – Express 5 + Prisma 6 + PostgreSQL 15 + Socket.io, plain CommonJS JS (no build step). Needs Node >= 22.12 because `archiver` 8 is an ES module loaded via `require` (`new ZipArchive(...)` in `receiptService`); `package.json` overrides `readdir-glob`'s `minimatch` to keep `npm audit` clean.
 - `apps/frontend` – Create React App (react-scripts 5), React 19, MUI 7, TanStack Query 5, React Router 7.
 
 ## Commands
@@ -32,11 +32,11 @@ Frontend (`apps/frontend`):
 ```bash
 npm start                      # CRA dev server on :3000
 npm run build                  # static build into build/
-npm test                       # react-scripts test (jest, watch mode)
+npm test                       # react-scripts test (jest, watch mode); CI runs it with --watchAll=false
 npm test -- --watchAll=false src/components/layout/Layout.test.js   # single file
 ```
 
-Backend has no test runner or linter; verify with a small fetch script against a local instance. CI (`.github/workflows/ci.yml`) runs `npm ci` in both apps, `node --check` over `src` and `prisma` plus `npx prisma validate` in the backend and `npm run build` in the frontend; there are no behavioural tests in CI.
+Backend has no test runner or linter; verify with a small fetch script against a local instance. CI (`.github/workflows/ci.yml`) runs `npm ci` in both apps, `node --check` over `src` and `prisma` plus `npx prisma validate` in the backend and `npm run build` in the frontend; plus the frontend jest tests (`Layout.test.js`; `package.json` maps `react-router` to its CommonJS build for jest 27 and `setupTests.js` polyfills `TextEncoder`). There are no backend behavioural tests in CI.
 
 Migrations on the local test DB: `prisma migrate dev` fails there (no permission for the shadow database). Create migrations with `prisma migrate diff` (from the migrations folder to `schema.prisma`, `--script`), save the SQL as a new migration folder and apply it with `prisma migrate deploy`.
 
@@ -90,7 +90,7 @@ There is no `apps/backend/.env.example`; `docker/.env.example` and `docker/docke
 
 ### Uploads and exports
 
-All uploads live under `UPLOADS_DIR` from `src/utils/uploadsDir.js` (env `UPLOADS_DIR`, else Railway's `RAILWAY_VOLUME_MOUNT_PATH`, else `<cwd>/uploads`); never build upload paths from `process.cwd()`, use `toPublicUrl(absPath)` / `fromPublicUrl(url)` from that module. `fileUploadService` writes `articles/{original,thumbnail,small,medium,large}` as WebP via sharp and `nachweise/` for receipt scans; `middleware/upload.js` stores ad slide media in `ads/` with a 500 MB limit. Stored URLs are relative (`/uploads/...`) so they work behind the nginx proxy. On Railway the directory is only persistent with a volume mounted on the backend service (see the comment block in `railway.toml`); without it every deploy wipes article images, receipts and ads. Uploads live on the container filesystem: docker-compose bind-mounts `./apps/backend/uploads`, but `railway.toml` declares no volume, so on Railway article images, ad media and receipt scans are lost on redeploy unless a volume is mounted at `/app/uploads` in the dashboard.
+All uploads live under `UPLOADS_DIR` from `src/utils/uploadsDir.js` (env `UPLOADS_DIR`, else Railway's `RAILWAY_VOLUME_MOUNT_PATH`, else `<cwd>/uploads`); never build upload paths from `process.cwd()`, use `toPublicUrl(absPath)` / `fromPublicUrl(url)` from that module. `fileUploadService` writes `articles/{original,thumbnail,small,medium,large}` as WebP via sharp and `nachweise/` for receipt scans; `middleware/upload.js` stores ad slide media in `ads/` with a 500 MB limit. Stored URLs are relative (`/uploads/...`) so they work behind the nginx proxy. On Railway the directory is only persistent with a volume mounted on the backend service (declared as `backend-volume` in `.railway/railway.ts`); without it every deploy wipes article images, receipts and ads. Uploads live on the container filesystem: docker-compose bind-mounts `./apps/backend/uploads`, on Railway the volume `backend-volume` is mounted at `/app/uploads`.
 
 Ads / digital signage: `AdSlide` rows are either an uploaded file (`imageUrl` under `/uploads/ads/`, image or video) or a designed slide (`slideData` JSON rendered live by `components/ads/SlideRenderer.js` on a fixed 1920×1080 canvas; `imageUrl` then holds a PNG snapshot). Admin routes `/api/ads` are ADMIN and CASHIER; multer errors map to 400, and deleting or replacing a slide removes its upload when nothing else references it. The public display `/public/ads` polls `GET /api/public/ads` every 60 s and restarts the rotation only when the fingerprint changed; the slide "Menü" element reads `GET /api/public/articles?category=` (active articles, name/price only) so it works without login. PDFs are built with PDFKit in `exportService` (theme in `getTheme()`, brand name "Clubraum").
 
@@ -113,7 +113,7 @@ Ads / digital signage: `AdSlide` rows are either an uploaded file (`imageUrl` un
 ### Artikel buchen (Verkauf, Einkauf, Rechnung)
 
 - One component for all three: `components/articles/ArticleLinePicker.js` (`mode="sale"|"purchase"|"invoice"`, search + category tabs + tile grid + line list; the page supplies `sidebar`, `linesHeader`, `linesFooter`). Below `md` it renders tabs `<sidebarLabel> | Artikel | <linesLabel> (n)`, unless the page passes `mobileBar({ openSidebar, openLines, count })`: then the articles stay visible, the page's bar sits below them and sidebar/lines open as bottom sheets (`mobileTab` 0 / 2, 1 = none open). From `md` three columns. `showCrates`/`editablePrice`/`allowFreeLines` default per mode: crates and free lines only outside sales, editable price only on invoices.
-- Sales on phones uses `mobileBar`: "Wer zahlt?" (Bar / Wirt / customer sheet, closes after picking; with a customer also Verlauf and Aufladen), cart button with count + total, and the book button. After every online sale a 5 s "RÜCKGÄNGIG" snackbar cancels it (`POST /transactions/:id/cancel`) and puts the lines back into an empty cart.
+- Sales on phones uses `mobileBar`: "Wer zahlt?" (Bar / Wirt / customer sheet, closes after picking; with a customer also Verlauf and Aufladen), cart button with count + total, and the book button. Booking is guarded against double taps by a ref lock (`guardedMutate` in `Sales.js`, same idea in `TopUpDialog.js`): while one booking is in flight further taps are dropped. After every online sale a 5 s "RÜCKGÄNGIG" snackbar cancels it (`POST /transactions/:id/cancel`) and puts the lines back into an empty cart.
 - Sales only (touch): swiping a cart line left removes it (`components/articles/SwipeableLine.js`, pointer events with direction lock, `touch-action: pan-y`), and every line removal in `mode="sale"` offers a 5 s "RÜCKGÄNGIG" snackbar (the `update` wrapper in `ArticleLinePicker` remembers the last removed line; `clear()` after a sale bypasses it). A long press (500 ms) on a tile opens a quantity dialog.
 - Articles come from `hooks/useArticles.js` (single query key `['articles']`, normalized once: `price`/`stock` numbers, `unitsPerPurchase >= 1`, `unit`/`purchaseUnit` fallbacks). Invalidate `ARTICLES_QUERY_KEY` after anything that moves stock.
 - Line model in `hooks/useArticleLines.js` keeps crates and singles separate (`crateQty`, `baseQty`); sales never set `crateQty`. `utils/units.js` converts (`toBaseUnits`, `describeLineQty` → "2 Kisten + 3 Fl. = 43 Flaschen"), `utils/format.js` formats money (`2,50 €`) and integer quantities.
@@ -121,7 +121,7 @@ Ads / digital signage: `AdSlide` rows are either an uploaded file (`imageUrl` un
 
 ### Deployment
 
-Railway (`railway.toml`) deploys two services from the per-app Dockerfiles. The backend container runs `prisma migrate deploy`, then the idempotent seed, then `node src/server.js`; on a database without users the start fails on purpose until `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` are set (production has no default password). The frontend container builds the CRA app and serves it with nginx; `nginx.conf` is an envsubst template that proxies `/api`, `/uploads` and `/socket.io` to `$BACKEND_URL`, so the SPA only talks to same-origin paths.
+Railway deploys backend and frontend from the per-app Dockerfiles on every push to `main`. The infrastructure is described in `.railway/railway.ts` (IaC, replaces the old `railway.toml`; variables are unmanaged and live only in the dashboard; `npm install` in `.railway/`, then `railway config plan` before any `railway config apply`; the Postgres image is pinned there on purpose, the `postgres()` shorthand would switch the major version). The backend container runs `prisma migrate deploy`, then the idempotent seed, then `node src/server.js`; on a database without users the start fails on purpose until `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` are set (production has no default password). The frontend container builds the CRA app and serves it with nginx; `nginx.conf` is an envsubst template that proxies `/api`, `/uploads` and `/socket.io` to `$BACKEND_URL`, so the SPA only talks to same-origin paths.
 
 ## Repo notes
 

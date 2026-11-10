@@ -32,6 +32,7 @@ export default function TopUpDialog({ customer, open, onClose }) {
   const valid = value >= 0.01 && value <= MAX;
   const balance = num(customer?.balance);
 
+  const busyRef = React.useRef(false); // Doppeltipp-Schutz: zwei Tipps im selben Moment buchen nur einmal
   const mutation = useMutation({
     mutationFn: async () => (await api.post(`${API_ENDPOINTS.CUSTOMERS}/${customer.id}/topup`, {
       amount: value, method, reference: reference.trim() || null,
@@ -44,7 +45,7 @@ export default function TopUpDialog({ customer, open, onClose }) {
       sx={{ zIndex: (t) => t.zIndex.modal + 1 }}
       // stopPropagation: der Dialog hängt im React-Baum im Kunden-Panel (selbst ein Formular) – sonst
       // würde das Absenden dort ankommen, die Kundendaten erneut speichern und das Panel schließen
-      PaperProps={{ component: 'form', onSubmit: (e) => { e.preventDefault(); e.stopPropagation(); if (valid) mutation.mutate(); } }}>
+      PaperProps={{ component: 'form', onSubmit: (e) => { e.preventDefault(); e.stopPropagation(); if (valid && !busyRef.current) { busyRef.current = true; mutation.mutate(undefined, { onSettled: () => { busyRef.current = false; } }); } } }}>
       <DialogTitle sx={{ pb: 0.5 }}>
         Guthaben aufladen
         <Typography variant="body2" color="text.secondary">{customer?.name} · aktuell {money(balance)}</Typography>

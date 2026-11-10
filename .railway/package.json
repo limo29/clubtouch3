@@ -1,0 +1,8 @@
+{
+  "name": "clubtouch3-railway-config",
+  "private": true,
+  "description": "Nur für railway config plan/apply: Typen und Laufzeit für railway.ts",
+  "dependencies": {
+    "railway": "^3.16.0"
+  }
+}

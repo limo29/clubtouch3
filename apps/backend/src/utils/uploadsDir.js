@@ -4,7 +4,7 @@
 // sobald dem Service ein Volume angehängt ist) > <cwd>/uploads (lokal / Docker mit Bind-Mount).
 //
 // Ohne Volume liegen die Dateien im Container-Dateisystem und sind nach jedem Deploy weg,
-// inklusive der Belegnachweise für die Kassenprüfung. Siehe railway.toml.
+// inklusive der Belegnachweise für die Kassenprüfung. Siehe .railway/railway.ts.
 const path = require('path');
 const fs = require('fs');
 

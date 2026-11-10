@@ -1,76 +1,80 @@
-
+// Navigation im Layout: Menüpunkte je Rolle. Die Rechte kommen aus config/permissions.js (echt, nicht gemockt),
+// damit der Test auffällt, wenn Menü und Rechtetabelle auseinanderlaufen.
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { BrowserRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import Layout from './Layout';
-import * as router from 'react-router-dom';
+import { can as roleCan } from '../../config/permissions';
 
-// Mock useNavigate
-const navigate = jest.fn();
+let mockRole = 'ADMIN';
 
-beforeEach(() => {
-    jest.spyOn(router, 'useNavigate').mockImplementation(() => navigate);
-});
-
-// Mock AuthContext
 jest.mock('../../context/AuthContext', () => ({
-    useAuth: () => ({
-        logout: jest.fn(),
-        isAdmin: true, // Mock as admin to see all links
-        user: { name: 'Test User' }
-    })
+  useAuth: () => {
+    const { can } = jest.requireActual('../../config/permissions');
+    return {
+      logout: jest.fn(),
+      isAdmin: mockRole === 'ADMIN',
+      user: { name: 'Testnutzer', role: mockRole },
+      can: (permission) => can(mockRole, permission),
+    };
+  },
 }));
 
-// Mock ColorModeContext
-jest.mock('../../theme/ColorModeContext', () => ({
-    useColorMode: () => ({
-        mode: 'light',
-        resolvedMode: 'light',
-        setMode: jest.fn(),
-        toggleMode: jest.fn()
-    })
+jest.mock('../../context/OfflineContext', () => ({
+  useOffline: () => ({ isOnline: true, queue: [], failed: [] }),
 }));
 
-describe('Navigation Layout', () => {
-    test('renders top level items and groups', () => {
-        render(
-            <BrowserRouter>
-                <Layout />
-            </BrowserRouter>
-        );
+jest.mock('../../theme', () => ({
+  useColorMode: () => ({ mode: 'dark', resolvedMode: 'dark', setMode: jest.fn(), toggleMode: jest.fn() }),
+}));
 
-        // Top level
-        expect(screen.getByText('Verkauf')).toBeInTheDocument();
-        expect(screen.getByText('Dashboard')).toBeInTheDocument();
-        expect(screen.getByText('Clubscore')).toBeInTheDocument();
-        expect(screen.getByText('Werbung')).toBeInTheDocument();
+// Eigene Datenabfragen dieser Bausteine gehören nicht in den Layout-Test
+jest.mock('../offline/OfflineStatus', () => () => null);
+jest.mock('../common/ChangePasswordDialog', () => () => null);
 
-        // Groups
-        expect(screen.getByText('Finanzen')).toBeInTheDocument();
-        expect(screen.getByText('Verwaltung')).toBeInTheDocument();
+const renderLayout = (role) => {
+  mockRole = role;
+  return render(
+    <MemoryRouter initialEntries={['/dashboard']}>
+      <Layout />
+    </MemoryRouter>
+  );
+};
+
+// Der Drawer wird je nach Breite doppelt gerendert (mobil + fest), daher getAllByText
+const shown = (text) => screen.queryAllByText(text).length > 0;
+const openGroup = (text) => fireEvent.click(screen.getAllByText(text)[0]);
+
+describe('Navigation im Layout', () => {
+  test('Admin sieht alle Hauptpunkte und Gruppen', () => {
+    renderLayout('ADMIN');
+    ['Verkauf', 'Dashboard', 'Clubscore', 'Werbung', 'Finanzen', 'Verwaltung'].forEach((label) => {
+      expect(shown(label)).toBe(true);
     });
+  });
 
-    test('groups expand and show children', () => {
-        render(
-            <BrowserRouter>
-                <Layout />
-            </BrowserRouter>
-        );
-
-        const finanzen = screen.getByText('Finanzen');
-        fireEvent.click(finanzen);
-
-        expect(screen.getByText('Kundenrechnungen')).toBeInTheDocument();
-        expect(screen.getByText('Einkauf')).toBeInTheDocument();
-        expect(screen.getByText('Transaktionen')).toBeInTheDocument();
-        expect(screen.getByText('EÜR')).toBeInTheDocument();
-        expect(screen.getByText('Berichte')).toBeInTheDocument();
-
-        const verwaltung = screen.getByText('Verwaltung');
-        fireEvent.click(verwaltung);
-
-        expect(screen.getByText('Artikel')).toBeInTheDocument();
-        expect(screen.getByText('Kunden')).toBeInTheDocument();
-        expect(screen.getByText('Benutzer')).toBeInTheDocument(); // Admin only
+  test('Gruppen zeigen ihre Unterpunkte', () => {
+    renderLayout('ADMIN');
+    if (!shown('Einkauf')) openGroup('Finanzen');
+    ['Einkauf', 'Kundenrechnungen', 'Transaktionen', 'Kasse & Bank', 'Kassenprüfung', 'Berichte'].forEach((label) => {
+      expect(shown(label)).toBe(true);
     });
+    if (!shown('Artikel')) openGroup('Verwaltung');
+    ['Artikel', 'Kunden', 'Benutzer'].forEach((label) => {
+      expect(shown(label)).toBe(true);
+    });
+  });
+
+  test('Kassenprüfer sieht keinen Verkauf, Kassierer keine Benutzerverwaltung', () => {
+    expect(roleCan('ACCOUNTANT', 'sell')).toBe(false);
+    const { unmount } = renderLayout('ACCOUNTANT');
+    expect(shown('Verkauf')).toBe(false);
+    expect(shown('Dashboard')).toBe(true);
+    unmount();
+
+    renderLayout('CASHIER');
+    expect(shown('Verkauf')).toBe(true);
+    if (!shown('Artikel')) openGroup('Verwaltung');
+    expect(shown('Benutzer')).toBe(false);
+  });
 });
