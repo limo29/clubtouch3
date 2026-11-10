@@ -2,8 +2,6 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Grid,
-  Card,
-  CardContent,
   Typography,
   Box,
   List,
@@ -12,7 +10,6 @@ import {
   ListItemAvatar,
   Avatar,
   Chip,
-  Button,
   Stack,
   Paper,
   Tooltip,
@@ -23,7 +20,6 @@ import {
   Warning,
   EmojiEvents,
   ShoppingCart,
-  Description,
   ShoppingBasket,
   CheckCircle,
   LocalBar,
@@ -31,6 +27,7 @@ import {
   Assessment,
   AccountBalance,
   Campaign,
+  Savings,
 } from "@mui/icons-material";
 import { useTheme, alpha } from "@mui/material/styles";
 import { useQuery } from "@tanstack/react-query";
@@ -55,7 +52,7 @@ const NavCard = ({ title, icon: Icon, color, to }) => {
         height: 0,
         paddingBottom: "100%", // Aspect ratio 1:1
         overflow: "hidden",
-        borderRadius: 4,
+        borderRadius: { xs: 2.5, sm: 4 },
         transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
         // Dark Mode: Subtle translucent background with colored border
         // Light Mode: Vibrant solid gradient
@@ -93,15 +90,15 @@ const NavCard = ({ title, icon: Icon, color, to }) => {
           sx={{
             bgcolor: isDark ? alpha(color[0], 0.2) : "rgba(255,255,255,0.2)",
             borderRadius: "50%",
-            p: 1.5,
-            mb: 1.5,
+            p: { xs: 0.75, sm: 1.5 },
+            mb: { xs: 0.5, sm: 1.5 },
             backdropFilter: "blur(4px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          <Icon sx={{ fontSize: { xs: 32, md: 40 }, color: isDark ? color[1] : "white" }} />
+          <Icon sx={{ fontSize: { xs: 22, sm: 32, md: 40 }, color: isDark ? color[1] : "white" }} />
         </Box>
         <Typography
           variant="subtitle2"
@@ -111,8 +108,8 @@ const NavCard = ({ title, icon: Icon, color, to }) => {
             color: isDark ? color[1] : "white",
             textTransform: "uppercase",
             // lange Titel (Kundenrechnungen, Kassenprüfung) brechen am weichen Trennstrich um statt abgeschnitten zu werden
-            fontSize: title.length > 10 ? { xs: "0.66rem", md: "0.74rem" } : { xs: "0.80rem", md: "0.9rem" },
-            letterSpacing: "0.5px",
+            fontSize: title.length > 10 ? { xs: "0.5rem", sm: "0.66rem", md: "0.74rem" } : { xs: "0.6rem", sm: "0.80rem", md: "0.9rem" },
+            letterSpacing: { xs: 0, sm: "0.5px" },
             lineHeight: 1.2,
             textShadow: isDark ? "none" : "0 2px 4px rgba(0,0,0,0.2)",
           }}
@@ -147,7 +144,7 @@ export default function Dashboard() {
   });
 
   // 2. Low Stock
-  const { data: lowStock, isLoading: loadingLowStock } = useQuery({
+  const { data: lowStock } = useQuery({
     queryKey: ["low-stock"],
     queryFn: async () => (await api.get(API_ENDPOINTS.ARTICLES_LOW_STOCK)).data,
     staleTime: 5 * 60_000,
@@ -183,10 +180,26 @@ export default function Dashboard() {
   const { data: recentTransactionsData } = useQuery({
     queryKey: ["recent-transactions-dashboard"],
     queryFn: async () => {
-      const res = await api.get(API_ENDPOINTS.TRANSACTIONS, { params: { limit: 10, includeItems: true } });
+      // Die API kennt kein limit: ohne Datum käme jede Buchung seit Beginn – der Feed zeigt nur heute
+      const res = await api.get(API_ENDPOINTS.TRANSACTIONS, { params: { startDate: format(new Date(), "yyyy-MM-dd"), includeItems: true } });
       return res.data;
     },
     refetchInterval: 30_000,
+  });
+
+  // 7. Kasse: Soll-Bestand seit der letzten Zählung
+  const { data: cashPreview, isLoading: loadingCash } = useQuery({
+    queryKey: ["cash-counts", "preview"],
+    queryFn: async () => (await api.get("/cash-counts/preview")).data,
+    staleTime: 60_000,
+  });
+
+  // 8. Bank: erwarteter Stand laut App-Buchungen (Jahresanfang bzw. letzter Abschluss bis heute)
+  const yearStart = format(new Date(new Date().getFullYear(), 0, 1), "yyyy-MM-dd");
+  const { data: bank, isLoading: loadingBank } = useQuery({
+    queryKey: ["bank-reconciliation", "dashboard", yearStart],
+    queryFn: async () => (await api.get("/accounting/bank-reconciliation", { params: { startDate: yearStart, endDate: format(new Date(), "yyyy-MM-dd") } })).data.bankReconciliation,
+    staleTime: 60_000,
   });
 
   /* ------------------------------ Derived data ----------------------------- */
@@ -208,29 +221,40 @@ export default function Dashboard() {
   ].filter(d => d.value > 0);
 
   const avgTicket = sum.totalTransactions ? sum.totalRevenue / sum.totalTransactions : 0;
-  const lowBalanceCount = (lowBalance?.customers || []).filter((c) => (c.balance ?? 0) < 5).length;
   const lowStockCount = lowStock?.count ?? (lowStock?.articles?.length ?? 0);
-  const openInvoicesCount = (openInvoicesData?.documents || []).filter(d => d.type === "RECHNUNG" && !d.paid).length;
-  const recentTransactions = recentTransactionsData?.transactions || [];
+  // offene Lieferantenrechnungen (Einkauf), nicht Kundenrechnungen
+  const openPurchases = (openInvoicesData?.documents || []).filter(d => d.type === "RECHNUNG" && !d.paid);
+  const openPurchasesCount = openPurchases.length;
+  const recentTransactions = [...(recentTransactionsData?.transactions || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const lowArticles = lowStock?.articles || [];
+  const emptyArticles = lowArticles.filter((a) => Number(a.stock) <= 0);
+  const lowButStocked = lowArticles.filter((a) => Number(a.stock) > 0);
+  const lowBalanceActive = (lowBalance?.customers || []).filter((c) => c.active !== false && Number(c.balance) < 5);
+  const feedLabel = (tx) => {
+    if (tx.type === "OWNER_USE") return { who: "Auf den Wirt", Icon: LocalBar };
+    if (tx.type === "EXPIRED") return { who: "Abschreibung", Icon: Inventory };
+    if (tx.type === "REFUND") return { who: `Storno${tx.customer ? ` · ${tx.customer.name}` : ""}`, Icon: ReceiptLong };
+    return { who: tx.customer?.name || "Barverkauf", Icon: tx.paymentMethod === "ACCOUNT" ? AccountBalance : AttachMoney };
+  };
+  const feedItems = (tx) => (tx.items || []).map((i) => `${Number(i.quantity)}× ${i.article?.name || "Artikel"}`).slice(0, 2).join(", ");
 
   /* --------------------------------- UI ----------------------------------- */
   return (
-    <Box sx={{ px: { xs: 2, md: 4 }, pb: 8, pt: 4, width: "100%", maxWidth: "2000px", margin: "0 auto" }}>
+    <Box sx={{ px: { xs: 0, md: 4 }, pb: 8, pt: { xs: 2, sm: 4 }, width: "100%", maxWidth: "2000px", margin: "0 auto" }}>
 
       {/* 1. Navigation Grid (Left-Aligned Header removed) */}
-      <Box sx={{ mb: 6 }}>
-        <Typography variant="overline" color="text.secondary" fontWeight={800} sx={{ mb: 2, display: "block", letterSpacing: "1.2px" }}>
+      <Box sx={{ mb: { xs: 3, sm: 6 } }}>
+        <Typography variant="overline" color="text.secondary" fontWeight={800} sx={{ mb: { xs: 1, sm: 2 }, display: "block", letterSpacing: "1.2px" }}>
           Schnellzugriff
         </Typography>
         <Box
           sx={{
             display: "grid",
             gridTemplateColumns: {
-              xs: "repeat(2, 1fr)",
-              sm: "repeat(4, 1fr)",
+              xs: "repeat(4, 1fr)", // Handy: vier kleine Kacheln pro Zeile statt zwei bildschirmfüllender
               lg: "repeat(8, 1fr)",
             },
-            gap: 2,
+            gap: { xs: 1, sm: 2 },
           }}
         >
           {[
@@ -252,74 +276,56 @@ export default function Dashboard() {
       <Typography variant="overline" color="text.secondary" fontWeight={800} sx={{ mb: 2, display: "block", letterSpacing: "1.2px" }}>
         Übersicht
       </Typography>
-      <Grid container spacing={3} sx={{ mb: 5 }} alignItems="stretch">
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+      <Grid container spacing={{ xs: 1.5, sm: 3 }} sx={{ mb: { xs: 3, sm: 5 } }} alignItems="stretch">
+        <Grid size={{ xs: 6, md: 3 }}>
           <KPICard
-            title="Umsatz Heute"
+            title="Umsatz heute"
             value={money(sum.totalRevenue)}
             icon={AttachMoney}
             color="primary"
             loading={loadingSummary}
-            subTitle={`${sum.totalTransactions} Transaktionen | Ø ${money(avgTicket)}`}
+            onClick={() => navigate("/transactions")}
+            subTitle={`${sum.totalTransactions} Verkäufe · Ø ${money(avgTicket)}`}
             sx={{ height: "100%" }}
           />
         </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <Grid size={{ xs: 6, md: 3 }}>
           <KPICard
-            title="Offene Kundenrechnungen"
-            value={openInvoicesCount}
+            title="Kasse (Soll)"
+            value={money(cashPreview?.expectedTotal)}
+            icon={Savings}
+            color="success"
+            loading={loadingCash}
+            onClick={() => navigate("/cash-count")}
+            subTitle={cashPreview?.hasBaseline && cashPreview?.since
+              ? `seit Zählung ${format(new Date(cashPreview.since), "dd.MM.")}`
+              : "noch keine Zählung – ohne Anfangsbestand"}
+            sx={{ height: "100%" }}
+          />
+        </Grid>
+        <Grid size={{ xs: 6, md: 3 }}>
+          <KPICard
+            title="Bank (erwartet)"
+            value={money(bank?.expected)}
+            icon={AccountBalance}
+            color="info"
+            loading={loadingBank}
+            onClick={() => navigate("/cash-count")}
+            subTitle={bank?.openingSource === "KEIN_VORJAHR" ? `Buchungen seit ${format(new Date(yearStart), "dd.MM.yyyy")}, ohne Anfangsstand` : "laut Buchungen in der App"}
+            sx={{ height: "100%" }}
+          />
+        </Grid>
+        <Grid size={{ xs: 6, md: 3 }}>
+          <KPICard
+            title="Einkauf offen"
+            value={openPurchasesCount}
             icon={ShoppingBasket}
-            color={openInvoicesCount > 0 ? "warning" : "success"}
+            color={openPurchasesCount > 0 ? "warning" : "success"}
             loading={loadingInvoices}
-            subTitle={openInvoicesCount > 0 ? "Zahlung ausstehend" : "Alles bezahlt"}
+            onClick={() => navigate("/purchases")}
+            subTitle={openPurchasesCount > 0 ? `Lieferantenrechnungen über ${money(openPurchases.reduce((s2, d) => s2 + Number(d.totalAmount || 0), 0))}` : "alle Lieferantenrechnungen bezahlt"}
             sx={{ height: "100%" }}
           />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <KPICard
-            title="Lagerbestand"
-            value={lowStockCount}
-            icon={Inventory}
-            color={lowStockCount > 0 ? "error" : "success"}
-            loading={loadingLowStock}
-            subTitle={lowStockCount > 0 ? "Artikel kritisch" : "Bestand OK"}
-            sx={{ height: "100%" }}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card
-            elevation={0}
-            sx={{
-              height: "100%",
-              borderRadius: 4,
-              bgcolor: "background.paper",
-              border: `1px solid ${theme.palette.divider}`,
-              transition: "all 0.2s",
-              "&:hover": { boxShadow: 4, borderColor: "primary.main" }
-            }}
-          >
-            <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", gap: 1.5, p: 3 }}>
-              <Button
-                variant="contained"
-                fullWidth
-                size="large"
-                startIcon={<ShoppingCart />}
-                onClick={() => navigate("/sales")}
-                sx={{ borderRadius: 3, fontWeight: 700, py: 1.2 }}
-              >
-                Verkauf starten
-              </Button>
-              <Button
-                variant="outlined"
-                fullWidth
-                startIcon={<Description />}
-                onClick={() => navigate("/purchases/create")}
-                sx={{ borderRadius: 3, fontWeight: 700, border: "2px solid", "&:hover": { border: "2px solid" } }}
-              >
-                Einkauf erfassen
-              </Button>
-            </CardContent>
-          </Card>
         </Grid>
       </Grid>
 
@@ -331,31 +337,40 @@ export default function Dashboard() {
         <Grid size={{ xs: 12, lg: 4 }}>
           <Stack spacing={3}>
             {/* Warnings */}
-            {(lowStockCount > 0 || lowBalanceCount > 0) ? (
+            {(lowStockCount > 0 || lowBalanceActive.length > 0) ? (
               <Paper elevation={0} sx={{ p: 2, borderRadius: 4, bgcolor: alpha(theme.palette.warning.main, 0.05), border: `1px solid ${alpha(theme.palette.warning.main, 0.2)}` }}>
-                <Stack direction="row" spacing={1.5} alignItems="center" mb={2}>
+                <Stack direction="row" spacing={1.5} alignItems="center" mb={1}>
                   <Warning color="warning" />
                   <Typography variant="h6" fontWeight={800}>Handlungsbedarf</Typography>
                 </Stack>
                 <List dense disablePadding>
-                  {(lowStock?.articles || []).slice(0, 3).map((a) => (
-                    <ListItem key={a.id} sx={{ px: 0 }}>
+                  {emptyArticles.length > 0 && (
+                    <ListItem onClick={() => navigate("/articles")} sx={{ px: 1, mx: -1, borderRadius: 2, cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>
+                      <ListItemText
+                        primary={<Typography variant="body2" fontWeight={700}>{emptyArticles.length} {emptyArticles.length === 1 ? "Artikel" : "Artikel"} ohne Bestand</Typography>}
+                        secondary={`${emptyArticles.slice(0, 3).map((a) => a.name).join(", ")}${emptyArticles.length > 3 ? " …" : ""} – Inventur oder Einkauf erfassen`}
+                      />
+                      <Chip label="Lager" size="small" color="error" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700, ml: 1 }} />
+                    </ListItem>
+                  )}
+                  {lowButStocked.slice(0, 3).map((a) => (
+                    <ListItem key={a.id} onClick={() => navigate("/articles")} sx={{ px: 1, mx: -1, borderRadius: 2, cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>
                       <ListItemText
                         primary={<Typography variant="body2" fontWeight={600}>{a.name}</Typography>}
-                        secondary={`Bestand: ${a.stock} (Min: ${a.minStock})`}
+                        secondary={`Bestand ${Number(a.stock)} · Warnung ab ${Number(a.minStock)}`}
                       />
-                      <Chip label="Lager" size="small" color="error" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }} />
+                      <Chip label="Niedrig" size="small" color="warning" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700, ml: 1 }} />
                     </ListItem>
                   ))}
-                  {(lowBalance?.customers || []).filter(c => c.balance < 5).slice(0, 3).map((c) => (
-                    <ListItem key={c.id} sx={{ px: 0 }}>
+                  {lowBalanceActive.length > 0 && (
+                    <ListItem onClick={() => navigate("/customers")} sx={{ px: 1, mx: -1, borderRadius: 2, cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>
                       <ListItemText
-                        primary={<Typography variant="body2" fontWeight={600}>{c.name}</Typography>}
-                        secondary={`Guthaben: ${money(c.balance)}`}
+                        primary={<Typography variant="body2" fontWeight={700}>{lowBalanceActive.length} aktive Kunden unter 5 €</Typography>}
+                        secondary="Beim nächsten Besuch ans Aufladen erinnern"
                       />
-                      <Chip label="Guthaben" size="small" color="warning" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }} />
+                      <Chip label="Guthaben" size="small" color="warning" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700, ml: 1 }} />
                     </ListItem>
-                  ))}
+                  )}
                 </List>
               </Paper>
             ) : (
@@ -363,7 +378,7 @@ export default function Dashboard() {
                 <CheckCircle color="success" />
                 <Box>
                   <Typography variant="subtitle1" fontWeight={700}>Keine Warnungen</Typography>
-                  <Typography variant="caption" color="text.secondary">System läuft optimal</Typography>
+                  <Typography variant="caption" color="text.secondary">Bestände und Guthaben im grünen Bereich</Typography>
                 </Box>
               </Paper>
             )}
@@ -426,22 +441,24 @@ export default function Dashboard() {
                 </Stack>
               </Box>
               <List sx={{ p: 0 }}>
-                {recentTransactions.slice(0, 6).map((tx) => (
-                  <ListItem key={tx.id} sx={{ borderBottom: `1px solid ${theme.palette.divider}`, "&:last-child": { borderBottom: 0 } }}>
-                    <ListItemAvatar>
-                      <Avatar sx={{ bgcolor: tx.type === 'DEPOSIT' ? 'success.light' : 'primary.light', width: 36, height: 36 }}>
-                        {tx.type === 'DEPOSIT' ? <AttachMoney sx={{ fontSize: 18 }} /> : <ShoppingCart sx={{ fontSize: 18 }} />}
-                      </Avatar>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={<Typography variant="body2" fontWeight={600}>{tx.customer?.name || "Unbekannt"}</Typography>}
-                      secondary={format(new Date(tx.createdAt), 'HH:mm')}
-                    />
-                    <Typography variant="body2" fontWeight={700} color={tx.type === 'DEPOSIT' ? 'success.main' : 'text.primary'}>
-                      {money(tx.totalAmount)}
-                    </Typography>
-                  </ListItem>
-                ))}
+                {recentTransactions.slice(0, 6).map((tx) => {
+                  const f = feedLabel(tx);
+                  const noMoney = tx.type !== "SALE" && tx.type !== "REFUND";
+                  return (
+                    <ListItem key={tx.id} onClick={() => navigate("/transactions")} sx={{ cursor: "pointer", borderBottom: `1px solid ${theme.palette.divider}`, "&:last-child": { borderBottom: 0 }, opacity: tx.cancelled ? 0.5 : 1 }}>
+                      <ListItemAvatar>
+                        <Avatar sx={{ bgcolor: "action.hover", color: "text.secondary", width: 36, height: 36 }}><f.Icon sx={{ fontSize: 18 }} /></Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={<Typography variant="body2" fontWeight={600} noWrap>{f.who}</Typography>}
+                        secondary={<Typography variant="caption" color="text.secondary" noWrap component="span" sx={{ display: "block" }}>{format(new Date(tx.createdAt), "HH:mm")}{feedItems(tx) ? ` · ${feedItems(tx)}` : ""}</Typography>}
+                      />
+                      <Typography variant="body2" fontWeight={700} sx={{ ml: 1, whiteSpace: "nowrap", textDecoration: tx.cancelled ? "line-through" : "none" }} color={noMoney ? "text.secondary" : tx.type === "REFUND" ? "error.main" : "text.primary"}>
+                        {noMoney ? "ohne Umsatz" : money(tx.type === "REFUND" ? -Math.abs(tx.totalAmount) : tx.totalAmount)}
+                      </Typography>
+                    </ListItem>
+                  );
+                })}
                 {recentTransactions.length === 0 && <Box p={4} textAlign="center" color="text.secondary">Keine Transaktionen</Box>}
               </List>
             </Paper>

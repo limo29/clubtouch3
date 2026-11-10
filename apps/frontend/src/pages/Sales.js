@@ -477,7 +477,7 @@ const Sales = () => {
   const mobileBar = ({ openSidebar, openLines, count }) => (
     <Card sx={{ p: 1, pb: 'calc(8px + env(safe-area-inset-bottom, 0px))', boxShadow: 6 }}>
       <Stack direction="row" alignItems="stretch" spacing={1} sx={{ mb: 1 }}>
-        <ButtonBase onClick={openSidebar} sx={{ ...barBorder, flex: 1, minWidth: 0, justifyContent: 'flex-start', gap: 1, px: 1, py: 0.75 }}>
+        <ButtonBase onClick={openSidebar} disabled={!openSidebar} sx={{ ...barBorder, flex: 1, minWidth: 0, justifyContent: 'flex-start', gap: 1, px: 1, py: 0.75 }}>
           {targetCustomer ? (
             <Avatar sx={{ width: 32, height: 32, fontSize: '0.95rem', fontWeight: 800, bgcolor: 'primary.main' }}>
               {(targetCustomer.nickname?.[0] || targetCustomer.name?.[0] || '?').toUpperCase()}
@@ -496,7 +496,7 @@ const Sales = () => {
               {money(targetCustomer.balance)}
             </Typography>
           )}
-          <ExpandLess color="action" />
+          {openSidebar && <ExpandLess color="action" />}
         </ButtonBase>
         {targetCustomer && (
           <>

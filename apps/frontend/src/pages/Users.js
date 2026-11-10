@@ -23,7 +23,12 @@ import {
   Tooltip,
   InputAdornment,
   Snackbar,
+  Avatar,
+  Card,
+  Stack,
+  useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
   Add,
   Edit,
@@ -43,6 +48,8 @@ import { API_ENDPOINTS } from '../config/api';
 import { PASSWORD_HINT, passwordProblem, apiError } from '../components/common/ChangePasswordDialog';
 
 const Users = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
   const [openDialog, setOpenDialog] = useState(false);
@@ -203,7 +210,40 @@ const Users = () => {
         </Alert>
       )}
 
-      {/* Users Table */}
+      {/* Handy: Kartenliste statt rechts abgeschnittener Tabelle */}
+      {isMobile ? (
+        <Card>
+          {users.map((user) => {
+            const lastAdmin = user.role === 'ADMIN' && user.active && users.filter((u) => u.role === 'ADMIN' && u.active).length === 1;
+            return (
+              <Stack key={user.id} direction="row" spacing={1.5} alignItems="center"
+                sx={{ px: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 'none' }, opacity: user.active ? 1 : 0.6 }}>
+                <Avatar sx={{ bgcolor: 'action.selected', color: 'text.primary', fontWeight: 800 }}>
+                  {(user.name || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')}
+                </Avatar>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Stack direction="row" spacing={0.75} alignItems="center">
+                    <Typography fontWeight={700} noWrap>{user.name}</Typography>
+                    {user.id === currentUser?.id && <Chip label="Du" size="small" sx={{ height: 20 }} />}
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" noWrap>{user.username ? `${user.username} · ` : ''}{user.email}</Typography>
+                  <Stack direction="row" spacing={0.75} sx={{ mt: 0.5 }}>
+                    <Chip icon={getRoleIcon(user.role)} label={getRoleLabel(user.role)} size="small" color={getRoleColor(user.role)} />
+                    {!user.active && <Chip label="Inaktiv" size="small" />}
+                  </Stack>
+                </Box>
+                <IconButton aria-label="Bearbeiten" onClick={() => handleOpenDialog(user)}><Edit /></IconButton>
+                {user.id !== currentUser?.id && (
+                  <IconButton aria-label={user.active ? 'Deaktivieren' : 'Aktivieren'} color={user.active ? 'error' : 'success'}
+                    onClick={() => toggleStatusMutation.mutate(user.id)} disabled={lastAdmin}>
+                    {user.active ? <PersonOff /> : <PersonAdd />}
+                  </IconButton>
+                )}
+              </Stack>
+            );
+          })}
+        </Card>
+      ) : (
       <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
         <Table sx={{ minWidth: 720 }}>
           <TableHead>
@@ -279,6 +319,7 @@ const Users = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      )}
 
       {/* User Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>

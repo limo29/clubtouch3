@@ -44,8 +44,9 @@ export default function KPICard({
                 position: 'relative',
                 overflow: 'hidden',
                 height: '100%',
-                minHeight: 140,
-                borderRadius: 4,
+                // Handy: flach, zwei Karten pro Zeile; ab sm die große Variante
+                minHeight: { xs: 0, sm: 140 },
+                borderRadius: { xs: 3, sm: 4 },
                 // Dark Mode: Subtle translucent background with border
                 // Light Mode: Vibrant solid gradient
                 background: isDark
@@ -69,8 +70,8 @@ export default function KPICard({
                 <Box
                     sx={{
                         position: 'absolute',
-                        right: -20,
-                        top: -20,
+                        right: { xs: -12, sm: -20 },
+                        top: { xs: -12, sm: -20 },
                         opacity: isDark ? 0.1 : 0.15,
                         transform: 'rotate(15deg)',
                         zIndex: 0,
@@ -78,7 +79,7 @@ export default function KPICard({
                         color: isDark ? mainColor : 'white',
                     }}
                 >
-                    <Icon sx={{ fontSize: 160 }} />
+                    <Icon sx={{ fontSize: { xs: 80, sm: 160 } }} />
                 </Box>
             )}
 
@@ -87,7 +88,7 @@ export default function KPICard({
                 sx={{
                     position: 'relative',
                     zIndex: 1,
-                    p: 3,
+                    p: { xs: 1.5, sm: 3 },
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
@@ -99,24 +100,28 @@ export default function KPICard({
                         variant="subtitle2"
                         sx={{
                             textTransform: 'uppercase',
-                            letterSpacing: '1.5px',
+                            letterSpacing: { xs: '0.5px', sm: '1.5px' },
+                            fontSize: { xs: '0.68rem', sm: '0.875rem' },
+                            lineHeight: 1.3,
                             fontWeight: 700,
                             opacity: 0.9,
-                            mb: 1
+                            mb: { xs: 0.5, sm: 1 }
                         }}
                     >
                         {title}
                     </Typography>
 
                     {loading ? (
-                        <Skeleton variant="text" width="60%" height={60} sx={{ bgcolor: 'rgba(255,255,255,0.2)' }} />
+                        <Skeleton variant="text" width="60%" sx={{ height: { xs: 32, sm: 60 }, bgcolor: 'rgba(255,255,255,0.2)' }} />
                     ) : (
                         <Typography
                             variant="h3"
                             sx={{
                                 fontWeight: 800,
                                 textShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                                lineHeight: 1
+                                lineHeight: 1,
+                                fontSize: { xs: '1.6rem', sm: '2.4rem', md: '3rem' },
+                                whiteSpace: 'nowrap'
                             }}
                         >
                             {value}
@@ -128,7 +133,9 @@ export default function KPICard({
                     <Typography
                         variant="body2"
                         sx={{
-                            mt: 2,
+                            mt: { xs: 0.75, sm: 2 },
+                            fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                            lineHeight: 1.3,
                             opacity: 0.9,
                             fontWeight: 500,
                             display: 'flex',

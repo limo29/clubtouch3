@@ -23,7 +23,7 @@
  */
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
+  Box, Button, Card, CardContent, Dialog, DialogActions, DialogContent,
   DialogTitle, Drawer, IconButton, InputAdornment, Snackbar, Stack, Tab, Tabs, TextField,
   Typography, useMediaQuery,
 } from '@mui/material';
@@ -130,7 +130,7 @@ function ArticleTile({ article, qtyInLines, showPrice, showStock, showCrates, on
         <Typography fontWeight={700} sx={{ lineHeight: 1.2, fontSize: '1rem', wordBreak: 'break-word' }}>{article.name}</Typography>
         <Box sx={{ mt: 'auto', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           {showStock && (article.stock <= 0
-            ? <Chip size="small" color="error" label="Leer" sx={{ fontWeight: 'bold' }} />
+            ? <Typography variant="caption" color="text.disabled">leer</Typography>
             : <Typography variant="caption" color="text.secondary">Bestand: {qty(article.stock, article.unit)}</Typography>)}
         </Box>
         {crate && (
@@ -376,6 +376,7 @@ export default function ArticleLinePicker({
 }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const { articles: loaded } = useArticles();
   const articles = articlesProp || loaded;
 
@@ -460,6 +461,8 @@ export default function ArticleLinePicker({
   const tabIndex = (i) => (hasSidebar ? i : i - 1); // ohne Sidebar: Artikel=0, Positionen=1
   // Handy mit mobileBar: Blätter statt Tabs, die Artikel bleiben stehen
   const sheets = isMobile && typeof mobileBar === 'function';
+  // Tablet hochkant: Seitenleiste (z. B. Kunden) links neben den Artikeln statt im Blatt, Warenkorb weiter in der Leiste
+  const sidebarInline = sheets && hasSidebar && isTablet;
   const closeSheet = () => setMobileTab(tabIndex(1));
   const show = (i) => !isMobile || (sheets ? i === 1 : mobileTab === tabIndex(i));
 
@@ -486,9 +489,9 @@ export default function ArticleLinePicker({
             <Tab label={`${linesLabel} (${badge})`} />
           </Tabs>
         )}
-        <Box sx={{ flex: 1, minHeight: 0, display: isMobile ? 'block' : 'grid', gap: 2, gridTemplateColumns: gridCols, overflow: 'hidden' }}>
-          {hasSidebar && !sheets && (
-            <Box sx={{ display: show(0) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>{sidebar}</Box>
+        <Box sx={{ flex: 1, minHeight: 0, display: isMobile && !sidebarInline ? 'block' : 'grid', gap: sidebarInline ? 1.5 : 2, gridTemplateColumns: sidebarInline ? '300px 1fr' : gridCols, overflow: 'hidden' }}>
+          {hasSidebar && (!sheets || sidebarInline) && (
+            <Box sx={{ display: sidebarInline || show(0) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>{sidebar}</Box>
           )}
           <Box sx={{ display: show(1) ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
             <ArticlePane articles={articles} lines={lines} showPrice={showPrice} showStock={showStock}
@@ -501,7 +504,7 @@ export default function ArticleLinePicker({
         {sheets && (
           <Box sx={{ flexShrink: 0, pt: 1 }}>
             {mobileBar({
-              openSidebar: hasSidebar ? () => setMobileTab(tabIndex(0)) : undefined,
+              openSidebar: hasSidebar && !sidebarInline ? () => setMobileTab(tabIndex(0)) : undefined,
               openLines: () => setMobileTab(tabIndex(2)),
               count: badge,
             })}
@@ -509,7 +512,7 @@ export default function ArticleLinePicker({
         )}
       </Box>
 
-      {sheets && hasSidebar && (
+      {sheets && hasSidebar && !sidebarInline && (
         <BottomSheet open={mobileTab === tabIndex(0)} onClose={closeSheet} title={sidebarLabel}>{sidebar}</BottomSheet>
       )}
       {sheets && (

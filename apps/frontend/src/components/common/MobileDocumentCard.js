@@ -17,7 +17,7 @@ export default function MobileDocumentCard({ stripColor = 'primary.main', childr
       sx={{
         mb: 2,
         p: 2,
-        borderRadius: 3,
+        borderRadius: 1, // wie die übrigen Karten (Theme-Rundung)
         border: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
         position: 'relative',
         overflow: 'hidden',

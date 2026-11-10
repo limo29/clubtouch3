@@ -19,7 +19,7 @@ export function DocumentTable({ children, minWidth = 800, sx }) {
       component={Paper}
       elevation={0}
       sx={{
-        borderRadius: 3,
+        borderRadius: 1, // wie die übrigen Karten (Theme-Rundung)
         border: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
         overflow: 'auto',
         ...sx,
