@@ -1,963 +1,329 @@
-import React, { useState } from 'react';
+/**
+ * Kunden: Liste mit Filter (Standard: aktive Kunden), Sortierung und Suche – die Leiste bleibt beim Scrollen stehen.
+ * Desktop: Tabelle mit „Aufladen“ je Zeile. Handy/Tablet: kompakte Kartenliste.
+ * Zeile antippen öffnet das Kunden-Panel (Konto mit Verlauf · Daten).
+ */
+import React, { useMemo, useState } from 'react';
 import {
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  IconButton,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Typography,
-  Grid,
-  InputAdornment,
-  Alert,
-  Chip,
-  MenuItem,
-  List,
-  ListItem,
-  ListItemText,
-  Avatar,
-  useMediaQuery,
-  useTheme,
-  Tooltip,
-  Switch,
-  FormControlLabel,
-  Divider,
+  Avatar, Box, Button, Card, Chip, Fab, Grid, InputAdornment, ListItemIcon, Menu, MenuItem, Skeleton,
+  Stack, Switch, TextField, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
 import {
-  Add,
-  Edit,
-  Search,
-  Person,
-  Receipt,
-  EmojiEvents,
-  TrendingUp,
-  AccountBalanceWallet,
-  Warning,
-  ContactMail,
-  Groups,
+  AccountBalanceWallet, Add, ArrowDownward, ArrowUpward, Check, ChevronRight, Groups, Person, PersonOff, Search,
+  Sort, TrendingDown, Warning,
 } from '@mui/icons-material';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm, Controller } from 'react-hook-form';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
 import { invalidate } from '../utils/invalidate';
 import { useAuth } from '../context/AuthContext';
+import { money, num } from '../utils/format';
 import GroupBadge from '../components/customers/GroupBadge';
 import GroupManagerDialog from '../components/customers/GroupManagerDialog';
+import CustomerPanel, { initials } from '../components/customers/CustomerPanel';
+import StickyToolbar, { FilterChips } from '../components/common/StickyToolbar';
 
-const Customers = () => {
-  const queryClient = useQueryClient();
-  const { can } = useAuth();
-  const canSeeContact = can('customerContact');
-  const canEdit = can('editCustomers');
-  const [openDialog, setOpenDialog] = useState(false);
-  const [openTopUpDialog, setOpenTopUpDialog] = useState(false);
-  const [openDetailDialog, setOpenDetailDialog] = useState(false);
-  const [openGroupManager, setOpenGroupManager] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState(null);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [groupFilter, setGroupFilter] = useState('');
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+const LOW = 5; // Grenze „wenig Guthaben“ in €
 
-  const { control, handleSubmit, reset, formState: { errors } } = useForm();
-  const { control: topUpControl, handleSubmit: handleTopUpSubmit, reset: resetTopUp } = useForm();
+const FILTERS = [
+  { key: 'active', label: 'Aktiv', test: (c) => c.active !== false },
+  { key: 'low', label: `Unter ${LOW} €`, test: (c) => c.active !== false && num(c.balance) >= 0 && num(c.balance) < LOW },
+  { key: 'negative', label: 'Im Minus', test: (c) => num(c.balance) < 0 },
+  { key: 'hidden', label: 'Ausgeblendet', test: (c) => c.active === false },
+  { key: 'all', label: 'Alle', test: () => true },
+];
+const SORTS = [
+  { key: 'name', label: 'Name', dir: 1, value: (c) => (c.nickname || c.name).toLowerCase() },
+  { key: 'balance', label: 'Guthaben', dir: -1, value: (c) => num(c.balance) },
+  { key: 'activity', label: 'Letzte Aktivität', dir: -1, value: (c) => new Date(c.lastActivity || 0).getTime() },
+];
 
-  // Gruppen laden (für Filter und Formular-Dropdown)
-  const { data: groupsData } = useQuery({
-    queryKey: ['customer-groups'],
-    queryFn: async () => {
-      const res = await api.get(API_ENDPOINTS.CUSTOMER_GROUPS);
-      return res.data;
-    },
-  });
-  const groups = groupsData?.groups || [];
-
-  // Fetch customers
-  const { data: customersData } = useQuery({
-    queryKey: ['customers', searchTerm, groupFilter],
-    queryFn: async () => {
-      const params = {};
-      if (searchTerm) params.search = searchTerm;
-      if (groupFilter) params.groupId = groupFilter;
-      const response = await api.get(API_ENDPOINTS.CUSTOMERS, { params });
-      return response.data;
-    },
-  });
-
-  // Fetch low balance customers
-  const { data: lowBalanceData } = useQuery({
-    queryKey: ['customers', 'low-balance'],
-    queryFn: async () => {
-      const response = await api.get(API_ENDPOINTS.CUSTOMERS_LOW_BALANCE);
-      return response.data;
-    },
-  });
-
-  // Fetch customer details
-  const { data: customerDetails } = useQuery({
-    queryKey: ['customer', selectedCustomer?.id],
-    queryFn: async () => {
-      if (!selectedCustomer) return null;
-      const response = await api.get(`${API_ENDPOINTS.CUSTOMERS}/${selectedCustomer.id}`);
-      return response.data.customer;
-    },
-    enabled: !!selectedCustomer,
-  });
-
-  // Fetch customer stats
-  const { data: customerStats } = useQuery({
-    queryKey: ['customer-stats', selectedCustomer?.id],
-    queryFn: async () => {
-      if (!selectedCustomer) return null;
-      const response = await api.get(`${API_ENDPOINTS.CUSTOMERS}/${selectedCustomer.id}/stats`);
-      return response.data;
-    },
-    enabled: !!selectedCustomer,
-  });
-
-  // Create/Update customer mutation
-  const customerMutation = useMutation({
-    mutationFn: async (data) => {
-      const payload = {
-        ...data,
-        groupId: data.groupId || null,
-        isGroupAccount: !!data.isGroupAccount,
-      };
-      if (editingCustomer) {
-        const response = await api.put(`${API_ENDPOINTS.CUSTOMERS}/${editingCustomer.id}`, payload);
-        return response.data;
-      } else {
-        const response = await api.post(API_ENDPOINTS.CUSTOMERS, payload);
-        return response.data;
-      }
-    },
-    onSuccess: () => {
-      invalidate(queryClient, 'customers', 'finance');
-      handleCloseDialog();
-    },
-  });
-
-  const toggleClientStatus = useMutation({
-    mutationFn: async (customer) => {
-      await api.put(`${API_ENDPOINTS.CUSTOMERS}/${customer.id}`, {
-        active: customer.active === false ? true : false
-      });
-    },
-    onSuccess: () => {
-      invalidate(queryClient, 'customers', 'finance');
-    }
-  });
-
-  // Top up mutation
-  const topUpMutation = useMutation({
-    mutationFn: async ({ customerId, ...data }) => {
-      const response = await api.post(`${API_ENDPOINTS.CUSTOMERS}/${customerId}/topup`, data);
-      return response.data;
-    },
-    onSuccess: () => {
-      invalidate(queryClient, 'customers', 'finance');
-      handleCloseTopUpDialog();
-    },
-  });
-
-  const customers = customersData?.customers || [];
-
-  // In der handleOpenDialog Funktion
-  const handleOpenDialog = (customer = null) => {
-    setEditingCustomer(customer);
-    if (customer) {
-      reset({
-        name: customer.name,
-        nickname: customer.nickname || '',
-        gender: customer.gender || 'OTHER',
-        active: customer.active !== false,
-        groupId: customer.groupId || '',
-        isGroupAccount: !!customer.isGroupAccount,
-        company: customer.company || '',
-        street: customer.street || '',
-        zip: customer.zip || '',
-        city: customer.city || '',
-        phone: customer.phone || '',
-        email: customer.email || '',
-      });
-    } else {
-      reset({
-        name: '',
-        nickname: '',
-        gender: 'OTHER',
-        active: true,
-        groupId: '',
-        isGroupAccount: false,
-        company: '',
-        street: '',
-        zip: '',
-        city: '',
-        phone: '',
-        email: '',
-      });
-    }
-    setOpenDialog(true);
-  };
-
-
-  const handleCloseDialog = () => {
-    setOpenDialog(false);
-    setEditingCustomer(null);
-    reset();
-  };
-
-  const handleOpenTopUpDialog = (customer) => {
-    setSelectedCustomer(customer);
-    resetTopUp({
-      amount: '',
-      method: 'CASH',
-      reference: '',
-    });
-    setOpenTopUpDialog(true);
-  };
-
-  const handleCloseTopUpDialog = () => {
-    setOpenTopUpDialog(false);
-    resetTopUp();
-  };
-
-  const handleOpenDetailDialog = (customer) => {
-    setSelectedCustomer(customer);
-    setOpenDetailDialog(true);
-  };
-
-  const handleCloseDetailDialog = () => {
-    setOpenDetailDialog(false);
-    setSelectedCustomer(null);
-  };
-
-  const onSubmit = (data) => {
-    customerMutation.mutate(data);
-  };
-
-  const onTopUpSubmit = (data) => {
-    topUpMutation.mutate({
-      customerId: selectedCustomer.id,
-      amount: parseFloat(data.amount),
-      method: data.method,
-      reference: data.reference || null,
-    });
-  };
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('de-DE', {
-      style: 'currency',
-      currency: 'EUR',
-    }).format(amount);
-  };
-
-  return (
-    <Box>
-
-      {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }} alignItems="stretch">
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <KPICard
-            title="Kunden gesamt"
-            value={customers.length}
-            icon={Person}
-            color="primary"
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <KPICard
-            title="Gesamtguthaben"
-            value={formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0))}
-            icon={AccountBalanceWallet}
-            color="success"
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <KPICard
-            title="Ø Guthaben"
-            value={customers.length > 0
-              ? formatCurrency(customers.reduce((sum, c) => sum + parseFloat(c.balance), 0) / customers.length)
-              : formatCurrency(0)
-            }
-            icon={TrendingUp}
-            color="info"
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <KPICard
-            title="Niedriges Guthaben"
-            value={lowBalanceData?.count || 0}
-            icon={Warning}
-            color="warning"
-            subTitle={lowBalanceData?.count > 0 ? "Handlungsbedarf" : "Alles OK"}
-          />
-        </Grid>
-      </Grid>
-
-      {/* Actions Bar */}
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid size="grow">
-            <TextField
-              placeholder="Kunde suchen..."
-              variant="outlined"
-              size="small"
-              fullWidth
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
-          {groups.length > 0 && (
-            <Grid size={{ xs: 12, sm: 'auto' }}>
-              <TextField
-                select
-                label="Gruppe"
-                size="small"
-                value={groupFilter}
-                onChange={(e) => setGroupFilter(e.target.value)}
-                sx={{ minWidth: 160 }}
-              >
-                <MenuItem value="">Alle Gruppen</MenuItem>
-                {groups.map((g) => (
-                  <MenuItem key={g.id} value={g.id}>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <GroupBadge group={g} size={20} tooltip={false} />
-                      {g.name}
-                    </Box>
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Grid>
-          )}
-          <Grid>
-            <Button
-              variant="outlined"
-              startIcon={<Groups />}
-              onClick={() => setOpenGroupManager(true)}
-            >
-              Gruppen
-            </Button>
-          </Grid>
-          {canEdit && (
-            <Grid>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={() => handleOpenDialog()}
-              >
-                Neuer Kunde
-              </Button>
-            </Grid>
-          )}
-        </Grid>
-      </Paper>
-
-      {/* Low Balance Alert */}
-      {lowBalanceData?.count > 0 && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          <strong>{lowBalanceData.count} Kunden</strong> haben ein Guthaben unter €{lowBalanceData.threshold}!
-        </Alert>
-      )}
-
-      {/* Customers Table */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Name / Status</TableCell>
-              {!isMobile && <TableCell>Spitzname</TableCell>}
-              <TableCell align="right">Guthaben</TableCell>
-              {!isMobile && <TableCell align="right">Letzte Transaktion</TableCell>}
-              {!isMobile && <TableCell align="right">Transaktionen</TableCell>}
-              {!isMobile && <TableCell>Erstellt am</TableCell>}
-              <TableCell align="right">Aktionen</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {customers.map((customer) => (
-              <TableRow
-                key={customer.id}
-                hover
-                sx={{
-                  cursor: 'pointer',
-                  bgcolor: customer.active === false ? 'rgba(255, 0, 0, 0.08)' : 'inherit'
-                }}
-                onClick={() => handleOpenDetailDialog(customer)}
-              >
-                <TableCell>
-                  <Box display="flex" alignItems="center">
-                    {customer.group && (
-                      <Box sx={{ mr: 1, flexShrink: 0 }}>
-                        <GroupBadge group={customer.group} size={28} />
-                      </Box>
-                    )}
-                    <Avatar sx={{ mr: 2, bgcolor: 'primary.main', flexShrink: 0 }}>
-                      <Person />
-                    </Avatar>
-                    <Box sx={{ minWidth: 0 }}>
-                      <Box display="flex" alignItems="center" gap={0.5} flexWrap="wrap">
-                        <Typography variant="body2" fontWeight="bold" noWrap>
-                          {customer.name}
-                        </Typography>
-                        {customer.isGroupAccount && (
-                          <Chip
-                            label="Gruppenkonto"
-                            size="small"
-                            sx={{ height: 16, fontSize: '0.6rem', flexShrink: 0 }}
-                          />
-                        )}
-                      </Box>
-                      {isMobile && customer.nickname && (
-                        <Typography variant="caption" display="block" color="text.secondary" noWrap>
-                          {customer.nickname}
-                        </Typography>
-                      )}
-                    </Box>
-                    <Box sx={{ ml: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                      <Tooltip title={customer.active !== false ? "Aktiv" : "Versteckt"}>
-                        <Switch
-                          size="small"
-                          checked={customer.active !== false}
-                          disabled={!canEdit}
-                          onChange={() => toggleClientStatus.mutate(customer)}
-                          color="primary"
-                        />
-                      </Tooltip>
-                    </Box>
-                  </Box>
-                </TableCell>
-                {!isMobile && <TableCell>{customer.nickname || '-'}</TableCell>}
-                <TableCell align="right">
-                  <Typography
-                    variant="body2"
-                    color={parseFloat(customer.balance) < 5 ? 'error' : 'inherit'}
-                    fontWeight={parseFloat(customer.balance) < 5 ? 'bold' : 'normal'}
-                  >
-                    {formatCurrency(customer.balance)}
-                  </Typography>
-                </TableCell>
-                {!isMobile && <TableCell align="right">
-                  {customer.lastActivity ? new Date(customer.lastActivity).toLocaleDateString('de-DE') : '-'}
-                </TableCell>}
-                {!isMobile && <TableCell align="right">{customer._count?.transactions || 0}</TableCell>}
-                {!isMobile && <TableCell>
-                  {new Date(customer.createdAt).toLocaleDateString('de-DE')}
-                </TableCell>}
-                <TableCell align="right">
-                  {canEdit && (
-                    <IconButton
-                      size="small"
-                      aria-label="Bearbeiten"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenDialog(customer);
-                      }}
-                    >
-                      <Edit />
-                    </IconButton>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      {/* Customer Dialog */}
-      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <form onSubmit={handleSubmit(onSubmit)}>
-          <DialogTitle>
-            {editingCustomer ? 'Kunde bearbeiten' : 'Neuer Kunde'}
-          </DialogTitle>
-          <DialogContent>
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="name"
-                  control={control}
-                  rules={{ required: 'Name ist erforderlich' }}
-                  render={({ field }) => (
-                    <TextField
-                      fullWidth
-                      {...field}
-                      label="Name"
-                      error={!!errors.name}
-                      helperText={errors.name?.message}
-                    />
-                  )}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="nickname"
-                  control={control}
-                  defaultValue=""
-                  render={({ field }) => (
-                    <TextField
-                      fullWidth
-                      {...field}
-                      label="Spitzname (optional)"
-                    />
-                  )}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="gender"
-                  control={control}
-                  defaultValue="OTHER"
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      label="Geschlecht"
-                      select
-                      fullWidth
-                    >
-                      <MenuItem value="FEMALE">Weiblich</MenuItem>
-                      <MenuItem value="MALE">Männlich</MenuItem>
-                      <MenuItem value="OTHER">Andere/Nicht angegeben</MenuItem>
-                    </TextField>
-                  )}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="active"
-                  control={control}
-                  defaultValue={true}
-                  render={({ field }) => (
-                    <FormControlLabel
-                      control={<Switch {...field} checked={field.value} />}
-                      label="Aktiv (im Verkauf anzeigen)"
-                    />
-                  )}
-                />
-              </Grid>
-
-              {/* Gruppe */}
-              <Grid size={{ xs: 12 }}>
-                <Divider><Typography variant="caption" color="text.secondary">Team / Gruppe (optional)</Typography></Divider>
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="groupId"
-                  control={control}
-                  defaultValue=""
-                  render={({ field }) => (
-                    <TextField
-                      {...field}
-                      label="Gruppe"
-                      select
-                      fullWidth
-                    >
-                      <MenuItem value="">– keine –</MenuItem>
-                      {groups.map((g) => (
-                        <MenuItem key={g.id} value={g.id}>
-                          <Box display="flex" alignItems="center" gap={1}>
-                            <GroupBadge group={g} size={20} tooltip={false} />
-                            {g.name}
-                          </Box>
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  )}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="isGroupAccount"
-                  control={control}
-                  defaultValue={false}
-                  render={({ field }) => (
-                    <FormControlLabel
-                      control={<Switch {...field} checked={field.value} onChange={(e) => field.onChange(e.target.checked)} />}
-                      label="Gruppenkonto (mehrere buchen auf dieses Konto)"
-                    />
-                  )}
-                />
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mt: -0.5 }}>
-                  Zählt in der Team-Wertung, aber nicht als Kopf bei „pro Kopf"
-                </Typography>
-              </Grid>
-
-              {canSeeContact && (
-                <>
-                  <Grid size={{ xs: 12 }}>
-                    <Divider><Typography variant="caption" color="text.secondary">Kontaktdaten (optional)</Typography></Divider>
-                  </Grid>
-                  <Grid size={{ xs: 12 }}>
-                    <Controller
-                      name="company"
-                      control={control}
-                      defaultValue=""
-                      render={({ field }) => (
-                        <TextField fullWidth {...field} label="Firma / Anschriftzusatz" />
-                      )}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12 }}>
-                    <Controller
-                      name="street"
-                      control={control}
-                      defaultValue=""
-                      render={({ field }) => (
-                        <TextField fullWidth {...field} label="Straße" />
-                      )}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 4 }}>
-                    <Controller
-                      name="zip"
-                      control={control}
-                      defaultValue=""
-                      render={({ field }) => (
-                        <TextField fullWidth {...field} label="PLZ" />
-                      )}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 8 }}>
-                    <Controller
-                      name="city"
-                      control={control}
-                      defaultValue=""
-                      render={({ field }) => (
-                        <TextField fullWidth {...field} label="Ort" />
-                      )}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 6 }}>
-                    <Controller
-                      name="phone"
-                      control={control}
-                      defaultValue=""
-                      render={({ field }) => (
-                        <TextField fullWidth {...field} label="Telefon" type="tel" />
-                      )}
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 6 }}>
-                    <Controller
-                      name="email"
-                      control={control}
-                      defaultValue=""
-                      render={({ field }) => (
-                        <TextField fullWidth {...field} label="E-Mail" type="email" />
-                      )}
-                    />
-                  </Grid>
-                </>
-              )}
-
-            </Grid>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseDialog}>Abbrechen</Button>
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={customerMutation.isPending}
-            >
-              {customerMutation.isPending ? 'Speichere...' : 'Speichern'}
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
-
-      {/* Top Up Dialog */}
-      <Dialog open={openTopUpDialog} onClose={handleCloseTopUpDialog}>
-        <form onSubmit={handleTopUpSubmit(onTopUpSubmit)}>
-          <DialogTitle>
-            Guthaben aufladen: {selectedCustomer?.name}
-          </DialogTitle>
-          <DialogContent>
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid size={{ xs: 12 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Aktuelles Guthaben: {selectedCustomer && formatCurrency(selectedCustomer.balance)}
-                </Typography>
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="amount"
-                  control={topUpControl}
-                  rules={{
-                    required: 'Betrag ist erforderlich',
-                    min: { value: 0.01, message: 'Betrag muss größer als 0 sein' },
-                    max: { value: 500, message: 'Maximalbetrag ist €500' }
-                  }}
-                  render={({ field }) => (
-                    <TextField
-                      fullWidth
-                      {...field}
-                      label="Betrag"
-                      type="number"
-                      inputProps={{ step: 0.01, min: 0.01, max: 500 }}
-                      error={!!errors.amount}
-                      helperText={errors.amount?.message}
-                      InputProps={{
-                        startAdornment: <InputAdornment position="start">€</InputAdornment>,
-                      }}
-                    />
-                  )}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="method"
-                  control={topUpControl}
-                  defaultValue="CASH"
-                  render={({ field }) => (
-                    <TextField
-                      fullWidth
-                      {...field}
-                      label="Zahlungsart"
-                      select
-                    >
-                      <MenuItem value="CASH">Bar</MenuItem>
-                      <MenuItem value="TRANSFER">Überweisung</MenuItem>
-                    </TextField>
-                  )}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Controller
-                  name="reference"
-                  control={topUpControl}
-                  defaultValue=""
-                  render={({ field }) => (
-                    <TextField
-                      fullWidth
-                      {...field}
-                      label="Referenz/Bemerkung (optional)"
-                    />
-                  )}
-                />
-              </Grid>
-            </Grid>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseTopUpDialog}>Abbrechen</Button>
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={topUpMutation.isPending}
-            >
-              {topUpMutation.isPending ? 'Verarbeite...' : 'Aufladen'}
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
-
-      {/* Customer Detail Dialog */}
-      <Dialog open={openDetailDialog} onClose={handleCloseDetailDialog} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
-            <Box display="flex" alignItems="center">
-              <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}>
-                <Person />
-              </Avatar>
-              <Box>
-                <Typography variant="h6">
-                  {selectedCustomer?.name}
-                </Typography>
-                {selectedCustomer?.nickname && (
-                  <Typography variant="body2" color="text.secondary">
-                    "{selectedCustomer.nickname}"
-                  </Typography>
-                )}
-              </Box>
-            </Box>
-            <Typography variant="h5" color="primary">
-              {selectedCustomer && formatCurrency(selectedCustomer.balance)}
-            </Typography>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={3}>
-            {/* Statistics */}
-            {customerStats && (
-              <Grid size={{ xs: 12 }}>
-                <Grid container spacing={2}>
-                  <Grid size={{ xs: 12, sm: 4 }}>
-                    <Card>
-                      <CardContent>
-                        <Typography color="textSecondary" gutterBottom variant="body2">
-                          Gesamtausgaben
-                        </Typography>
-                        <Typography variant="h6">
-                          {formatCurrency(customerStats.totalSpent)}
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 4 }}>
-                    <Card>
-                      <CardContent>
-                        <Typography color="textSecondary" gutterBottom variant="body2">
-                          Anzahl Käufe
-                        </Typography>
-                        <Typography variant="h6">
-                          {customerStats.transactionCount}
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 4 }}>
-                    <Card>
-                      <CardContent>
-                        <Typography color="textSecondary" gutterBottom variant="body2">
-                          Durchschnitt pro Kauf
-                        </Typography>
-                        <Typography variant="h6">
-                          {customerStats.transactionCount > 0
-                            ? formatCurrency(customerStats.totalSpent / customerStats.transactionCount)
-                            : formatCurrency(0)
-                          }
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              </Grid>
-            )}
-
-            {/* Favorite Articles */}
-            {customerStats?.favoriteArticles?.length > 0 && (
-              <Grid size={{ xs: 12, md: 6 }}>
-                <Typography variant="h6" gutterBottom>
-                  <EmojiEvents sx={{ verticalAlign: 'middle', mr: 1 }} />
-                  Lieblingsartikel
-                </Typography>
-                <List>
-                  {customerStats.favoriteArticles.map((article, index) => (
-                    <ListItem key={article.id} dense>
-                      <ListItemText
-                        primary={`${index + 1}. ${article.name}`}
-                        secondary={`${article.total_quantity}x gekauft (${formatCurrency(article.total_spent)})`}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Grid>
-            )}
-
-            {/* Recent Transactions */}
-            {customerDetails?.transactions?.length > 0 && (
-              <Grid size={{ xs: 12, md: 6 }}>
-                <Typography variant="h6" gutterBottom>
-                  <Receipt sx={{ verticalAlign: 'middle', mr: 1 }} />
-                  Letzte Transaktionen
-                </Typography>
-                <List>
-                  {customerDetails.transactions.slice(0, 5).map((transaction) => (
-                    <ListItem key={transaction.id} dense>
-                      <ListItemText
-                        primary={`${transaction.items.length} Artikel`}
-                        secondary={new Date(transaction.createdAt).toLocaleString('de-DE')}
-                      />
-                      <Typography variant="body2" color={transaction.cancelled ? 'error' : 'primary'}>
-                        {transaction.cancelled && 'STORNIERT '}
-                        {formatCurrency(transaction.totalAmount)}
-                      </Typography>
-                    </ListItem>
-                  ))}
-                </List>
-              </Grid>
-            )}
-
-            {/* Recent Top Ups */}
-            {customerDetails?.accountTopUps?.length > 0 && (
-              <Grid size={{ xs: 12 }}>
-                <Typography variant="h6" gutterBottom>
-                  <TrendingUp sx={{ verticalAlign: 'middle', mr: 1 }} />
-                  Letzte Aufladungen
-                </Typography>
-                <List>
-                  {customerDetails.accountTopUps.slice(0, 5).map((topUp) => (
-                    <ListItem key={topUp.id} dense>
-                      <ListItemText
-                        primary={formatCurrency(topUp.amount)}
-                        secondary={`${new Date(topUp.createdAt).toLocaleString('de-DE')} - ${topUp.method === 'CASH' ? 'Bar' : topUp.method === 'REIMBURSEMENT' ? 'Auslage (Einkauf)' : topUp.method === 'MIGRATION' ? 'Übernahme Altsystem' : 'Überweisung'}`}
-                      />
-                      {topUp.reference && (
-                        <Chip label={topUp.reference} size="small" />
-                      )}
-                    </ListItem>
-                  ))}
-                </List>
-              </Grid>
-            )}
-          {canSeeContact && customerDetails && (customerDetails.company || customerDetails.street || customerDetails.zip || customerDetails.city || customerDetails.phone || customerDetails.email) && (
-              <Grid size={{ xs: 12 }}>
-                <Divider sx={{ mb: 1 }} />
-                <Typography variant="h6" gutterBottom>
-                  <ContactMail sx={{ verticalAlign: 'middle', mr: 1 }} />
-                  Kontaktdaten
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                  {(customerDetails.company || customerDetails.street || customerDetails.zip || customerDetails.city) && (
-                    <Box>
-                      {customerDetails.company && <Typography variant="body2">{customerDetails.company}</Typography>}
-                      {customerDetails.street && <Typography variant="body2">{customerDetails.street}</Typography>}
-                      {(customerDetails.zip || customerDetails.city) && (
-                        <Typography variant="body2">{[customerDetails.zip, customerDetails.city].filter(Boolean).join(' ')}</Typography>
-                      )}
-                    </Box>
-                  )}
-                  {customerDetails.phone && (
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Telefon</Typography>
-                      <Typography variant="body2">{customerDetails.phone}</Typography>
-                    </Box>
-                  )}
-                  {customerDetails.email && (
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">E-Mail</Typography>
-                      <Typography variant="body2">{customerDetails.email}</Typography>
-                    </Box>
-                  )}
-                </Box>
-              </Grid>
-            )}
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          {canEdit && (
-            <Button onClick={() => handleOpenTopUpDialog(selectedCustomer)}>
-              Guthaben aufladen
-            </Button>
-          )}
-          <Button onClick={handleCloseDetailDialog}>Schließen</Button>
-        </DialogActions>
-      </Dialog>
-      {/* Gruppen-Manager */}
-      <GroupManagerDialog
-        open={openGroupManager}
-        onClose={() => setOpenGroupManager(false)}
-      />
-    </Box>
-  );
+/** „heute“, „gestern“, „vor 5 Tagen“, sonst Datum */
+const relDate = (d) => {
+  if (!d) return '–';
+  const date = new Date(d);
+  const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(date).setHours(0, 0, 0, 0)) / 86400000);
+  if (days <= 0) return 'heute';
+  if (days === 1) return 'gestern';
+  if (days < 14) return `vor ${days} Tagen`;
+  return date.toLocaleDateString('de-DE');
 };
 
-export default Customers;
+const balanceColor = (c) => (num(c.balance) < 0 ? 'error.main' : c.active !== false && num(c.balance) < LOW ? 'warning.main' : 'text.primary');
+
+function CustomerAvatar({ customer, size = 40 }) {
+  return (
+    <Box sx={{ position: 'relative', flexShrink: 0 }}>
+      <Avatar sx={{ width: size, height: size, fontWeight: 800, fontSize: size * 0.38, bgcolor: 'action.selected', color: 'text.primary' }}>
+        {initials(customer.name)}
+      </Avatar>
+      {customer.group && (
+        <Box sx={{ position: 'absolute', right: -4, bottom: -4 }}><GroupBadge group={customer.group} size={size * 0.5} /></Box>
+      )}
+    </Box>
+  );
+}
+
+/* ------------------------------ Tabelle ------------------------------ */
+
+const COLS = 'minmax(220px, 2.2fr) 120px minmax(130px, 1fr) 64px 110px 100px 48px';
+
+function HeaderCell({ label, sortKey, sort, onSort, align = 'left' }) {
+  const active = sort.key === sortKey;
+  const Arrow = sort.dir === 1 ? ArrowUpward : ArrowDownward;
+  const content = (
+    <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: active ? 'text.primary' : 'text.secondary', display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+      {label}{active && <Arrow sx={{ fontSize: 14 }} />}
+    </Typography>
+  );
+  return (
+    <Box sx={{ textAlign: align }}>
+      {sortKey ? <Box component="button" type="button" onClick={() => onSort(sortKey)} sx={{ all: 'unset', cursor: 'pointer' }}>{content}</Box> : content}
+    </Box>
+  );
+}
+
+function TableRow({ c, onOpen, onToggle, canEdit }) {
+  const hidden = c.active === false;
+  return (
+    <Box onClick={() => onOpen(c)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen(c)}
+      sx={{
+        display: 'grid', gridTemplateColumns: COLS, gap: 2, alignItems: 'center', px: 2, py: 1.25, cursor: 'pointer',
+        borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 'none' },
+        '&:hover': { bgcolor: 'action.hover' }, outline: 'none', '&:focus-visible': { bgcolor: 'action.focus' },
+      }}>
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, opacity: hidden ? 0.55 : 1 }}>
+        <CustomerAvatar customer={c} />
+        <Box sx={{ minWidth: 0 }}>
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+            <Typography fontWeight={700} noWrap>{c.name}</Typography>
+            {c.isGroupAccount && <Chip size="small" label="Gruppenkonto" sx={{ height: 20, fontSize: '0.7rem' }} />}
+            {hidden && <Chip size="small" label="Ausgeblendet" sx={{ height: 20, fontSize: '0.7rem' }} />}
+          </Stack>
+          {c.nickname && <Typography variant="body2" color="text.secondary" noWrap>„{c.nickname}“</Typography>}
+        </Box>
+      </Stack>
+      <Typography fontWeight={800} sx={{ textAlign: 'right', color: balanceColor(c), fontSize: '1.05rem' }}>{money(c.balance)}</Typography>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography noWrap>{relDate(c.lastActivity)}</Typography>
+        {c.lastActivity && relDate(c.lastActivity).startsWith('vor') && <Typography variant="body2" color="text.secondary">{new Date(c.lastActivity).toLocaleDateString('de-DE')}</Typography>}
+      </Box>
+      <Typography sx={{ textAlign: 'right' }} color={c._count?.transactions ? 'text.primary' : 'text.secondary'}>{c._count?.transactions || 0}</Typography>
+      <Typography color="text.secondary">{new Date(c.createdAt).toLocaleDateString('de-DE')}</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
+        <Tooltip title={hidden ? 'Ausgeblendet – erscheint nicht im Verkauf' : 'Wird im Verkauf angezeigt'}>
+          <span><Switch checked={!hidden} disabled={!canEdit} onChange={() => onToggle(c)} /></span>
+        </Tooltip>
+      </Box>
+      <ChevronRight sx={{ color: 'text.disabled', justifySelf: 'end' }} />
+    </Box>
+  );
+}
+
+/* ------------------------- Handy: Kartenliste ------------------------ */
+
+function CompactRow({ c, onOpen }) {
+  const hidden = c.active === false;
+  return (
+    <Box onClick={() => onOpen(c)} role="button" tabIndex={0}
+      sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 1.5, py: 1.25, cursor: 'pointer', borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 'none' }, '&:active': { bgcolor: 'action.hover' } }}>
+      <Box sx={{ opacity: hidden ? 0.55 : 1 }}><CustomerAvatar customer={c} size={44} /></Box>
+      <Box sx={{ flex: 1, minWidth: 0, opacity: hidden ? 0.6 : 1 }}>
+        <Typography fontWeight={700} noWrap>{c.nickname || c.name}</Typography>
+        <Typography variant="body2" color="text.secondary" noWrap>
+          {[c.nickname && c.name, hidden ? 'ausgeblendet' : null, `zuletzt ${relDate(c.lastActivity)}`].filter(Boolean).join(' · ')}
+        </Typography>
+      </Box>
+      <Typography fontWeight={800} sx={{ color: balanceColor(c), whiteSpace: 'nowrap' }}>{money(c.balance)}</Typography>
+      <ChevronRight sx={{ color: 'text.disabled', ml: -0.5 }} />
+    </Box>
+  );
+}
+
+/* -------------------------------- Seite ------------------------------ */
+
+export default function Customers() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const compact = useMediaQuery(theme.breakpoints.down('md'));
+  const tableLayout = useMediaQuery(theme.breakpoints.up('lg'));
+  const queryClient = useQueryClient();
+  const { can } = useAuth();
+  const canEdit = can('editCustomers');
+  const canSeeContact = can('customerContact');
+
+  const [search, setSearch] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
+  const [filter, setFilter] = useState('active');
+  const [sort, setSort] = useState({ key: 'name', dir: 1 });
+  const [sortAnchor, setSortAnchor] = useState(null);
+  const [panel, setPanel] = useState({ open: false, id: null, tab: 'account' });
+  const [groupManager, setGroupManager] = useState(false);
+
+  const { data: groupsData } = useQuery({ queryKey: ['customer-groups'], queryFn: async () => (await api.get(API_ENDPOINTS.CUSTOMER_GROUPS)).data });
+  const groups = groupsData?.groups || [];
+  // Alle Kunden einmal laden, Suche/Filter/Sortierung im Browser (kein Flackern beim Tippen)
+  const { data, isLoading } = useQuery({ queryKey: ['customers', 'all'], queryFn: async () => (await api.get(API_ENDPOINTS.CUSTOMERS)).data });
+  const customers = useMemo(() => data?.customers || [], [data]);
+
+  const toggle = useMutation({
+    mutationFn: async (c) => api.put(`${API_ENDPOINTS.CUSTOMERS}/${c.id}`, { active: c.active === false }),
+    onSuccess: () => invalidate(queryClient, 'customers', 'finance'),
+  });
+
+  const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.key, customers.filter(f.test).length])), [customers]);
+  const sums = useMemo(() => ({
+    total: customers.reduce((s, c) => s + num(c.balance), 0),
+    negative: customers.filter((c) => num(c.balance) < 0).reduce((s, c) => s + num(c.balance), 0),
+    active: customers.filter((c) => c.active !== false).reduce((s, c) => s + num(c.balance), 0),
+  }), [customers]);
+
+  const visible = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    const f = FILTERS.find((x) => x.key === filter);
+    const sd = SORTS.find((x) => x.key === sort.key);
+    return customers
+      .filter((c) => f.test(c) && (!groupFilter || c.groupId === groupFilter)
+        && (!s || c.name.toLowerCase().includes(s) || (c.nickname || '').toLowerCase().includes(s)))
+      .sort((a, b) => {
+        const va = sd.value(a); const vb = sd.value(b);
+        return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir || a.name.localeCompare(b.name, 'de');
+      });
+  }, [customers, search, filter, groupFilter, sort]);
+
+  // Klick auf den aktiven Filter wählt ihn ab -> alle Kunden
+  const pickFilter = (key) => setFilter((f) => (f === key ? 'all' : key));
+  const onSort = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: SORTS.find((x) => x.key === key).dir }));
+  const open = (c, tab = 'account') => setPanel({ open: true, id: c?.id || null, tab });
+  // frisch angelegt: bis die Liste neu geladen ist, die Antwort des Servers verwenden
+  const panelCustomer = panel.id ? customers.find((c) => c.id === panel.id) || panel.fallback || null : null;
+  const sortDef = SORTS.find((x) => x.key === sort.key);
+
+  return (
+    <Box sx={{ pb: 10 }}>
+      {/* Kennzahlen (ab Desktop) – Klick setzt den Filter */}
+      {!compact && (
+        <Grid container spacing={2} sx={{ mb: 1 }}>
+          <Grid size={{ md: 3 }}>
+            <KPICard title="Aktive Kunden" value={counts.active} icon={Person} color="primary" loading={isLoading} onClick={() => pickFilter('active')}
+              subTitle={`${counts.hidden} ausgeblendet`} />
+          </Grid>
+          <Grid size={{ md: 3 }}>
+            <KPICard title="Guthaben gesamt" value={money(sums.total)} icon={AccountBalanceWallet} color="success" loading={isLoading} onClick={() => pickFilter('all')}
+              subTitle={`davon aktive Kunden ${money(sums.active)}`} />
+          </Grid>
+          <Grid size={{ md: 3 }}>
+            <KPICard title={`Unter ${LOW} €`} value={counts.low} icon={Warning} color="warning" loading={isLoading} onClick={() => pickFilter('low')}
+              subTitle="aktive Kunden mit wenig Guthaben" />
+          </Grid>
+          <Grid size={{ md: 3 }}>
+            <KPICard title="Im Minus" value={counts.negative} icon={TrendingDown} color="error" loading={isLoading} onClick={() => pickFilter('negative')}
+              subTitle={counts.negative ? `zusammen ${money(sums.negative)}` : 'niemand'} />
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Werkzeugleiste – bleibt unter der App-Leiste stehen */}
+      <StickyToolbar>
+          <Stack spacing={1.5}>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <TextField placeholder="Name oder Spitzname suchen…" size="small" fullWidth value={search} onChange={(e) => setSearch(e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }} sx={{ minWidth: 0 }} />
+              {groups.length > 0 && !isMobile && (
+                <TextField select size="small" label="Gruppe" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} sx={{ minWidth: 170, flexShrink: 0 }}>
+                  <MenuItem value="">Alle Gruppen</MenuItem>
+                  {groups.map((g) => (
+                    <MenuItem key={g.id} value={g.id}><Box display="flex" alignItems="center" gap={1}><GroupBadge group={g} size={20} tooltip={false} />{g.name}</Box></MenuItem>
+                  ))}
+                </TextField>
+              )}
+              {!isMobile && <Button variant="outlined" startIcon={<Groups />} onClick={() => setGroupManager(true)} sx={{ flexShrink: 0 }}>Gruppen</Button>}
+              {canEdit && !isMobile && (
+                <Button variant="contained" startIcon={<Add />} onClick={() => open(null, 'data')} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>Neuer Kunde</Button>
+              )}
+            </Stack>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <FilterChips value={filter} onChange={setFilter} sx={{ flex: 1 }}
+                options={FILTERS.map((f) => ({ key: f.key, label: f.label, count: counts[f.key], color: f.key === 'negative' ? 'error' : f.key === 'low' ? 'warning' : 'primary' }))} />
+              {!tableLayout && (
+                <>
+                  <Button size="small" color="inherit" startIcon={<Sort />} onClick={(e) => setSortAnchor(e.currentTarget)} sx={{ flexShrink: 0, color: 'text.secondary' }}>
+                    {sortDef.label}
+                  </Button>
+                  <Menu anchorEl={sortAnchor} open={!!sortAnchor} onClose={() => setSortAnchor(null)}>
+                    {SORTS.map((s) => (
+                      <MenuItem key={s.key} selected={sort.key === s.key} onClick={() => { setSort({ key: s.key, dir: s.dir }); setSortAnchor(null); }}>
+                        <ListItemIcon>{sort.key === s.key ? <Check fontSize="small" /> : null}</ListItemIcon>{s.label}
+                      </MenuItem>
+                    ))}
+                    {isMobile && (
+                      <MenuItem onClick={() => { setSortAnchor(null); setGroupManager(true); }} sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+                        <ListItemIcon><Groups fontSize="small" /></ListItemIcon>Gruppen verwalten
+                      </MenuItem>
+                    )}
+                  </Menu>
+                </>
+              )}
+            </Stack>
+            {isMobile && groups.length > 0 && (
+              <TextField select size="small" label="Gruppe" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} fullWidth>
+                <MenuItem value="">Alle Gruppen</MenuItem>
+                {groups.map((g) => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
+              </TextField>
+            )}
+          </Stack>
+      </StickyToolbar>
+
+      {/* Liste */}
+      {isLoading ? (
+        <Skeleton variant="rounded" height={400} />
+      ) : visible.length === 0 ? (
+        <Card sx={{ p: 6, textAlign: 'center' }}>
+          <PersonOff sx={{ fontSize: 56, color: 'text.disabled', mb: 1 }} />
+          <Typography color="text.secondary">Keine Kunden für diese Suche oder diesen Filter.</Typography>
+          {(filter !== 'all' || search || groupFilter) && (
+            <Button sx={{ mt: 2 }} onClick={() => { setFilter('all'); setSearch(''); setGroupFilter(''); }}>Alle Kunden zeigen</Button>
+          )}
+        </Card>
+      ) : (
+        <Card>
+          {tableLayout && (
+            <Box sx={{ display: 'grid', gridTemplateColumns: COLS, gap: 2, alignItems: 'center', px: 2, py: 1, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'action.hover' }}>
+              <HeaderCell label="Kunde" sortKey="name" sort={sort} onSort={onSort} />
+              <HeaderCell label="Guthaben" sortKey="balance" sort={sort} onSort={onSort} align="right" />
+              <HeaderCell label="Letzte Aktivität" sortKey="activity" sort={sort} onSort={onSort} />
+              <HeaderCell label="Käufe" align="right" sort={sort} />
+              <HeaderCell label="Kunde seit" sort={sort} />
+              <HeaderCell label="Im Verkauf" align="center" sort={sort} />
+              <span />
+            </Box>
+          )}
+          {visible.map((c) => (tableLayout
+            ? <TableRow key={c.id} c={c} onOpen={open} onToggle={(x) => toggle.mutate(x)} canEdit={canEdit} />
+            : <CompactRow key={c.id} c={c} onOpen={open} />
+          ))}
+        </Card>
+      )}
+      {!isLoading && visible.length > 0 && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, textAlign: 'center' }}>
+          {visible.length} von {customers.length} Kunden · Summe {money(visible.reduce((s, c) => s + num(c.balance), 0))}
+        </Typography>
+      )}
+
+      {canEdit && isMobile && (
+        <Fab color="primary" aria-label="Neuer Kunde" onClick={() => open(null, 'data')}
+          sx={{ position: 'fixed', right: 16, bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))', boxShadow: `0 8px 24px ${alpha(theme.palette.primary.main, 0.35)}` }}>
+          <Add />
+        </Fab>
+      )}
+
+      <CustomerPanel open={panel.open} customer={panelCustomer} initialTab={panel.tab} groups={groups}
+        canEdit={canEdit} canSeeContact={canSeeContact}
+        onClose={() => setPanel((p) => ({ ...p, open: false }))}
+        onCreated={(c) => setPanel({ open: true, id: c.id, tab: 'account', fallback: c })} />
+      <GroupManagerDialog open={groupManager} onClose={() => setGroupManager(false)} />
+    </Box>
+  );
+}
