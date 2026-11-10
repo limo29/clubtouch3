@@ -49,13 +49,14 @@ router.patch('/:id/status',
   validateInvoiceStatus,
   invoiceController.updateStatus
 );
-// NEU: Rechnung updaten (nur DRAFT)
+
+// Rechnung bearbeiten (nur Entwürfe)
 router.put('/:id',
   authorize('ADMIN', 'CASHIER'),
   invoiceController.updateInvoice
 );
 
-// NEU: Rechnung löschen (stornieren oder hard delete)
+// Rechnung stornieren bzw. mit ?hard=true endgültig löschen (nur Entwurf/storniert)
 router.delete('/:id',
   authorize('ADMIN', 'ACCOUNTANT'), // Löschen nicht an der Theke; Storno läuft über den Status
   invoiceController.deleteInvoice

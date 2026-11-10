@@ -132,23 +132,36 @@ const Sales = () => {
     onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); refetchHistory(); }
   });
 
+  // Offline-Betrieb: submitBooking bucht online direkt (mit clientId gegen Doppelbuchung) und legt die
+  // Buchung offline oder bei Verbindungsfehler in die Warteschlange (OfflineContext), die sie nachreicht
+  const { submitBooking } = useOffline();
+
   const topUpMutation = useMutation({
-    mutationFn: async (data) => api.post(`/customers/${data.customerId}/topup`, { amount: num(data.amount), method: data.method, reference: data.reference }),
-    onSuccess: () => { invalidate(queryClient, 'customers', 'sales', 'finance'); setShowTopUp(false); setTopUpAmount(''); }
+    mutationFn: async (data) => submitBooking({ isTopUp: true, customerId: data.customerId, amount: num(data.amount), method: data.method, reference: data.reference }),
+    onSuccess: (res) => {
+      if (res.queued) showFeedback('Offline: Aufladung gespeichert, wird übertragen sobald online', 'info');
+      else invalidate(queryClient, 'customers', 'sales', 'finance');
+      setShowTopUp(false); setTopUpAmount('');
+    },
+    onError: (err) => showFeedback(err.response?.data?.error || 'Aufladen fehlgeschlagen', 'error')
   });
 
   // Letzter Verkauf für „Rückgängig“ (5 s): storniert ihn und legt den Warenkorb wieder hin
   const [lastSale, setLastSale] = useState(null); // { id, total, lines, target } | null
 
   const quickSaleMutation = useMutation({
-    mutationFn: async (data) => api.post(API_ENDPOINTS.TRANSACTIONS, data),
+    mutationFn: async (data) => submitBooking(data),
     onMutate: () => ({ lines, total, target: bookingTarget }),
     onSuccess: (res, _data, ctx) => {
-      invalidate(queryClient, 'customers', 'stock', 'sales', 'finance');
+      if (res.queued) showFeedback('Offline: Buchung gespeichert, wird übertragen sobald online', 'info');
+      else invalidate(queryClient, 'customers', 'stock', 'sales', 'finance');
       clearCart(); setShowChangeCalc(false); setMobileTab(1);
+      // Nach einem Kundenverkauf zurück auf „Bar“, damit der nächste Gast nicht versehentlich auf dessen Konto bucht
+      if (ctx?.target?.type === 'CUSTOMER') setBookingTarget({ type: 'CASH' });
       const id = res.data?.transaction?.id;
       if (id && ctx) setLastSale({ id, ...ctx });
-    }
+    },
+    onError: (err) => showFeedback(err.response?.data?.error || 'Buchung fehlgeschlagen', 'error')
   });
 
   const undoSaleMutation = useMutation({
@@ -156,55 +169,25 @@ const Sales = () => {
     onSuccess: (_res, sale) => {
       invalidate(queryClient, 'customers', 'stock', 'sales', 'finance');
       // Nur in einen leeren Warenkorb zurücklegen, eine schon begonnene Bestellung bleibt
-      setLines(prev => (prev.length ? prev : sale.lines));
-      setBookingTarget(sale.target);
+      // Positionen UND Zahler zurück; war schon eine neue Bestellung begonnen, bleibt diese unangetastet
+      if (lines.length === 0) {
+        setLines(sale.lines);
+        setBookingTarget(sale.target);
+      }
       showFeedback('Verkauf storniert', 'info');
     },
     onError: (err) => showFeedback(err.response?.data?.error || 'Storno fehlgeschlagen', 'error')
   });
 
   /* Logic & Actions */
-  const { isOnline, addTransaction } = useOffline();
 
   const handleBooking = () => {
     if (!lines.length) return;
     // Backend-Vertrag unverändert: [{ articleId, quantity }]
     const items = toSalePayload(lines);
 
-    // Offline Handling
-    if (!isOnline) {
-      if (bookingTarget.type === 'CARD') {
-        setShowCardConfirm(true); // auch offline erst nach erfolgreicher Zahlung am Terminal buchen
-      } else if (bookingTarget.type === 'CASH') {
-        addTransaction({ paymentMethod: 'CASH', items });
-        clearCart();
-        showFeedback('Offline: Buchung wurde gespeichert', 'info');
-      } else if (bookingTarget.type === 'CUSTOMER' && bookingTarget.data) {
-        addTransaction({ paymentMethod: 'ACCOUNT', customerId: bookingTarget.data.id, items });
-
-        // Optimistic Update
-        queryClient.setQueryData(['customers-sales'], (old) => {
-          if (!old || !old.customers) return old;
-          return {
-            ...old,
-            customers: old.customers.map(c =>
-              c.id === bookingTarget.data.id
-                ? { ...c, balance: c.balance - total, lastActivity: new Date().toISOString() }
-                : c
-            )
-          };
-        });
-
-        clearCart();
-        showFeedback(`Offline: Buchung für ${bookingTarget.data.nickname || bookingTarget.data.name} gespeichert`, 'info');
-      } else if (bookingTarget.type === 'OWNER') {
-        addTransaction({ type: 'OWNER_USE', paymentMethod: 'CASH', customerId: null, items });
-        clearCart();
-        showFeedback('Offline: Wirt-Buchung gespeichert', 'info');
-      }
-      return;
-    }
-
+    // Offline wie online: Überziehungsprüfung gegen das lokal fortgeschriebene Guthaben, die Buchung
+    // landet über submitBooking in der Warteschlange
     if (bookingTarget.type === 'CASH') {
       quickSaleMutation.mutate({ paymentMethod: 'CASH', items });
     } else if (bookingTarget.type === 'CARD') {
@@ -333,8 +316,10 @@ const Sales = () => {
           mb: 1
         }}
       >
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 1.5 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: { xs: 1.5, md: 1, lg: 1.5 } }}>
           <Avatar sx={{
+            // Tablet quer: Platz für den Namen statt Avatar
+            display: { xs: 'flex', md: 'none', lg: 'flex' },
             width: 44, height: 44, fontSize: '1.1rem',
             bgcolor: customer.gender === 'FEMALE' ? 'pink.main' : customer.gender === 'MALE' ? 'blue.main' : 'grey.600',
             fontWeight: 800, border: '2px solid', borderColor: 'background.paper'
@@ -344,7 +329,7 @@ const Sales = () => {
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Stack direction="row" alignItems="center" spacing={0.5}>
               {customer.group && <GroupBadge group={customer.group} size={18} tooltip={false} />}
-              <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '1rem', lineHeight: 1.25, overflowWrap: 'anywhere' }}>{customer.nickname || customer.name}</Typography>
+              <Typography variant="body1" sx={{ fontWeight: 600, fontSize: '1rem', lineHeight: 1.25, overflowWrap: 'break-word', hyphens: 'auto' }} lang="de">{customer.nickname || customer.name}</Typography>
             </Stack>
             {customer._specialActive
               ? (<Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{customer.nickname ? `${customer.name} · ` : ''}zuletzt {timeLabel(customer.lastActivity)}</Typography>)
@@ -386,7 +371,7 @@ const Sales = () => {
         <TextField placeholder="Kunde suchen…" size="small" fullWidth value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }} />
       </Box>
       <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <Stack sx={{ width: 40, overflowY: 'auto', alignItems: 'center', py: 1, borderRight: '1px solid', borderColor: 'divider', bgcolor: 'background.default', '&::-webkit-scrollbar': { display: 'none' } }} spacing={0}>
+        <Stack sx={{ width: { xs: 40, md: 32, lg: 40 }, flexShrink: 0, overflowY: 'auto', alignItems: 'center', py: 1, borderRight: '1px solid', borderColor: 'divider', bgcolor: 'background.default', '&::-webkit-scrollbar': { display: 'none' } }} spacing={0}>
           {alphabet.map(char => (
             <Box key={char} onClick={() => scrollToLetter(char)}
               sx={{
@@ -398,7 +383,7 @@ const Sales = () => {
             </Box>
           ))}
         </Stack>
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
+        <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto', p: { xs: 1.5, md: 1, lg: 1.5 } }}>
           {todayCustomers.length > 0 && (
             <>
               <SectionLabel>Heute an der Theke ({todayCustomers.length})</SectionLabel>
@@ -546,7 +531,7 @@ const Sales = () => {
         mobileTab={mobileTab}
         onMobileTabChange={setMobileTab}
         mobileBar={mobileBar}
-        columns={{ md: '280px 1fr 280px', lg: '340px 1fr 320px' }}
+        columns={{ md: '250px 1fr 260px', lg: '300px 1fr 300px' }}
         height="100%"
       />
 
@@ -657,34 +642,6 @@ const Sales = () => {
             size="large"
             disabled={!num(topUpAmount) || num(topUpAmount) <= 0}
             onClick={() => {
-              if (!isOnline) {
-                const amount = num(topUpAmount);
-                addTransaction({
-                  isTopUp: true,
-                  customerId: bookingTarget.data.id,
-                  amount: amount,
-                  method: topUpMethod,
-                  reference: `Offline TopUp ${new Date().toLocaleTimeString()}`
-                });
-
-                // Optimistic Update
-                queryClient.setQueryData(['customers-sales'], (old) => {
-                  if (!old || !old.customers) return old;
-                  return {
-                    ...old,
-                    customers: old.customers.map(c =>
-                      c.id === bookingTarget.data.id
-                        ? { ...c, balance: c.balance + amount }
-                        : c
-                    )
-                  };
-                });
-
-                setShowTopUp(false);
-                setTopUpAmount('');
-                showFeedback('Offline: Aufladung gespeichert', 'info');
-                return;
-              }
               topUpMutation.mutate({ customerId: bookingTarget.data.id, amount: num(topUpAmount), method: topUpMethod });
             }}
             sx={{ py: 1.5, fontWeight: 800, borderRadius: 2, boxShadow: 4 }}
@@ -712,9 +669,11 @@ const Sales = () => {
                 const isAuslage = t.method === 'REIMBURSEMENT';
                 const isMigration = t.method === 'MIGRATION'; // Startguthaben aus Clubtouch 2.0: nicht stornierbar
                 // Gegenbuchungen (Storno einer Aufladung/Auslage) sind negative TopUps
-                const isPositive = isTopUp && Number(t.amount) >= 0;
+                // Storno eines Verkaufs: eigene REFUND-Zeile (Geld/Ware zurück), selbst nicht stornierbar
+                const isRefund = !isTopUp && (t.isRefund || t.txType === 'REFUND');
+                const isPositive = (isTopUp && Number(t.amount) >= 0) || isRefund;
                 // Auslagen werden nur über die Lieferantenrechnung zurückgebucht, Gegenbuchungen nicht erneut storniert
-                const canCancel = !t.cancelled && !isAuslage && !isMigration && !(isTopUp && Number(t.amount) < 0);
+                const canCancel = !t.cancelled && !isAuslage && !isMigration && !isRefund && !(isTopUp && Number(t.amount) < 0);
                 return (
                   <Card key={t.id} elevation={0} sx={{
                     border: '1px solid', borderColor: 'divider',
@@ -734,7 +693,7 @@ const Sales = () => {
 
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="body1" fontWeight={700} noWrap sx={{ textDecoration: t.cancelled ? 'line-through' : 'none' }}>
-                          {isAuslage ? (t.reference || 'Auslage') : isMigration && isPositive ? 'Übernahme Altsystem' : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}{t.method === 'CARD' && '(Karte)'}
+                          {isAuslage ? (t.reference || 'Auslage') : isMigration && isPositive ? 'Übernahme Altsystem' : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : isRefund ? 'Storno' : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}{t.method === 'CARD' && '(Karte)'}
                         </Typography>
 
                         {/* Sold Items List */}
@@ -866,14 +825,7 @@ const Sales = () => {
           <Button variant="outlined" color="inherit" fullWidth onClick={() => setShowCardConfirm(false)}>Abbrechen</Button>
           <Button variant="contained" color="info" fullWidth sx={{ fontWeight: 800 }}
             onClick={() => {
-              const items = toSalePayload(lines);
-              if (isOnline) {
-                quickSaleMutation.mutate({ paymentMethod: 'CARD', items });
-              } else {
-                addTransaction({ paymentMethod: 'CARD', items });
-                clearCart();
-                showFeedback('Offline: Kartenzahlung wurde gespeichert', 'info');
-              }
+              quickSaleMutation.mutate({ paymentMethod: 'CARD', items: toSalePayload(lines) });
               setShowCardConfirm(false);
             }}>
             Zahlung erfolgreich

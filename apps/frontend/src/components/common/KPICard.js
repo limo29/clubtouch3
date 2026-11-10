@@ -36,6 +36,9 @@ export default function KPICard({
         return str.startsWith('#') || str.startsWith('rgb') || str.startsWith('hsl');
     }
 
+    // Schrift passt sich der Textlänge an: Breite des Containers / (Zeichenzahl * mittlere Zeichenbreite)
+    const fitCqw = (100 / (Math.max(String(value ?? '').length, 4) * 0.5)).toFixed(2);
+
     return (
         <Card
             elevation={0}
@@ -114,18 +117,21 @@ export default function KPICard({
                     {loading ? (
                         <Skeleton variant="text" width="60%" sx={{ height: { xs: 32, sm: 60 }, bgcolor: 'rgba(255,255,255,0.2)' }} />
                     ) : (
-                        <Typography
-                            variant="h3"
-                            sx={{
-                                fontWeight: 800,
-                                textShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                                lineHeight: 1,
-                                fontSize: { xs: '1.6rem', sm: '2.4rem', md: '3rem' },
-                                whiteSpace: 'nowrap'
-                            }}
-                        >
-                            {value}
-                        </Typography>
+                        // Container: die Schrift schrumpft stufenlos, damit Werte bis 99.999,99 € in die Kachel passen
+                        <Box sx={{ containerType: 'inline-size', minWidth: 0 }}>
+                            <Typography
+                                variant="h3"
+                                sx={{
+                                    fontWeight: 800,
+                                    textShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                                    lineHeight: 1,
+                                    fontSize: { xs: `min(1.6rem, ${fitCqw}cqw)`, sm: `min(2.4rem, ${fitCqw}cqw)`, md: `min(3rem, ${fitCqw}cqw)` },
+                                    whiteSpace: 'nowrap'
+                                }}
+                            >
+                                {value}
+                            </Typography>
+                        </Box>
                     )}
                 </Box>
 

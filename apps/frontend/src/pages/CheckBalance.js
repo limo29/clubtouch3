@@ -144,7 +144,10 @@ export default function CheckBalance() {
                                                 fontWeight="bold"
                                                 color={item.amount > 0 ? 'success.main' : item.amount < 0 ? 'text.primary' : 'text.secondary'}
                                             >
-                                                {item.amount > 0 ? '+' : ''}{money(item.amount)}
+                                                {/* Bar/Karte bezahlte Einkäufe berühren das Guthaben nicht: Zahlart statt „0,00 €“ */}
+                                                {item.type !== 'TOPUP' && !item.cancelled && item.paymentMethod && item.paymentMethod !== 'ACCOUNT'
+                                                    ? (item.paymentMethod === 'CARD' ? 'Karte' : 'bar bezahlt')
+                                                    : `${item.amount > 0 ? '+' : ''}${money(item.amount)}`}
                                             </Typography>
                                         </Stack>
                                     ))}

@@ -10,26 +10,38 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Use Node.js 22.x
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: 22.x
+        cache: npm
+        cache-dependency-path: apps/backend/package-lock.json
     - name: Install Backend Dependencies
       working-directory: ./apps/backend
-      run: npm install
+      run: npm ci
+    - name: Syntax-Check (alle Quelldateien)
+      working-directory: ./apps/backend
+      run: find src prisma -name '*.js' -print0 | xargs -0 -n1 node --check
+    - name: Prisma-Schema prüfen
+      working-directory: ./apps/backend
+      env:
+        DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      run: npx prisma validate
 
   frontend:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Use Node.js 22.x
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: 22.x
+        cache: npm
+        cache-dependency-path: apps/frontend/package-lock.json
     - name: Install Frontend Dependencies
       working-directory: ./apps/frontend
-      run: npm install
+      run: npm ci
     - name: Build Frontend
       working-directory: ./apps/frontend
       run: npm run build

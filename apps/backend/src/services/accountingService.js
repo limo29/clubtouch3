@@ -2,6 +2,7 @@ const prisma = require('../utils/prisma');
 const cashCountService = require('./cashCountService');
 const cashMovementService = require('./cashMovementService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
+const closedPeriod = require('../utils/closedPeriod');
 
 function dec(n) { return Number(n || 0); }
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -15,7 +16,8 @@ class AccountingService {
    * Einnahmen   = Verkäufe (Transaction SALE, cancelled=false; bar + Kundenkonto)
    *             + bezahlte Kundenrechnungen (Invoice PAID, paidAt im Zeitraum)
    *             + sonstige Bareinnahmen (CashMovement OTHER_INCOME, nicht storniert)
-   * Ausgaben    = bezahlte Lieferantenrechnungen (PurchaseDocument RECHNUNG, paid=true, documentDate im Zeitraum)
+   * Ausgaben    = bezahlte Lieferantenrechnungen (PurchaseDocument RECHNUNG, paid=true, Zahldatum paidAt
+   *               im Zeitraum, Zuflussprinzip; Altbelege ohne paidAt nach documentDate)
    *             + sonstige Barausgaben (CashMovement OTHER_EXPENSE, nicht storniert)
    * nonRevenue  = Eigenverbrauch (OWNER_USE) und Abgelaufen (EXPIRED): KEINE Einnahmen,
    *               nur Menge und Warenwert (Verkaufspreis) je Artikel
@@ -23,7 +25,8 @@ class AccountingService {
    *               kein Ertrag), Gästeguthaben zum Stichtag
    *             + Kassenbewegungen (DEPOSIT_TO_BANK/WITHDRAWAL_FROM_BANK: ergebnisneutral, nur Liquidität)
    *               als liquidity.cashMovements und liquidity.cashMovementItems
-   * liabilities = offene Lieferantenrechnungen, receivables = offene Kundenrechnungen
+   * liabilities = zum Stichtag offene Lieferantenrechnungen (documentDate bis Zeitraumende und
+   *               unbezahlt oder erst nach dem Zeitraumende bezahlt), receivables = offene Kundenrechnungen
    *
    * Rückgabeform: `summary`/`details` bleiben abwärtskompatibel (ProfitLoss.js liest
    * summary.totalIncome/totalExpenses/profit, details.incomeByCategory/incomeByArticle/
@@ -46,6 +49,9 @@ class AccountingService {
       GROUP BY a.id, a.name, a.category, a.unit
       ORDER BY amount DESC, quantity DESC
     `;
+
+    // Bezahlte Lieferantenrechnungen nach Zahldatum (Fallback Belegdatum, wenn paidAt fehlt)
+    const paidInPeriod = { OR: [{ paidAt: { gte: start, lte: end } }, { paidAt: null, documentDate: { gte: start, lte: end } }] };
 
     const [
       txCash, txAccount,
@@ -77,20 +83,21 @@ class AccountingService {
       itemsByArticle('EXPIRED'),
       itemsByArticle('OWNER_USE'),
       prisma.purchaseDocument.aggregate({
-        where: { type: 'RECHNUNG', paid: true, documentDate: { gte: start, lte: end } },
+        where: { type: 'RECHNUNG', paid: true, ...paidInPeriod },
         _sum: { totalAmount: true }, _count: true
       }),
       prisma.$queryRaw`
         SELECT "supplier" AS supplier, COUNT(*) AS count, SUM("totalAmount") AS amount
         FROM "PurchaseDocument"
         WHERE type='RECHNUNG' AND paid = true
-          AND "documentDate" >= (${start}::timestamptz AT TIME ZONE 'UTC') AND "documentDate" <= (${end}::timestamptz AT TIME ZONE 'UTC')
+          AND COALESCE("paidAt", "documentDate") >= (${start}::timestamptz AT TIME ZONE 'UTC')
+          AND COALESCE("paidAt", "documentDate") <= (${end}::timestamptz AT TIME ZONE 'UTC')
         GROUP BY supplier
         ORDER BY amount DESC
       `,
       prisma.purchaseDocument.findMany({
-        where: { type: 'RECHNUNG', paid: true, documentDate: { gte: start, lte: end } },
-        orderBy: { documentDate: 'asc' },
+        where: { type: 'RECHNUNG', paid: true, ...paidInPeriod },
+        orderBy: [{ paidAt: 'asc' }, { documentDate: 'asc' }],
         select: {
           id: true, documentNumber: true, supplier: true, documentDate: true, paidAt: true,
           paymentMethod: true, totalAmount: true, nachweisUrl: true, paid: true, description: true
@@ -107,9 +114,10 @@ class AccountingService {
         orderBy: { dueDate: 'asc' },
         select: { id: true, invoiceNumber: true, customerName: true, description: true, createdAt: true, dueDate: true, status: true, totalAmount: true }
       }),
-      // Verbindlichkeiten: offene Lieferantenrechnungen, Stichtag = Zeitraumende
+      // Verbindlichkeiten: zum Stichtag (Zeitraumende) offene Lieferantenrechnungen nach Belegdatum;
+      // auch solche, die erst nach dem Stichtag bezahlt wurden (sonst fehlten sie in jedem Abschluss)
       prisma.purchaseDocument.findMany({
-        where: { type: 'RECHNUNG', paid: false, documentDate: { lte: end } },
+        where: { type: 'RECHNUNG', documentDate: { lte: end }, OR: [{ paid: false }, { paid: true, paidAt: { gt: end } }] },
         orderBy: { documentDate: 'asc' },
         select: { id: true, documentNumber: true, supplier: true, documentDate: true, dueDate: true, totalAmount: true, nachweisUrl: true, description: true }
       }),
@@ -281,8 +289,8 @@ class AccountingService {
    *                sonst 0 (KEIN_VORJAHR)
    *   + Einzahlungen aus der Kasse      (CashMovement DEPOSIT_TO_BANK, nicht storniert)
    *   + Aufladungen per Überweisung     (AccountTopUp.method = TRANSFER)
-   *   + bezahlte Kundenrechnungen     (Invoice PAID, paidAt im Zeitraum; es gibt keine Zahlungsart,
-   *                                      Kundenrechnungen gelten als Bankeingang)
+   *   + bezahlte Kundenrechnungen     (Invoice PAID, paidAt im Zeitraum, paymentMethod TRANSFER oder
+   *                                      null = Altbestand; bar bezahlte nur nachrichtlich, laufen über die Kasse)
    *   - per Überweisung bezahlte Einkäufe (PurchaseDocument RECHNUNG, paid, paymentMethod TRANSFER,
    *                                      paidAt-Fallback documentDate wie in cashCountService)
    *   - Abhebungen für die Kasse        (CashMovement WITHDRAWAL_FROM_BANK, nicht storniert)
@@ -444,25 +452,46 @@ class AccountingService {
       .filter((a) => Number.isFinite(a.balance));
   }
 
-  async addBankBalance({ date, isOpening = false, accounts, note, userId }) {
+  async addBankBalance({ date, isOpening = false, accounts, note, userId, confirmClosed = false }) {
     const list = this._normalizeAccounts(accounts);
     if (!list.length) throw new Error('Mindestens ein Konto mit Kontostand angeben');
     const when = date ? new Date(date) : new Date();
     if (Number.isNaN(when.getTime())) throw new Error('Ungültiges Datum');
     if (when > new Date(Date.now() + 60_000)) throw new Error('Datum liegt in der Zukunft');
-    const row = await prisma.bankBalance.create({
-      data: { date: when, isOpening: !!isOpening, accountsJson: list, total: sumBy(list, (a) => a.balance), note: note ? String(note).trim() || null : null, userId },
+    return prisma.$transaction(async (tx) => {
+      // Kontostand mit Datum in einem abgeschlossenen Geschäftsjahr → 409 ohne Bestätigung
+      const closedYears = await closedPeriod.guard([when], confirmClosed, tx);
+      const row = await tx.bankBalance.create({
+        data: { date: when, isOpening: !!isOpening, accountsJson: list, total: sumBy(list, (a) => a.balance), note: note ? String(note).trim() || null : null, userId },
+      });
+      await tx.auditLog.create({
+        data: { userId, action: isOpening ? 'BANK_OPENING' : 'BANK_BALANCE_CHECK', entityType: 'BankBalance', entityId: row.id, changes: { date: when, total: row.total, accounts: list } },
+      });
+      await closedPeriod.logChange(tx, closedYears, {
+        userId, entityType: 'BankBalance', entityId: row.id,
+        operation: isOpening ? 'Bank-Anfangsstand nachgetragen' : 'Kontostand nachgetragen',
+        description: `${isOpening ? 'Bank-Anfangsstand' : 'Kontostand laut Auszug'} zum ${closedPeriod.fmtDate(when)} nachgetragen, ${closedPeriod.fmtEUR(row.total)} (kein Ertrag, nur Bank-Abstimmung)`,
+        effect: null,
+      });
+      return row;
     });
-    await prisma.auditLog.create({
-      data: { userId, action: isOpening ? 'BANK_OPENING' : 'BANK_BALANCE_CHECK', entityType: 'BankBalance', entityId: row.id, changes: { date: when, total: row.total, accounts: list } },
-    });
-    return row;
   }
 
-  async deleteBankBalance(id, userId) {
-    const row = await prisma.bankBalance.delete({ where: { id } });
-    await prisma.auditLog.create({ data: { userId, action: 'BANK_BALANCE_DELETE', entityType: 'BankBalance', entityId: id, changes: { date: row.date, total: row.total, isOpening: row.isOpening } } });
-    return row;
+  async deleteBankBalance(id, userId, { confirmClosed = false } = {}) {
+    return prisma.$transaction(async (tx) => {
+      const existing = await tx.bankBalance.findUnique({ where: { id } });
+      if (!existing) throw Object.assign(new Error('Kontostand nicht gefunden'), { code: 'P2025' });
+      const closedYears = await closedPeriod.guard([existing.date], confirmClosed, tx);
+      const row = await tx.bankBalance.delete({ where: { id } });
+      await tx.auditLog.create({ data: { userId, action: 'BANK_BALANCE_DELETE', entityType: 'BankBalance', entityId: id, changes: { date: row.date, total: row.total, isOpening: row.isOpening } } });
+      await closedPeriod.logChange(tx, closedYears, {
+        userId, entityType: 'BankBalance', entityId: id,
+        operation: row.isOpening ? 'Bank-Anfangsstand gelöscht' : 'Kontostand gelöscht',
+        description: `${row.isOpening ? 'Bank-Anfangsstand' : 'Kontostand laut Auszug'} zum ${closedPeriod.fmtDate(row.date)} gelöscht, ${closedPeriod.fmtEUR(row.total)} (kein Ertrag, nur Bank-Abstimmung)`,
+        effect: null,
+      });
+      return row;
+    });
   }
 
   /** Anfangsstand + Abgleiche, je Abgleich mit Bank-Soll der App zum selben Zeitpunkt und Differenz */
@@ -501,20 +530,34 @@ class AccountingService {
 
   /** Liste Geschäftsjahre */
   async listFiscalYears() {
-    return prisma.fiscalYear.findMany({
-      include: { report: true },
-      orderBy: [{ startDate: 'desc' }]
-    });
+    const [years, changeCounts] = await Promise.all([
+      prisma.fiscalYear.findMany({
+        include: { report: true },
+        orderBy: [{ startDate: 'desc' }]
+      }),
+      closedPeriod.countByYear()
+    ]);
+    // Je geschlossenem Jahr: Anzahl nachträglicher Änderungen nach dem Abschluss (AuditLog CLOSED_PERIOD_CHANGE)
+    return years.map((fy) => ({ ...fy, closedPeriodChanges: fy.closed ? (changeCounts.get(fy.id) || 0) : 0 }));
   }
 
-  /** Geschäftsjahr anlegen */
+  /** Geschäftsjahr anlegen (darf sich mit keinem bestehenden Jahr überschneiden) */
   async createFiscalYear({ name, startDate, endDate }) {
-    if (!name || !startDate || !endDate) throw new Error('Name, Start- und Enddatum sind erforderlich');
+    const cleanName = typeof name === 'string' ? name.trim() : '';
+    if (!cleanName || !startDate || !endDate) throw new Error('Name, Start- und Enddatum sind erforderlich');
     const start = parseLocalDate(startDate);
     const end = parseLocalDate(endDate);
     if (!start || !end) throw new Error('Ungültiges Datum');
     if (end < start) throw new Error('Enddatum liegt vor dem Startdatum');
-    return prisma.fiscalYear.create({ data: { name, startDate: start, endDate: end } });
+    // Tage inklusive: [start, end] überschneidet [s, e], wenn s <= end und e >= start
+    const overlap = await prisma.fiscalYear.findFirst({
+      where: { startDate: { lte: end }, endDate: { gte: start } },
+      orderBy: { startDate: 'asc' }
+    });
+    if (overlap) {
+      throw new Error(`Zeitraum überschneidet sich mit dem Geschäftsjahr „${overlap.name}“ (${fmtDateDE(overlap.startDate)} – ${fmtDateDE(overlap.endDate)})`);
+    }
+    return prisma.fiscalYear.create({ data: { name: cleanName, startDate: start, endDate: end } });
   }
 
   /** Aktueller Systembestand als Snapshot-Zeilen */
@@ -597,22 +640,32 @@ class AccountingService {
       };
     });
 
-    const customers = await prisma.customer.findMany({
-      where: { balance: { not: 0 } },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true, nickname: true, balance: true }
-    });
-    const customerBalances = customers.map(c => ({
-      customerId: c.id, name: c.name, nickname: c.nickname, balance: dec(c.balance)
-    }));
-    const guestBalance = sumBy(customerBalances, c => c.balance);
-
     const banks = Array.isArray(bankAccounts)
       ? bankAccounts.map(b => ({ name: b.name || '', iban: b.iban || '', balance: dec(b.balance) }))
       : [];
 
+    // v4: Kassenzählungen des Jahres, Stornos/Korrekturen, Gästeguthaben zum Stichtag (statt "jetzt")
+    // mit Guthaben-Abstimmung und Geldbestand-Überleitung (yearEndExtrasService)
+    const yearEndExtrasService = require('./yearEndExtrasService');
+    const extras = await yearEndExtrasService.build(fy, {
+      profit: eur.summary.profit,
+      bankRecon: this._withActual(bankRecon, banks),
+      cashCount,
+      bankAccounts: banks,
+      cashCountWindow: this._cashCountWindow(fy),
+      draft
+    });
+    inventoryDiff.forEach(r => { r.active = extras.articleActive.has(r.articleId) ? extras.articleActive.get(r.articleId) : true; });
+    const customerBalances = extras.guestBalances.customerBalances;
+    const guestBalance = extras.guestBalances.totals.net;
+    const { customerBalances: _cb, ...guestBalancesInfo } = extras.guestBalances;
+
     return {
-      version: 3,
+      version: 4,
+      cashCounts: extras.cashCounts,
+      corrections: extras.corrections,
+      guestBalances: guestBalancesInfo,
+      liquidityBridge: extras.liquidityBridge,
       draft,
       closedAt: draft ? null : new Date(),
       generatedAt: new Date(),
@@ -653,7 +706,8 @@ class AccountingService {
         expectedTotal: dec(cashCount.expectedTotal),
         difference: dec(cashCount.difference),
         countedBy: cashCount.user ? cashCount.user.name : null,
-        note: cashCount.note || null
+        note: cashCount.note || null,
+        isOpening: !!cashCount.isOpening
       } : null,
       inventory: { system, physical: inventoryPhysical, diff: inventoryDiff }
     };
@@ -694,6 +748,7 @@ class AccountingService {
       const updated = await tx.fiscalYear.update({ where: { id: fy.id }, data: { closed: true } });
       return { fiscalYear: updated, report };
     });
+    closedPeriod.invalidate(); // Sperre greift ab sofort
 
     return result;
   }
@@ -758,14 +813,6 @@ class AccountingService {
     };
   }
 
-  /** Ein einzelner Bericht (für PDF) */
-  async getYearEndReport(fiscalYearId) {
-    return prisma.yearEndReport.findFirst({
-      where: { fiscalYearId },
-      include: { fiscalYear: true }
-    });
-  }
-
   /**
    * Live-Vorschau für den Abschluss eines (offenen) Geschäftsjahres.
    * Datenbasis ist getProfitLoss, damit Vorschau, Abschluss und PDF dieselben Zahlen zeigen.
@@ -783,6 +830,14 @@ class AccountingService {
 
     const { start, end } = this._cashCountWindow(fy);
     const cashCount = await cashCountService.getLatestInPeriod(start, end);
+    // Gästeguthaben zum Stichtag (wie im Abschluss-Snapshot) und alle Zählungen im Fenster
+    const yearEndExtrasService = require('./yearEndExtrasService');
+    const yw = yearEndExtrasService.yearWindow(fy);
+    const [guestBalances, cashCounts] = await Promise.all([
+      yearEndExtrasService.getGuestBalances(yw.start, yw.end),
+      yearEndExtrasService.getCashCounts({ start, end })
+    ]);
+    const { customerBalances: _cb, ...guestBalancesInfo } = guestBalances;
 
     return {
       fiscalYear: fy,
@@ -795,7 +850,9 @@ class AccountingService {
       expiredArticles: eur.nonRevenue.expired.items,
       ownerUseArticles: eur.nonRevenue.ownerUse.items,
       nonRevenue: eur.nonRevenue,
-      liquidity: eur.liquidity,
+      liquidity: { ...eur.liquidity, guestBalanceEnd: guestBalances.totals.net },
+      guestBalances: guestBalancesInfo,
+      cashCounts,
       expensesByType: eur.details.expensesByType,
       cashMovements: {
         bankDeposits: eur.liquidity.cashMovements.bankDeposits,

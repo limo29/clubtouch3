@@ -9,7 +9,7 @@ import {
   Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, InputAdornment, Skeleton, Stack, TextField, Tooltip, Typography,
 } from '@mui/material';
 import { AccountBalance, DeleteOutline, FactCheck } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DatePicker } from '../common/SafeDatePickers';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import api from '../../services/api';

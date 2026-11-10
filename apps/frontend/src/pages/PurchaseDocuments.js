@@ -34,7 +34,7 @@ import {
   ReceiptLong,
   LocalShipping,
 } from "@mui/icons-material";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import { DatePicker } from '../components/common/SafeDatePickers';
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import { useTheme, alpha } from "@mui/material/styles";
@@ -218,8 +218,8 @@ export default function PurchaseDocuments() {
 
   /* -------- Mutations -------- */
   const markPaid = useMutation({
-    mutationFn: ({ id, paymentMethod, reimbursedCustomerId }) =>
-      api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod, reimbursedCustomerId }),
+    mutationFn: ({ id, paymentMethod, reimbursedCustomerId, paidAt }) =>
+      api.post(`/purchase-documents/${id}/mark-paid`, { paymentMethod, reimbursedCustomerId, paidAt }),
     onSuccess: () => {
       setPayingDoc(null);
       invalidate(queryClient, "purchases", "finance", "customers");

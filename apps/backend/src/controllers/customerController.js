@@ -1,5 +1,7 @@
 const customerService = require('../services/customerService');
 const prisma = require('../utils/prisma');
+const { sendError } = require('../utils/httpError');
+const closedPeriod = require('../utils/closedPeriod');
 
 // Kontaktfelder und die Rollen, die sie sehen und ändern dürfen
 const CONTACT_FIELDS = ['company', 'street', 'zip', 'city', 'phone', 'email'];
@@ -81,16 +83,7 @@ class CustomerController {
         customer: stripContact(customer, role),
       });
     } catch (error) {
-      console.error('Create customer error:', error);
-
-      if (error.message.includes('existiert bereits')) {
-        return res.status(400).json({ error: error.message });
-      }
-      if (error.userError) {
-        return res.status(error.status || 400).json({ error: error.message });
-      }
-
-      res.status(500).json({ error: 'Fehler beim Erstellen des Kunden' });
+      sendError(res, error, 'Fehler beim Erstellen des Kunden', 'Create customer error:');
     }
   }
 
@@ -123,26 +116,26 @@ class CustomerController {
         customer: stripContact(customer, role),
       });
     } catch (error) {
-      console.error('Update customer error:', error);
-
-      if (error.message.includes('existiert bereits')) {
-        return res.status(400).json({ error: error.message });
-      }
-      if (error.userError) {
-        return res.status(error.status || 400).json({ error: error.message });
-      }
-
-      res.status(500).json({ error: 'Fehler beim Aktualisieren des Kunden' });
+      sendError(res, error, 'Fehler beim Aktualisieren des Kunden', 'Update customer error:');
     }
   }
 
-  // Guthaben aufladen
+  // Guthaben aufladen (mit clientId idempotent: Wiederholung → 200 mit der Original-Aufladung und duplicate: true)
   async topUpAccount(req, res) {
     try {
       const { id } = req.params;
-      const { amount, method, reference } = req.body;
+      const { amount, method, reference, clientId, clientCreatedAt } = req.body;
 
-      const result = await customerService.topUpAccount(id, amount, method, reference);
+      const result = await customerService.topUpAccount(id, amount, method, reference, { clientId, clientCreatedAt, userId: req.user.id });
+
+      if (result.duplicate) {
+        return res.json({
+          message: 'Aufladung wurde bereits gebucht',
+          topUp: result.topUp,
+          customer: stripContact(result.customer, req.user?.role),
+          duplicate: true,
+        });
+      }
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -155,6 +148,7 @@ class CustomerController {
             amount,
             method,
             reference,
+            clientId: result.topUp.clientId || undefined,
             newBalance: result.customer.balance,
           },
         },
@@ -166,8 +160,7 @@ class CustomerController {
         customer: stripContact(result.customer, req.user?.role),
       });
     } catch (error) {
-      console.error('Top up account error:', error);
-      res.status(500).json({ error: error.message || 'Fehler beim Aufladen des Guthabens' });
+      sendError(res, error, 'Fehler beim Aufladen des Guthabens', 'Top up account error:');
     }
   }
 
@@ -201,12 +194,15 @@ class CustomerController {
         ? parseLocalDate(startDate)
         : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return res.status(400).json({ error: 'Ungültiger Zeitraum' });
+      }
+
       const statement = await customerService.getAccountStatement(id, start, end);
 
       res.json(statement);
     } catch (error) {
-      console.error('Get account statement error:', error);
-      res.status(500).json({ error: 'Fehler beim Erstellen des Kontoauszugs' });
+      sendError(res, error, 'Fehler beim Erstellen des Kontoauszugs', 'Get account statement error:');
     }
   }
 
@@ -244,7 +240,7 @@ class CustomerController {
   async reverseTopUp(req, res) {
     try {
       const { id, topUpId } = req.params;
-      const reversal = await customerService.reverseTopUp(topUpId, req.user.id);
+      const reversal = await customerService.reverseTopUp(topUpId, req.user.id, id, { confirmClosed: closedPeriod.isConfirmed(req) });
 
       // Audit-Log
       await prisma.auditLog.create({
@@ -259,8 +255,7 @@ class CustomerController {
 
       res.json({ message: 'Aufladung erfolgreich storniert', reversal });
     } catch (error) {
-      console.error('Reverse topup error:', error);
-      res.status(500).json({ error: error.message || 'Fehler beim Stornieren der Aufladung' });
+      sendError(res, error, 'Fehler beim Stornieren der Aufladung', 'Reverse topup error:');
     }
   }
 }

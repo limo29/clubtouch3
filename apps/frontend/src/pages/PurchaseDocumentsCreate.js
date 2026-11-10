@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -20,7 +20,7 @@ import {
   Alert,
   FormControlLabel,
 } from "@mui/material";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import { DatePicker } from '../components/common/SafeDatePickers';
 import {
   ArrowBack as ArrowBackIcon,
   Save as SaveIcon,
@@ -37,6 +37,7 @@ import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
 import { invalidate } from '../utils/invalidate';
 import ReimbursementCustomerField, { PAYMENT_METHOD_LABELS } from "../components/purchases/ReimbursementCustomerField";
+import PaidAtField, { isValidPaidAt, toPaidAtIso } from "../components/purchases/PaidAtField";
 import EnteredByField from "../components/purchases/EnteredByField";
 import { useAuth } from "../context/AuthContext";
 
@@ -57,6 +58,15 @@ export default function PurchaseDocumentCreate() {
 
   const [file, setFile] = useState(null);
   const [formError, setFormError] = useState(null);
+  // Handy: Pflichtfelder liegen im Tab „Beleg“. Bei Fehlern dorthin wechseln, Meldung zeigen und das Feld fokussieren
+  const [mobileTab, setMobileTab] = useState(0);
+  const formRef = useRef(null);
+  const showProblem = (msg) => {
+    setFormError(msg);
+    setMobileTab(0);
+    setTimeout(() => formRef.current?.querySelector('[aria-invalid="true"]')?.focus(), 120);
+  };
+  const onInvalid = () => showProblem("Bitte die markierten Pflichtfelder ausfüllen.");
 
   /* ---------------------------- React Hook Form --------------------------- */
   const { control, handleSubmit, watch } = useForm({
@@ -68,6 +78,7 @@ export default function PurchaseDocumentCreate() {
       enteredBy: user?.name || "",
       totalAmount: "",
       paid: false,
+      paidAt: new Date(),
       paymentMethod: "TRANSFER",
       reimbursedCustomerId: "",
     },
@@ -102,7 +113,7 @@ export default function PurchaseDocumentCreate() {
       invalidate(queryClient, "purchases", "stock", "finance", "customers");
       navigate("/purchases");
     },
-    onError: (err) => console.error("Fehler beim Erstellen:", err),
+    onError: (err) => { console.error("Fehler beim Erstellen:", err); setMobileTab(0); },
   });
 
   /* ---------------------------- Delivery Notes ---------------------------- */
@@ -129,18 +140,22 @@ export default function PurchaseDocumentCreate() {
     const supplierValue = data.supplier;
 
     if (typeof supplierValue !== "string" || !supplierValue.trim()) {
-      setFormError("Bitte einen Lieferanten auswählen oder eintippen.");
+      showProblem("Bitte einen Lieferanten auswählen oder eintippen.");
       return;
     }
     if (isRechnung && data.paid && data.paymentMethod === "ACCOUNT") {
       if (!data.reimbursedCustomerId) {
-        setFormError("Bitte wählen, wer die Rechnung ausgelegt hat.");
+        showProblem("Bitte wählen, wer die Rechnung ausgelegt hat.");
         return;
       }
       if (!(Number(data.totalAmount) > 0)) {
-        setFormError("Für eine Auslage muss der Gesamtbetrag größer als 0 sein.");
+        showProblem("Für eine Auslage muss der Gesamtbetrag größer als 0 sein.");
         return;
       }
+    }
+    if (isRechnung && data.paid && !isValidPaidAt(data.paidAt)) {
+      showProblem("Bitte ein gültiges Datum bei „Bezahlt am“ wählen.");
+      return;
     }
     setFormError(null);
 
@@ -155,6 +170,7 @@ export default function PurchaseDocumentCreate() {
       formData.append("totalAmount", data.totalAmount || "0");
       formData.append("paid", data.paid);
       if (data.paid) formData.append("paymentMethod", data.paymentMethod);
+      if (data.paid) formData.append("paidAt", toPaidAtIso(data.paidAt) || "");
       if (data.paid && data.paymentMethod === "ACCOUNT") formData.append("reimbursedCustomerId", data.reimbursedCustomerId);
       if (data.dueDate) formData.append("dueDate", data.dueDate.toISOString());
 
@@ -355,6 +371,13 @@ export default function PurchaseDocumentCreate() {
                 )}
               />
             )}
+            {watchedPaid && (
+              <Controller
+                name="paidAt"
+                control={control}
+                render={({ field }) => <PaidAtField value={field.value} onChange={field.onChange} />}
+              />
+            )}
             {watchedPaid && watchedMethod === "ACCOUNT" && (
               <Controller
                 name="reimbursedCustomerId"
@@ -394,7 +417,9 @@ export default function PurchaseDocumentCreate() {
   return (
     <Box
       component="form"
-      onSubmit={handleSubmit(onSubmit)}
+      noValidate
+      ref={formRef}
+      onSubmit={handleSubmit(onSubmit, onInvalid)}
       sx={{ height: "calc(100vh - 80px)", display: "flex", flexDirection: "column", minHeight: 0 }}
     >
       {/* Header */}
@@ -444,6 +469,8 @@ export default function PurchaseDocumentCreate() {
           sidebar={sidebar}
           sidebarLabel="Beleg"
           linesLabel="Positionen"
+          mobileTab={mobileTab}
+          onMobileTabChange={setMobileTab}
         />
       </Box>
 

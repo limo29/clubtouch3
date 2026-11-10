@@ -22,7 +22,6 @@ export const API_ENDPOINTS = {
 
   // Transactions
   TRANSACTIONS: '/transactions',
-  QUICK_SALE: '/transactions/quick-sale',
   DAILY_SUMMARY: '/transactions/daily-summary',
 
   // Highscore

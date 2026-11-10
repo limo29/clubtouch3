@@ -12,15 +12,17 @@ function initializeWebSocket(server) {
           return callback(null, true);
         }
 
-        // In development, allow all origins (e.g. LAN IPs)
-        if (process.env.NODE_ENV === 'development') {
+        // Außerhalb von Production alles erlauben (z. B. LAN-IPs)
+        if (process.env.NODE_ENV !== 'production') {
           return callback(null, true);
         }
 
-        // In production, strictly check against allowed origin
-        const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
-        // Allow Railway domains, localhost, or exact match
-        if (origin === allowedOrigin || (origin && origin.includes('railway.app')) || (origin && origin.includes('localhost'))) {
+        // Production: exakter Vergleich mit FRONTEND_URL (kommagetrennte Liste möglich)
+        const allowed = (process.env.FRONTEND_URL || 'http://localhost:3000')
+          .split(',')
+          .map((u) => u.trim().replace(/\/+$/, ''))
+          .filter(Boolean);
+        if (allowed.includes(origin.replace(/\/+$/, ''))) {
           callback(null, true);
         } else {
           console.warn('Blocked CORS origin:', origin);

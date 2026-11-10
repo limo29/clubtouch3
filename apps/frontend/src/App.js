@@ -1,12 +1,15 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './services/queryClient';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { de } from 'date-fns/locale';
+import { deDE } from '@mui/x-date-pickers/locales';
 
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
+import ClosedPeriodDialog from './components/common/ClosedPeriodDialog';
 import Layout from './components/layout/Layout';
 
 // Pages
@@ -31,21 +34,16 @@ import AdminAds from './pages/AdminAds';
 import CheckBalance from './pages/CheckBalance';
 import { PERMISSIONS } from './config/permissions';
 
-// React Query Client
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
-      staleTime: 5 * 60 * 1000,
-    },
-  },
-});
+// React Query Client (gemeinsam mit OfflineContext; spiegelt die Daten der Verkaufsseite für offline)
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={de}>
+      {/* deutsche Texte in den Datumsauswahlen („Datum auswählen“, „Abbrechen“ statt „SELECT DATE“, „Cancel“) */}
+      <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={de}
+        localeText={deDE.components.MuiLocalizationProvider.defaultProps.localeText}>
+        {/* Rückfrage bei Änderungen in abgeschlossenen Geschäftsjahren (services/api.js) */}
+        <ClosedPeriodDialog />
         <AuthProvider>
           {/* KEIN <Router> HIER! Router ist bereits in index.js */}
           <Routes>

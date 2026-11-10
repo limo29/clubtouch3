@@ -29,7 +29,7 @@ import {
   Checkbox,
   Divider,
 } from "@mui/material";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import { DatePicker } from '../components/common/SafeDatePickers';
 import {
   ArrowBack as ArrowBackIcon,
   Save as SaveIcon,
@@ -46,6 +46,7 @@ import { useArticles } from "../hooks/useArticles";
 import LinkedLieferscheineInfo from "../components/purchases/LinkedLieferscheineInfo";
 import { invalidate } from '../utils/invalidate';
 import ReimbursementCustomerField, { PAYMENT_METHOD_LABELS } from "../components/purchases/ReimbursementCustomerField";
+import PaidAtField, { isValidPaidAt, toPaidAtIso } from "../components/purchases/PaidAtField";
 import EnteredByField from "../components/purchases/EnteredByField";
 
 /* -------------------------------------------------------------------------- */
@@ -61,6 +62,15 @@ export default function PurchaseDocumentEdit() {
 
   const [file, setFile] = useState(null);
   const [formError, setFormError] = useState(null);
+  // Handy: Pflichtfelder liegen im Tab „Beleg“. Bei Fehlern dorthin wechseln, Meldung zeigen und das Feld fokussieren
+  const [mobileTab, setMobileTab] = useState(0);
+  const formRef = useRef(null);
+  const showProblem = (msg) => {
+    setFormError(msg);
+    setMobileTab(0);
+    setTimeout(() => formRef.current?.querySelector('[aria-invalid="true"]')?.focus(), 120);
+  };
+  const onInvalid = () => showProblem("Bitte die markierten Pflichtfelder ausfüllen.");
   const [linkedLieferscheinIds, setLinkedLieferscheinIds] = useState(new Set());
   const initializedRef = useRef(false);
 
@@ -76,6 +86,7 @@ export default function PurchaseDocumentEdit() {
       enteredBy: "",
       totalAmount: "",
       paid: false,
+      paidAt: new Date(),
       paymentMethod: "TRANSFER",
       reimbursedCustomerId: "",
       dueDate: null,
@@ -136,6 +147,7 @@ export default function PurchaseDocumentEdit() {
       enteredBy: documentData.enteredBy || "",
       totalAmount: documentData.totalAmount || "",
       paid: documentData.paid || false,
+      paidAt: documentData.paidAt ? new Date(documentData.paidAt) : new Date(),
       paymentMethod: documentData.paymentMethod || "TRANSFER",
       reimbursedCustomerId: documentData.reimbursedCustomerId || "",
       dueDate: documentData.dueDate ? new Date(documentData.dueDate) : null,
@@ -156,6 +168,7 @@ export default function PurchaseDocumentEdit() {
     mutationFn: (formData) =>
       api.patch(`/purchase-documents/${id}`, formData, { headers: { "Content-Type": "multipart/form-data" } }),
     onSuccess: () => triggerLinkMutations(),
+    onError: () => setMobileTab(0), // Fehlermeldung steht im Tab „Beleg“
   });
 
   const linkMutation = useMutation({
@@ -171,11 +184,15 @@ export default function PurchaseDocumentEdit() {
   const onSubmit = (data) => {
     const isAuslage = documentData?.type === "RECHNUNG" && data.paid && data.paymentMethod === "ACCOUNT";
     if (isAuslage && !credited && !data.reimbursedCustomerId && !legacyAccount) {
-      setFormError("Bitte wählen, wer die Rechnung ausgelegt hat.");
+      showProblem("Bitte wählen, wer die Rechnung ausgelegt hat.");
       return;
     }
     if (isAuslage && !credited && data.reimbursedCustomerId && !(Number(data.totalAmount) > 0)) {
-      setFormError("Für eine Auslage muss der Gesamtbetrag größer als 0 sein.");
+      showProblem("Für eine Auslage muss der Gesamtbetrag größer als 0 sein.");
+      return;
+    }
+    if (documentData?.type === "RECHNUNG" && data.paid && !isValidPaidAt(data.paidAt)) {
+      showProblem("Bitte ein gültiges Datum bei „Bezahlt am“ wählen.");
       return;
     }
     setFormError(null);
@@ -189,6 +206,11 @@ export default function PurchaseDocumentEdit() {
       formData.append("totalAmount", data.totalAmount || "0");
       formData.append("paid", data.paid);
       if (data.paid) formData.append("paymentMethod", data.paymentMethod);
+      // Zahldatum nur senden, wenn neu bezahlt oder der Tag geändert wurde (sonst bleibt der gespeicherte Zeitpunkt)
+      const oldPaidAt = documentData.paid && documentData.paidAt ? new Date(documentData.paidAt) : null;
+      if (data.paid && (!oldPaidAt || oldPaidAt.toDateString() !== data.paidAt.toDateString())) {
+        formData.append("paidAt", toPaidAtIso(data.paidAt));
+      }
       if (isAuslage && !credited && data.reimbursedCustomerId) formData.append("reimbursedCustomerId", data.reimbursedCustomerId);
       if (data.dueDate) formData.append("dueDate", data.dueDate.toISOString());
     }
@@ -304,6 +326,11 @@ export default function PurchaseDocumentEdit() {
                 </TextField>
               )} />
             )}
+            {watchedPaid && (
+              <Controller name="paidAt" control={control} render={({ field }) => (
+                <PaidAtField value={field.value} onChange={field.onChange} />
+              )} />
+            )}
             {watchedPaid && watchedMethod === "ACCOUNT" && (
               <Controller name="reimbursedCustomerId" control={control} render={({ field }) => (
                 <ReimbursementCustomerField
@@ -387,7 +414,7 @@ export default function PurchaseDocumentEdit() {
   );
 
   return (
-    <Box component="form" onSubmit={handleSubmit(onSubmit)} sx={{ height: "calc(100vh - 80px)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <Box component="form" noValidate ref={formRef} onSubmit={handleSubmit(onSubmit, onInvalid)} sx={{ height: "calc(100vh - 80px)", display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* Header */}
       <Paper square elevation={0} sx={{ flexShrink: 0, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider", py: 1.5, px: { xs: 1, sm: 2 }, mb: 1.5, borderRadius: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -424,6 +451,8 @@ export default function PurchaseDocumentEdit() {
           sidebar={sidebar}
           sidebarLabel="Beleg"
           linesLabel="Positionen"
+          mobileTab={mobileTab}
+          onMobileTabChange={setMobileTab}
         />
       </Box>
 

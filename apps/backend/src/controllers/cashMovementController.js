@@ -5,6 +5,7 @@
 
 const cashMovementService = require('../services/cashMovementService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
+const closedPeriod = require('../utils/closedPeriod');
 
 class CashMovementController {
   // GET /api/cash-movements?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=50
@@ -42,15 +43,16 @@ class CashMovementController {
       const { type, amount, occurredAt, note, bankAccount } = req.body;
       const cashMovement = await cashMovementService.create({
         type, amount, occurredAt, note, bankAccount,
-        userId: req.user.id
+        userId: req.user.id,
+        confirmClosed: closedPeriod.isConfirmed(req)
       });
       res.status(201).json({ cashMovement });
     } catch (error) {
+      if (closedPeriod.sendClosedPeriod(res, error)) return;
       console.error('Create cash movement error:', error);
       const known = /Ungültig|Pflicht|Betrag|Datum|Benutzer fehlt/.test(error.message || '');
       res.status(known ? 400 : 500).json({
         error: known ? error.message : 'Fehler beim Anlegen der Kassenbewegung',
-        ...(known ? {} : { details: error.message })
       });
     }
   }
@@ -58,9 +60,10 @@ class CashMovementController {
   // POST /api/cash-movements/:id/cancel
   async cancel(req, res) {
     try {
-      const cashMovement = await cashMovementService.cancel(req.params.id, req.user.id);
+      const cashMovement = await cashMovementService.cancel(req.params.id, req.user.id, { confirmClosed: closedPeriod.isConfirmed(req) });
       res.json({ cashMovement });
     } catch (error) {
+      if (closedPeriod.sendClosedPeriod(res, error)) return;
       console.error('Cancel cash movement error:', error);
       if (/nicht gefunden/.test(error.message || '')) {
         return res.status(404).json({ error: error.message });

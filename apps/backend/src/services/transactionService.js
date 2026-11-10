@@ -7,165 +7,217 @@ const {
   endOfLocalDay,
   formatLocalDate,
 } = require('../utils/businessDay');
+const { userError, isUniqueViolation } = require('../utils/httpError');
+const { normalizeClientId, resolveClientCreatedAt } = require('../utils/clientRequest');
+const closedPeriod = require('../utils/closedPeriod');
+
+const TYPE_LABEL = { SALE: 'Verkauf', OWNER_USE: 'Buchung „Auf den Wirt“', EXPIRED: 'Buchung „Abgelaufen“' };
+const PAY_LABEL = { CASH: 'bar', ACCOUNT: 'Kundenkonto', CARD: 'Karte' };
+const saleLabel = (t, customer) => `${TYPE_LABEL[t.type] || t.type}${t.type === 'SALE' ? ` (${PAY_LABEL[t.paymentMethod] || t.paymentMethod})` : ''}`
+  + `${customer ? ` von ${customer.nickname || customer.name}` : ''} vom ${closedPeriod.fmtDate(t.createdAt)} ${new Date(t.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`;
 
 // Prisma speichert DateTime als "timestamp without time zone" in UTC. Stundenwerte für
 // Berichte müssen in lokaler Zeit gruppiert werden, sonst steht im Tagesabschluss 17:00 statt 19:00.
 const LOCAL_TZ = process.env.REPORT_TIMEZONE || 'Europe/Berlin';
 
-class TransactionService {
-  async createSale(data, userId) {
-    const { customerId, paymentMethod, items, type = 'SALE' } = data;
+// Buchungstypen, die über POST /transactions angelegt werden dürfen (REFUND entsteht nur durch Storno)
+const SALE_TYPES = ['SALE', 'OWNER_USE', 'EXPIRED'];
+const SALE_PAYMENT_METHODS = ['CASH', 'ACCOUNT', 'CARD'];
+// Stornierbar sind dieselben Typen; eine REFUND-Zeile ist selbst schon die Gegenbuchung
+const CANCELLABLE_TYPES = SALE_TYPES;
+// Überziehungsrahmen für Zahlung per Kundenkonto
+const ALLOWED_OVERDRAFT = 10.0;
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
+const SALE_INCLUDE = {
+  items: { include: { article: true } },
+  customer: { select: CUSTOMER_BASIC_SELECT },
+  user: { select: { id: true, name: true } }
+};
+
+class TransactionService {
+  // Bereits gebuchte Transaktion zu einer clientId (Idempotenz der Offline-Warteschlange)
+  async findByClientId(clientId) {
+    if (!clientId) return null;
+    return prisma.transaction.findUnique({ where: { clientId }, include: SALE_INCLUDE });
+  }
+
+  async createSale(data, userId) {
+    const { paymentMethod, items, type = 'SALE' } = data;
+    const customerId = data.customerId || null;
+    const clientId = normalizeClientId(data.clientId);
+    // Offline gebuchte Verkäufe behalten ihren Zeitpunkt (richtiger Geschäftstag)
+    const bookedAt = resolveClientCreatedAt(data.clientCreatedAt);
+
+    if (!SALE_TYPES.includes(type)) {
+      throw userError('Ungültiger Buchungstyp. Erlaubt: SALE, OWNER_USE, EXPIRED');
+    }
+    if (type === 'SALE' && !SALE_PAYMENT_METHODS.includes(paymentMethod)) {
+      throw userError('Ungültige Zahlungsmethode');
+    }
+    if (type === 'SALE' && paymentMethod === 'ACCOUNT' && !customerId) {
+      throw userError('Kunde erforderlich bei Zahlung per Kundenkonto');
+    }
     if (!items || !Array.isArray(items) || items.length === 0) {
-      throw new Error('Keine Artikel im Warenkorb');
+      throw userError('Keine Artikel im Warenkorb');
     }
 
-    // DB-Transaktion
-    const result = await prisma.$transaction(async (tx) => {
-      let totalAmount = 0;
-      const processedItems = [];
-      const warnings = [];
+    // Wiederholte Übertragung derselben Buchung: nicht erneut buchen, Original zurückgeben
+    const existing = await this.findByClientId(clientId);
+    if (existing) return { transaction: existing, warnings: [], duplicate: true };
 
-      for (const item of items) {
-        // Artikel laden
-        const article = await tx.article.findUnique({
-          where: { id: item.articleId }
-        });
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        let totalAmount = 0;
+        const processedItems = [];
+        const warnings = [];
 
-        if (!article) {
-          throw new Error(`Artikel nicht gefunden: ${item.articleId}`);
-        }
-        if (!article.active) {
-          throw new Error(`Artikel nicht verfügbar: ${article.name}`);
+        let customer = null;
+        if (customerId) {
+          customer = await tx.customer.findUnique({ where: { id: customerId } });
+          if (!customer) throw userError('Kunde nicht gefunden', 404);
         }
 
-        const qty = Number(item.quantity || 0);
-        if (!(qty > 0)) {
-          throw new Error(`Ungültige Menge für ${article.name}`);
-        }
+        for (const item of items) {
+          const article = item && item.articleId
+            ? await tx.article.findUnique({ where: { id: String(item.articleId) } })
+            : null;
 
-        // PREIS (als Number – pragmatisch, da Prisma Decimal in JS gut als Number nutzbar ist)
-        const price = Number(article.price || 0);
-        const itemTotal = price * qty;
-        // Nur bei echtem Verkauf summieren wir den Betrag für die Bezahlung
-        if (type === 'SALE') {
-          totalAmount += itemTotal;
-        }
-
-        // Vorhersage Lager nach Verkauf (nur für Warnung, nicht blockierend)
-        const currentStock = Number(article.stock || 0);
-        const projected = currentStock - qty;
-        if (projected < 0) {
-          warnings.push(`Artikel "${article.name}" fällt auf ${projected}`);
-        }
-
-        // Lager reduzieren (darf negativ werden)
-        await tx.article.update({
-          where: { id: article.id },
-          data: {
-            stock: { decrement: qty }
+          if (!article) {
+            throw userError(`Artikel nicht gefunden: ${item && item.articleId ? item.articleId : '(ohne ID)'}`, 404);
           }
-        });
+          if (!article.active) {
+            throw userError(`Artikel nicht verfügbar: ${article.name}`);
+          }
 
-        // StockMovement (SALE; Menge negativ)
-        // Falls type EXPIRED oder OWNER_USE ist, nehmen wir das als Reason
-        const movementType = (type === 'EXPIRED' || type === 'OWNER_USE') ? type : 'SALE';
+          const qty = Number(item.quantity || 0);
+          if (!Number.isInteger(qty) || qty <= 0) {
+            throw userError(`Ungültige Menge für ${article.name}`);
+          }
 
-        await tx.stockMovement.create({
-          data: {
+          const price = Number(article.price || 0);
+          const itemTotal = round2(price * qty);
+          // Nur bei echtem Verkauf summieren wir den Betrag für die Bezahlung
+          if (type === 'SALE') {
+            totalAmount = round2(totalAmount + itemTotal);
+          }
+
+          // Lager reduzieren (darf negativ werden; Warnung, keine Blockade)
+          const updatedArticle = await tx.article.update({
+            where: { id: article.id },
+            data: { stock: { decrement: qty } }
+          });
+          const projected = Number(updatedArticle.stock);
+          if (projected < 0) {
+            warnings.push(`Artikel "${article.name}" fällt auf ${projected}`);
+          }
+
+          // StockMovement (Menge negativ); bei EXPIRED/OWNER_USE ist der Typ der Grund
+          const movementType = (type === 'EXPIRED' || type === 'OWNER_USE') ? type : 'SALE';
+          await tx.stockMovement.create({
+            data: {
+              articleId: article.id,
+              type: movementType,
+              quantity: -qty,
+              reason: type === 'SALE' ? 'Verkauf' : (type === 'EXPIRED' ? 'Abgelaufen' : 'Eigenverbrauch'),
+              ...(bookedAt ? { createdAt: bookedAt } : {})
+            }
+          });
+
+          processedItems.push({
             articleId: article.id,
-            type: movementType,
-            quantity: -qty,
-            reason: type === 'SALE' ? 'Verkauf' : (type === 'EXPIRED' ? 'Abgelaufen' : 'Eigenverbrauch')
+            quantity: qty,
+            pricePerUnit: price,
+            totalPrice: itemTotal
+          });
+        }
+
+        // Kundenkonto: Überziehungsrahmen atomar prüfen (parallele Verkäufe können ihn nicht gemeinsam überschreiten)
+        if (type === 'SALE' && paymentMethod === 'ACCOUNT') {
+          const balance = Number(customer.balance || 0);
+          const charged = await tx.customer.updateMany({
+            where: { id: customerId, balance: { gte: totalAmount - ALLOWED_OVERDRAFT } },
+            data: { balance: { decrement: totalAmount } }
+          });
+          if (charged.count === 0) {
+            throw userError(`Nicht genügend Guthaben. Limit: -€${ALLOWED_OVERDRAFT.toFixed(2)}, Aktuell: €${balance.toFixed(2)}, Benötigt: €${totalAmount.toFixed(2)}`);
           }
-        });
-
-        processedItems.push({
-          articleId: article.id,
-          quantity: qty,
-          pricePerUnit: price,
-          totalPrice: itemTotal,
-          article // für Response/Debug
-        });
-      }
-
-      // Kundenkonto-Prüfung (hier NICHT negativ zulassen!)
-      // Nur relevant, wenn es ein SALE ist und per ACCOUNT bezahlt wird
-      if (type === 'SALE' && paymentMethod === 'ACCOUNT' && customerId) {
-        const customer = await tx.customer.findUnique({
-          where: { id: customerId }
-        });
-        if (!customer) throw new Error('Kunde nicht gefunden');
-        const balance = Number(customer.balance || 0);
-        const allowedOverdraft = 10.0;
-        if (balance - totalAmount < -allowedOverdraft) {
-          throw new Error(`Nicht genügend Guthaben. Limit: -€${allowedOverdraft.toFixed(2)}, Aktuell: €${balance.toFixed(2)}, Benötigt: €${totalAmount.toFixed(2)}`);
-        }
-
-        if (balance - totalAmount < 0) {
-          warnings.push(`Achtung: Kontostand negativ! Neuer Stand: €${(balance - totalAmount).toFixed(2)}`);
-        }
-
-        await tx.customer.update({
-          where: { id: customerId },
-          data: { balance: { decrement: totalAmount } }
-        });
-      }
-
-      // Transaktion anlegen
-      const transaction = await tx.transaction.create({
-        data: {
-          type: type, // SALE, EXPIRED, OWNER_USE
-          paymentMethod: (type === 'SALE') ? paymentMethod : 'CASH', // Fallback für Non-Sale
-          totalAmount, // ist 0 bei EXPIRED/OWNER_USE
-          userId,
-          customerId,
-          items: {
-            create: processedItems.map(it => ({
-              articleId: it.articleId,
-              quantity: it.quantity,
-              pricePerUnit: it.pricePerUnit,
-              totalPrice: it.totalPrice
-            }))
+          if (balance - totalAmount < 0) {
+            warnings.push(`Achtung: Kontostand negativ! Neuer Stand: €${(balance - totalAmount).toFixed(2)}`);
           }
-        },
-        include: {
-          items: { include: { article: true } },
-          customer: { select: CUSTOMER_BASIC_SELECT },
-          user: { select: { id: true, name: true } }
         }
-      });
 
-      // Optionale Audits für negative Bestände (best-effort, keine Blockade)
-      for (const note of warnings) {
-        await tx.auditLog.create({
+        const transaction = await tx.transaction.create({
           data: {
+            type, // SALE, EXPIRED, OWNER_USE
+            paymentMethod: (type === 'SALE') ? paymentMethod : 'CASH', // Fallback für Non-Sale
+            totalAmount, // ist 0 bei EXPIRED/OWNER_USE
             userId,
-            action: 'NEGATIVE_STOCK_WARNING',
-            entityType: 'Transaction',
-            entityId: transaction.id,
-            changes: { message: note }
+            customerId,
+            clientId,
+            ...(bookedAt ? { createdAt: bookedAt } : {}),
+            items: {
+              create: processedItems
+            }
+          },
+          include: SALE_INCLUDE
+        });
+
+        // Audits für negative Bestände (keine Blockade)
+        for (const note of warnings) {
+          await tx.auditLog.create({
+            data: {
+              userId,
+              action: 'NEGATIVE_STOCK_WARNING',
+              entityType: 'Transaction',
+              entityId: transaction.id,
+              changes: { message: note }
+            }
+          });
+        }
+
+        // Offline-Nachbuchung in ein inzwischen abgeschlossenes Geschäftsjahr: kann nicht nachfragen,
+        // wird angenommen und automatisch protokolliert (neue Verkäufe mit Serverzeit sind nie betroffen)
+        if (bookedAt) {
+          const closedYears = await closedPeriod.findClosedYears([bookedAt], tx);
+          if (closedYears.length) {
+            await closedPeriod.logChange(tx, closedYears, {
+              userId, entityType: 'Transaction', entityId: transaction.id,
+              operation: 'Offline-Nachbuchung',
+              description: `Offline gebuchter ${saleLabel(transaction, transaction.customer)} nachträglich übertragen, ${closedPeriod.fmtEUR(totalAmount)}`,
+              ...(type === 'SALE' ? { amountBefore: 0, amountAfter: totalAmount } : { effect: null }),
+            });
           }
-        });
+        }
+
+        // Kompatibel: Warnungen auch am Objekt (alter Controller)
+        transaction._warnings = warnings;
+
+        // Letzte Aktivität (immer, auch bei Barzahlung); ein nachträglich übertragener Offline-Verkauf
+        // setzt sie nicht zurück
+        if (customer) {
+          const activityAt = bookedAt || new Date();
+          if (!customer.lastActivity || customer.lastActivity < activityAt) {
+            await tx.customer.update({
+              where: { id: customerId },
+              data: { lastActivity: activityAt }
+            });
+          }
+        }
+
+        return { transaction, warnings };
+      });
+    } catch (error) {
+      // Zwei gleichzeitige Übertragungen derselben clientId: die zweite scheitert am Unique-Index
+      if (clientId && isUniqueViolation(error, 'clientId')) {
+        const original = await this.findByClientId(clientId);
+        if (original) return { transaction: original, warnings: [], duplicate: true };
       }
+      throw error;
+    }
 
-      // WARNUNGEN kompatibel zurückgeben:
-      // 1) als separates Array (für den neuen Controller),
-      // 2) UND an das Objekt gehängt (für alten Controller).
-      transaction._warnings = warnings;
-
-      // UPDATE LAST ACTIVITY (immer, auch bei Barzahlung)
-      if (customerId) {
-        await tx.customer.update({
-          where: { id: customerId },
-          data: { lastActivity: new Date() }
-        });
-      }
-
-      return { transaction, warnings };
-    });
-
-    // WebSocket Events + Highscore wie gehabt
+    // WebSocket Events + Highscore
     const { emitNewSale } = require('../utils/websocket');
     const highscoreService = require('./highscoreService');
 
@@ -174,14 +226,12 @@ class TransactionService {
       console.error('Error updating highscore:', err);
     });
 
-    return result;
+    return { ...result, duplicate: false };
   }
 
-  // Storniere Transaktion
-  async cancelTransaction(transactionId, userId) {
-    // Starte Datenbank-Transaktion
+  // Storniere Transaktion (legt eine verknüpfte REFUND-Buchung an, löscht nichts)
+  async cancelTransaction(transactionId, userId, { confirmClosed = false } = {}) {
     const result = await prisma.$transaction(async (tx) => {
-      // Hole Original-Transaktion
       const originalTransaction = await tx.transaction.findUnique({
         where: { id: transactionId },
         include: {
@@ -191,24 +241,41 @@ class TransactionService {
       });
 
       if (!originalTransaction) {
-        throw new Error('Transaktion nicht gefunden');
+        throw userError('Transaktion nicht gefunden', 404);
       }
-
+      if (!CANCELLABLE_TYPES.includes(originalTransaction.type)) {
+        throw userError('Eine Storno-Buchung kann nicht storniert werden');
+      }
       if (originalTransaction.cancelled) {
-        throw new Error('Transaktion wurde bereits storniert');
+        throw userError('Transaktion wurde bereits storniert');
       }
 
-      // Markiere Original-Transaktion als storniert
-      await tx.transaction.update({
-        where: { id: transactionId },
+      // Verkauf aus einem abgeschlossenen Geschäftsjahr: Storno ändert dessen Einnahmen/Bestand → 409 ohne Bestätigung
+      const closedYears = await closedPeriod.guard([originalTransaction.createdAt], confirmClosed, tx);
+      if (closedYears.length) {
+        const amount = Number(originalTransaction.totalAmount || 0);
+        await closedPeriod.logChange(tx, closedYears, {
+          userId, entityType: 'Transaction', entityId: transactionId,
+          operation: 'Verkauf storniert',
+          description: `${saleLabel(originalTransaction, originalTransaction.customer)} storniert, ${closedPeriod.fmtEUR(amount)}`,
+          ...(originalTransaction.type === 'SALE' ? { amountBefore: amount, amountAfter: 0 } : { effect: null }),
+        });
+      }
+
+      // Atomar als storniert markieren: von parallelen Stornos gewinnt genau eines
+      const marked = await tx.transaction.updateMany({
+        where: { id: transactionId, cancelled: false },
         data: {
           cancelled: true,
           cancelledAt: new Date(),
           cancelledBy: userId
         }
       });
+      if (marked.count === 0) {
+        throw userError('Transaktion wurde bereits storniert');
+      }
 
-      // Erstelle Storno-Transaktion
+      // Storno-Transaktion
       const cancelTransaction = await tx.transaction.create({
         data: {
           type: 'REFUND',
@@ -228,18 +295,13 @@ class TransactionService {
         }
       });
 
-      // Gebe Artikel wieder in den Bestand zurück
+      // Artikel zurück in den Bestand
       for (const item of originalTransaction.items) {
         await tx.article.update({
           where: { id: item.articleId },
-          data: {
-            stock: {
-              increment: item.quantity
-            }
-          }
+          data: { stock: { increment: item.quantity } }
         });
 
-        // Erstelle Bestandsbewegung
         await tx.stockMovement.create({
           data: {
             articleId: item.articleId,
@@ -250,15 +312,11 @@ class TransactionService {
         });
       }
 
-      // Bei Kundenkonto: Buche Guthaben zurück
+      // Bei Kundenkonto: Guthaben zurückbuchen
       if (originalTransaction.paymentMethod === 'ACCOUNT' && originalTransaction.customerId) {
         await tx.customer.update({
           where: { id: originalTransaction.customerId },
-          data: {
-            balance: {
-              increment: originalTransaction.totalAmount
-            }
-          }
+          data: { balance: { increment: originalTransaction.totalAmount } }
         });
       }
 
@@ -267,7 +325,6 @@ class TransactionService {
         cancelTransaction
       };
     });
-
 
     // Clubscore: ein Storno kann ein Ranking verändern → Boards neu berechnen und pushen
     require('./highscoreService').refreshBoards();

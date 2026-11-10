@@ -15,17 +15,19 @@ const SLOTS = [{ idx: 1, h: 0.78 }, { idx: 0, h: 1 }, { idx: 2, h: 0.6 }];
 
 function PodiumItem({ entry, idx, baseHeight, mode, change, gap, lg }) {
   const color = COLORS[idx];
-  if (!entry) return <Box sx={{ width: '31%' }} />;
+  if (!entry) return <Box sx={{ width: idx === 0 ? '37%' : '29%' }} />;
   return (
     <Stack alignItems="center" justifyContent="flex-end" sx={{
-      width: '31%', minWidth: 0, height: '100%',
+      width: idx === 0 ? '37%' : '29%', minWidth: 0, height: '100%',
       animation: `${slideUp} 0.6s ease-out ${idx * 150}ms both`,
       '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
     }}>
       <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="center" sx={{ maxWidth: '100%', minWidth: 0 }}>
         {entry.group && <GroupBadge group={entry.group} size={lg ? 34 : 20} />}
-        <Typography noWrap sx={{
-          fontWeight: 900, minWidth: 0, textShadow: `0 0 10px ${alpha(color, 0.5)}`,
+        <Typography sx={{
+          fontWeight: 900, minWidth: 0, textAlign: 'center', lineHeight: 1.1,
+          display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', overflowWrap: 'break-word',
+          textShadow: `0 0 10px ${alpha(color, 0.5)}`,
           fontSize: lg ? (idx === 0 ? '2rem' : '1.6rem') : { xs: '0.9rem', md: idx === 0 ? '1.2rem' : '1.05rem' },
         }}>
           {displayName(entry)}

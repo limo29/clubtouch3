@@ -69,7 +69,9 @@ function _paymentLabel(pm) {
 class ReceiptService {
 
   /**
-   * Listet alle PurchaseDocuments im Zeitraum [start, end] auf,
+   * Listet alle PurchaseDocuments im Zeitraum [start, end] auf (Belegdatum im Zeitraum, dazu
+   * Lieferantenrechnungen, die im Zeitraum bezahlt wurden: die EÜR zählt Ausgaben nach Zahldatum,
+   * ihr Beleg muss also auch in der Belegliste dieses Zeitraums stehen),
    * sortiert nach documentDate asc, dann documentNumber asc.
    * Prüft jeweils, ob die Nachweis-Datei auf dem Dateisystem vorhanden ist.
    *
@@ -80,7 +82,10 @@ class ReceiptService {
   async listReceipts(start, end) {
     const docs = await prisma.purchaseDocument.findMany({
       where: {
-        documentDate: { gte: start, lte: end }
+        OR: [
+          { documentDate: { gte: start, lte: end } },
+          { type: 'RECHNUNG', paid: true, paidAt: { gte: start, lte: end } }
+        ]
       },
       orderBy: [
         { documentDate: 'asc' },
@@ -340,13 +345,15 @@ class ReceiptService {
             { header: 'Typ',       width: 59,  render: r => r.type === 'RECHNUNG' ? 'Rechnung' : 'Lieferschein' },
             { header: 'Datum',     width: 55,  render: r => fmtDate(r.documentDate) },
             // „Eingetragen von“ unter dem Lieferanten, eine eigene Spalte wäre zu schmal
-            { header: 'Lieferant', width: 85,  render: r => (r.supplier || '') + (r.enteredBy ? `
+            // breiter als früher (85), damit lange Lieferantennamen an Wortgrenzen umbrechen;
+            // passt ein einzelnes Wort trotzdem nicht, verkleinert _table die Schrift statt es zu teilen
+            { header: 'Lieferant', width: 105, render: r => (r.supplier || '') + (r.enteredBy ? `
 erfasst: ${r.enteredBy}` : '') },
             { header: 'Bezahlt',   width: 64,  render: r => paidLabel(r), color: r => (r.type === 'RECHNUNG' && !r.paid) ? th.color.warning : th.color.text },
             { header: 'Betrag',    width: 55,  align: 'right', render: r => r.totalAmount !== null ? fmtEUR(r.totalAmount) : '–' },
             {
               header: 'Nachweis',
-              width: 107,
+              width: 87,
               render: r => fileNameLabel(r),
               color: r => fileNameColor(r)
             }

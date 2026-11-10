@@ -3,6 +3,24 @@ const { toPublicUrl } = require('../utils/uploadsDir');
 const receiptService = require('../services/receiptService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 const prisma = require('../utils/prisma');
+const fs = require('fs');
+const closedPeriod = require('../utils/closedPeriod');
+
+// Fachliche Fehler (userFacing, statusCode 4xx) mit Meldung, sonst generische 500 ohne Interna
+function sendError(res, error, fallback, label) {
+  // Abgeschlossenes Geschäftsjahr ohne Bestätigung: 409 mit code/fiscalYear (das Frontend fragt nach)
+  if (closedPeriod.sendClosedPeriod(res, error)) {
+    // Hochgeladener Nachweis wäre verwaist; die Wiederholung mit Bestätigung lädt ihn erneut hoch
+    if (res.req && res.req.file && res.req.file.path) fs.promises.unlink(res.req.file.path).catch(() => {});
+    return;
+  }
+  if (error && (error.userFacing || (error.statusCode && error.statusCode < 500))) {
+    return res.status(error.statusCode || 400).json({ error: error.message });
+  }
+  if (error && error.code === 'P2025') return res.status(404).json({ error: 'Beleg nicht gefunden' });
+  console.error(label, error);
+  return res.status(500).json({ error: fallback });
+}
 
 class PurchaseDocumentController {
 
@@ -40,15 +58,15 @@ class PurchaseDocumentController {
         }
       }
 
-      // Datentypen konvertieren (aus FormData sind alles Strings)
-      data.totalAmount = data.totalAmount ? parseFloat(data.totalAmount) : null;
-      data.paid = data.paid === 'true';
+      // Datentypen konvertieren (aus FormData sind alles Strings); Betrag parst der Service ("12,50" -> 12.50)
+      data.paid = data.paid === true || data.paid === 'true';
       if (data.reimbursedCustomerId === '') data.reimbursedCustomerId = undefined;
 
       const document = await purchaseDocumentService.createDocument(
         data,
         req.user.id,
-        nachweisUrl
+        nachweisUrl,
+        { confirmClosed: closedPeriod.isConfirmed(req) }
       );
 
       // Audit-Log
@@ -68,13 +86,7 @@ class PurchaseDocumentController {
 
       res.status(201).json(document);
     } catch (error) {
-      console.error('Create document error:', error);
-      if (error.userFacing) return res.status(400).json({ error: error.message });
-      // Prisma-Transaktionsfehler abfangen
-      if (error.message.includes('Artikel mit ID')) {
-        return res.status(404).json({ error: error.message });
-      }
-      res.status(500).json({ error: 'Fehler beim Erstellen des Belegs' });
+      sendError(res, error, 'Fehler beim Erstellen des Belegs', 'Create document error:');
     }
   }
 
@@ -174,31 +186,31 @@ class PurchaseDocumentController {
         ...result
       });
     } catch (error) {
-      console.error('Link documents error:', error);
-      res.status(500).json({ error: 'Fehler beim Verknüpfen der Belege' });
+      sendError(res, error, 'Fehler beim Verknüpfen der Belege', 'Link documents error:');
     }
   }
   // POST /:id/mark-paid
   async markAsPaid(req, res) {
     try {
       const { id } = req.params;
-      const { paymentMethod, reimbursedCustomerId } = req.body;
+      const { paymentMethod, reimbursedCustomerId, paidAt } = req.body || {};
 
       if (!paymentMethod) {
-        return res.status(400).json({ error: 'paymentMethod ist erforderlich.' });
+        return res.status(400).json({ error: 'Zahlungsart (paymentMethod) ist erforderlich.' });
       }
 
       const document = await purchaseDocumentService.markAsPaid(
         id,
         paymentMethod,
         req.user.id,
-        reimbursedCustomerId || null
+        reimbursedCustomerId || null,
+        paidAt,
+        { confirmClosed: closedPeriod.isConfirmed(req) }
       );
 
       res.json(document);
     } catch (error) {
-      console.error('Mark as paid error:', error);
-      res.status(error.userFacing ? 400 : 500).json({ error: error.message });
+      sendError(res, error, 'Fehler beim Markieren als bezahlt', 'Mark as paid error:');
     }
   }
   // POST /:id/mark-unpaid
@@ -208,13 +220,13 @@ class PurchaseDocumentController {
 
       const document = await purchaseDocumentService.markAsUnpaid(
         id,
-        req.user.id
+        req.user.id,
+        { confirmClosed: closedPeriod.isConfirmed(req) }
       );
 
       res.json(document);
     } catch (error) {
-      console.error('Mark as unpaid error:', error);
-      res.status(error.userFacing ? 400 : 500).json({ error: error.message });
+      sendError(res, error, 'Fehler beim Zurücksetzen der Zahlung', 'Mark as unpaid error:');
     }
   }
   // POST /unlink
@@ -264,23 +276,22 @@ class PurchaseDocumentController {
         }
       }
 
-      // Datentypen aus FormData konvertieren
-      if (data.totalAmount) data.totalAmount = parseFloat(data.totalAmount);
-      if (data.paid !== undefined) data.paid = data.paid === 'true';
+      // Datentypen aus FormData konvertieren; Betrag parst der Service, leerer Betrag = unverändert
+      if (data.totalAmount === '') delete data.totalAmount;
+      if (data.paid !== undefined) data.paid = data.paid === true || data.paid === 'true';
       if (data.reimbursedCustomerId === '') data.reimbursedCustomerId = undefined;
 
       const document = await purchaseDocumentService.updateDocument(
         id,
         data, // Enthält jetzt 'items'
         req.user.id,
-        nachweisUrl
+        nachweisUrl,
+        { confirmClosed: closedPeriod.isConfirmed(req) }
       );
 
       res.json(document);
     } catch (error) {
-      console.error('Update document error:', error);
-      if (error.userFacing) return res.status(400).json({ error: error.message });
-      res.status(500).json({ error: 'Fehler beim Aktualisieren des Belegs', details: error.message });
+      sendError(res, error, 'Fehler beim Aktualisieren des Belegs', 'Update document error:');
     }
   }
   // DELETE /:id
@@ -290,13 +301,13 @@ class PurchaseDocumentController {
 
       const document = await purchaseDocumentService.deleteDocument(
         id,
-        req.user.id
+        req.user.id,
+        { confirmClosed: closedPeriod.isConfirmed(req) }
       );
 
       res.json({ message: `Beleg ${document.documentNumber} erfolgreich gelöscht.` });
     } catch (error) {
-      console.error('Delete document error:', error);
-      res.status(500).json({ error: 'Fehler beim Löschen des Belegs', details: error.message });
+      sendError(res, error, 'Fehler beim Löschen des Belegs', 'Delete document error:');
     }
   }
 
@@ -350,10 +361,6 @@ class PurchaseDocumentController {
       res.status(500).json({ error: 'Fehler beim Erstellen des ZIP.' });
     }
   }
-
-  // TODO:
-  // async updateDocument(req, res) { ... }
-  // async deleteDocument(req, res) { ... }
 }
 
 module.exports = new PurchaseDocumentController();

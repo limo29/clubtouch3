@@ -31,7 +31,7 @@ class ExportController {
       res.send(result.data);
     } catch (error) {
       console.error('Export transactions error:', error);
-      res.status(500).json({ error: 'Fehler beim Export der Transaktionen', details: error.message });
+      res.status(500).json({ error: 'Fehler beim Export der Transaktionen' });
     }
   }
 
@@ -274,7 +274,7 @@ class ExportController {
       res.send(result.data);
     } catch (e) {
       console.error('Export EUR error', e);
-      res.status(500).json({ error: 'Fehler beim EÜR-Export', details: e.message });
+      res.status(500).json({ error: 'Fehler beim EÜR-Export' });
     }
   }
 

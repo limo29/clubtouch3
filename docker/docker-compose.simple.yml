@@ -1,3 +1,5 @@
+# NUR FÜR DIE ENTWICKLUNG: feste Platzhalter-Secrets und Standard-Passwörter.
+# Nicht im Netz betreiben. Für den echten Betrieb docker-compose.yml mit gesetzten Secrets verwenden.
 services:
   # PostgreSQL Database
   db:
@@ -26,7 +28,7 @@ services:
     container_name: clubtouch3-backend
     restart: unless-stopped
     environment:
-      NODE_ENV: production
+      NODE_ENV: development   # Dev-Variante: in production würde der Start mit Platzhalter-Secrets verweigert
       PORT: 3001
       DATABASE_URL: postgresql://clubtouch3:clubtouch3@db:5432/clubtouch3?schema=public
       JWT_SECRET: your-super-secret-key-change-this

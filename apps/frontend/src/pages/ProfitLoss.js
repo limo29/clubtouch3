@@ -10,7 +10,7 @@ import {
   TextField, Alert, Chip, Dialog, DialogTitle, DialogContent, DialogActions, Stack, useTheme, useMediaQuery,
 } from '@mui/material';
 import { Close, Add, PictureAsPdf, Lock, ReceiptLong } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DatePicker } from '../components/common/SafeDatePickers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -46,7 +46,19 @@ function FiscalYearsSection({ fiscalYears, error, onClose, onNew, onReceipts }) 
       <Button size="small" variant="outlined" startIcon={<PictureAsPdf />} onClick={() => downloadReport(fy)}>{fy.closed ? 'PDF' : 'Entwurf-PDF'}</Button>
     </Stack>
   );
-  const status = (fy) => (fy.closed ? <Chip color="success" size="small" label="Abgeschlossen" /> : <Chip size="small" label="Offen" />);
+  // Nachträgliche Änderungen nach dem Abschluss (bestätigte Änderungen im abgeschlossenen Jahr, im PDF als Nachtrag)
+  const status = (fy) => (fy.closed ? (
+    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+      <Chip color="success" size="small" label="Abgeschlossen" />
+      {fy.closedPeriodChanges > 0 && (
+        <Chip
+          color="warning" size="small" variant="outlined"
+          label={`${fy.closedPeriodChanges} nachträgl. ${fy.closedPeriodChanges === 1 ? 'Änderung' : 'Änderungen'}`}
+          title="Nach dem Abschluss bestätigte Änderungen an Buchungen dieses Jahres; Einzelheiten im Nachtrag des PDFs"
+        />
+      )}
+    </Stack>
+  ) : <Chip size="small" label="Offen" />);
 
   return (
     <Stack spacing={2}>

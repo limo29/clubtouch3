@@ -26,6 +26,28 @@ function noteFailure(key) {
   if (failedLogins.size > 5000) failedLogins.clear();
 }
 
+/**
+ * Kulanz für parallele Refreshes: alter Refresh-Token → neue Tokens, 30 s lang. So erhalten alle
+ * gleichzeitigen Anfragen dieselben (gültigen) Tokens, statt dass nur eine Antwort brauchbar ist.
+ */
+const ROTATION_GRACE_MS = 30 * 1000;
+const recentRotations = new Map();
+function rememberRotation(oldRefreshToken, tokens) {
+  const now = Date.now();
+  for (const [k, v] of recentRotations) if (v.until <= now) recentRotations.delete(k);
+  recentRotations.set(oldRefreshToken, { tokens, until: now + ROTATION_GRACE_MS });
+}
+
+/** Kurz auf die Tokens des Gewinners warten (er trägt sie nach dem DB-Update in die Map ein) */
+async function waitForRotation(oldRefreshToken) {
+  for (let i = 0; i < 40; i++) {
+    const hit = recentRotations.get(oldRefreshToken);
+    if (hit && hit.until > Date.now()) return hit.tokens;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return null;
+}
+
 class AuthController {
   // Login
   async login(req, res) {
@@ -109,7 +131,7 @@ class AuthController {
     }
   }
 
-  // Logout
+  // Logout: immer 200, auch wenn Token abgelaufen oder Session schon weg ist
   async logout(req, res) {
     try {
       const authHeader = req.headers.authorization;
@@ -117,20 +139,12 @@ class AuthController {
       if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.substring(7);
 
-        // Lösche Session
-        await prisma.session.deleteMany({
-          where: { token }
-        });
+        const sessions = await prisma.session.findMany({ where: { token }, select: { userId: true } });
+        await prisma.session.deleteMany({ where: { token } });
 
-        // Audit-Log
-        if (req.user) {
+        if (sessions.length > 0) {
           await prisma.auditLog.create({
-            data: {
-              userId: req.user.id,
-              action: 'LOGOUT',
-              entityType: 'User',
-              entityId: req.user.id
-            }
+            data: { userId: sessions[0].userId, action: 'LOGOUT', entityType: 'User', entityId: sessions[0].userId }
           });
         }
       }
@@ -142,13 +156,19 @@ class AuthController {
     }
   }
 
-  // Refresh Token
+  // Refresh Token (Rotation, tolerant gegen parallele Anfragen mit demselben Token)
   async refreshToken(req, res) {
     try {
       const { refreshToken } = req.body;
 
       if (!refreshToken) {
         return res.status(401).json({ error: 'Refresh Token fehlt' });
+      }
+
+      // Gerade rotiert (paralleler Request hat gewonnen): dieselben neuen Tokens zurückgeben
+      const recent = recentRotations.get(refreshToken);
+      if (recent && recent.until > Date.now()) {
+        return res.json(recent.tokens);
       }
 
       // Verifiziere Refresh Token
@@ -163,6 +183,9 @@ class AuthController {
       });
 
       if (!session) {
+        // Das Rennen kann zwischen Lesen und hier entschieden worden sein
+        const late = await waitForRotation(refreshToken);
+        if (late) return res.json(late);
         return res.status(401).json({ error: 'Ungültige Session' });
       }
 
@@ -173,18 +196,25 @@ class AuthController {
         return res.status(401).json({ error: 'Benutzer inaktiv' });
       }
 
-      // Generiere neue Tokens
+      // Generiere neue Tokens und rotiere atomar: nur wer den alten Refresh-Token noch vorfindet, gewinnt
       const tokens = generateTokens(user.id);
-
-      // Update Session
-      await prisma.session.update({
-        where: { id: session.id },
+      const { count } = await prisma.session.updateMany({
+        where: { id: session.id, refreshToken },
         data: {
           token: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         }
       });
+
+      if (count === 0) {
+        // Verloren: Tokens des Gewinners abwarten (kurz, er schreibt gleich in die Map)
+        const won = await waitForRotation(refreshToken);
+        if (won) return res.json(won);
+        return res.status(401).json({ error: 'Ungültige Session' });
+      }
+
+      rememberRotation(refreshToken, { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
 
       res.json({
         accessToken: tokens.accessToken,

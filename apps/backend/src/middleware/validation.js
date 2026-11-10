@@ -17,7 +17,6 @@ const validateLogin = [
 const validateRegister = [
   body('email')
     .isEmail()
-    .normalizeEmail()
     .withMessage('Bitte gültige E-Mail-Adresse eingeben'),
   body('password')
     .isLength({ min: 8 })
@@ -57,7 +56,6 @@ const validateUserUpdate = [
   body('email')
     .optional()
     .isEmail()
-    .normalizeEmail()
     .withMessage('Bitte gültige E-Mail-Adresse eingeben'),
   body('password')
     .optional()
@@ -141,28 +139,6 @@ const validateArticleUpdate = [
     .optional()
     .isInt()
     .withMessage('Bestandsanpassung muss eine Ganzzahl sein')
-];
-
-const validateDelivery = [
-  body('quantity')
-    .isInt({ min: 1 })
-    .withMessage('Menge muss eine positive Ganzzahl sein'),
-  body('reason')
-    .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('Grund darf nicht leer sein')
-];
-
-const validateInventory = [
-  body('actualStock')
-    .isInt({ min: 0 })
-    .withMessage('Bestand muss eine positive Ganzzahl sein'),
-  body('reason')
-    .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('Grund darf nicht leer sein')
 ];
 
 const validateCustomer = [
@@ -270,6 +246,16 @@ const validateCustomerUpdate = [
     .withMessage('E-Mail darf höchstens 200 Zeichen lang sein'),
 ];
 
+// Offline-Warteschlange: Idempotenzschlüssel (8–64 Zeichen). clientCreatedAt wird nicht abgelehnt,
+// sondern im Service geprüft und bei ungültigem/zu altem Wert ignoriert (utils/clientRequest.js).
+const clientIdRule = () => body('clientId')
+  .optional({ values: 'null' })
+  .isString()
+  .withMessage('clientId muss Text sein')
+  .trim()
+  .isLength({ min: 8, max: 64 })
+  .withMessage('clientId muss zwischen 8 und 64 Zeichen lang sein');
+
 const validateTopUp = [
   body('amount')
     .isFloat({ min: 0.01, max: 500 })
@@ -278,8 +264,13 @@ const validateTopUp = [
     .isIn(['CASH', 'TRANSFER', 'CARD'])
     .withMessage('Ungültige Zahlungsmethode'),
   body('reference')
-    .optional()
+    .optional({ values: 'null' })
+    .isString()
+    .withMessage('Referenz muss Text sein')
     .trim()
+    .isLength({ max: 200 })
+    .withMessage('Referenz darf höchstens 200 Zeichen lang sein'),
+  clientIdRule()
 ];
 
 // Kundengruppe anlegen/aktualisieren
@@ -426,6 +417,10 @@ const validateCashMovement = [
 ];
 
 const validateSale = [
+  body('type')
+    .optional()
+    .isIn(['SALE', 'OWNER_USE', 'EXPIRED'])
+    .withMessage('Ungültiger Buchungstyp. Erlaubt: SALE, OWNER_USE, EXPIRED'),
   body('paymentMethod')
     .isIn(['CASH', 'ACCOUNT', 'CARD'])
     .withMessage('Ungültige Zahlungsmethode'),
@@ -433,29 +428,21 @@ const validateSale = [
     .if(body('paymentMethod').equals('ACCOUNT'))
     .notEmpty()
     .withMessage('Kunde erforderlich bei Zahlung per Kundenkonto'),
+  body('customerId')
+    .optional({ values: 'falsy' })
+    .isString()
+    .withMessage('Kunden-ID muss Text sein'),
   body('items')
     .isArray({ min: 1 })
     .withMessage('Mindestens ein Artikel erforderlich'),
   body('items.*.articleId')
+    .isString()
     .notEmpty()
     .withMessage('Artikel-ID erforderlich'),
   body('items.*.quantity')
-    .isInt({ min: 1 })
-    .withMessage('Menge muss mindestens 1 sein')
-];
-
-const validateQuickSale = [
-  body('articleId')
-    .notEmpty()
-    .withMessage('Artikel-ID erforderlich'),
-  body('quantity')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('Menge muss mindestens 1 sein'),
-  body('paymentMethod')
-    .optional()
-    .isIn(['CASH', 'ACCOUNT', 'CARD'])
-    .withMessage('Ungültige Zahlungsmethode')
+    .isInt({ min: 1, max: 10000 })
+    .withMessage('Menge muss eine ganze Zahl zwischen 1 und 10000 sein'),
+  clientIdRule()
 ];
 
 
@@ -466,15 +453,12 @@ module.exports = {
   validateChangePassword,
   validateArticle,
   validateArticleUpdate,
-  validateDelivery,
-  validateInventory,
   validateCustomer,
   validateCustomerUpdate,
   validateCustomerGroup,
   validateCustomerGroupUpdate,
   validateTopUp,
   validateSale,
-  validateQuickSale,
   validateCashCount,
   validateCashMovement,
   validateInvoiceStatus,

@@ -218,8 +218,25 @@ class UserController {
         });
       }
       
-      // Deaktiviere statt löschen
-      await this.toggleUserStatus(req, res);
+      // Immer deaktivieren (nie reaktivieren), auch wenn der Benutzer schon inaktiv ist
+      const user = await userService.findById(id);
+      if (!user) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+
+      if (user.role === 'ADMIN' && user.active) {
+        const activeAdminCount = await prisma.user.count({ where: { role: 'ADMIN', active: true } });
+        if (activeAdminCount <= 1) {
+          return res.status(400).json({ error: 'Der letzte aktive Administrator kann nicht deaktiviert werden' });
+        }
+      }
+
+      const result = await userService.deactivateUser(id);
+      if (user.active) {
+        await prisma.auditLog.create({
+          data: { userId: req.user.id, action: 'DEACTIVATE_USER', entityType: 'User', entityId: id }
+        });
+      }
+
+      res.json({ message: 'Benutzer erfolgreich deaktiviert', user: result });
     } catch (error) {
       console.error('Delete user error:', error);
       res.status(500).json({ error: 'Fehler beim Löschen des Benutzers' });

@@ -1,6 +1,7 @@
 const articleService = require('../services/articleService');
 const fileUploadService = require('../services/fileUploadService');
 const prisma = require('../utils/prisma');
+const { sendError } = require('../utils/httpError');
 
 // Prisma Decimal mag Strings -> kleine Helper
 const toDecimalString = (v) =>
@@ -147,7 +148,7 @@ class ArticleController {
         updateData.imageLarge = imagePaths.large;
       }
 
-      const article = await articleService.updateArticle(id, updateData);
+      const article = await articleService.updateArticle(id, updateData, req.user.id);
 
       // Alte Bilddateien erst löschen, wenn die Datenbank nicht mehr auf sie zeigt (best-effort)
       if (replaceImage && currentArticle.imageUrl) {
@@ -173,8 +174,7 @@ class ArticleController {
 
       res.json({ message: 'Artikel erfolgreich aktualisiert', article: sanitizeArticle(article) });
     } catch (error) {
-      console.error('Update article error:', error);
-      res.status(500).json({ error: 'Fehler beim Aktualisieren des Artikels' });
+      sendError(res, error, 'Fehler beim Aktualisieren des Artikels', 'Update article error:');
     }
   }
 
@@ -198,8 +198,7 @@ class ArticleController {
         article: sanitizeArticle(article),
       });
     } catch (error) {
-      console.error('Toggle article status error:', error);
-      res.status(500).json({ error: 'Fehler beim Ändern des Artikelstatus' });
+      sendError(res, error, 'Fehler beim Ändern des Artikelstatus', 'Toggle article status error:');
     }
   }
 

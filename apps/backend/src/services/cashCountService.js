@@ -12,6 +12,10 @@
 //   + Bar-Erstattungen    (Transaction REFUND, CASH, Betrag negativ -> wird addiert)
 //   + Bar-Aufladungen     (AccountTopUp CASH)
 //   - Bar-Ausgaben        (PurchaseDocument RECHNUNG, paid, CASH; paidAt, ersatzweise documentDate)
+//   (Kassenbewegungen zählen nach max(occurredAt, createdAt): eine nach der letzten Zählung
+//    erfasste, aber davor datierte Bewegung landet in der nächsten Zählung. Bar-Zahlungen von
+//    Rechnungen dürfen gar nicht vor die letzte Zählung datiert werden, siehe
+//    assertCashPaymentAfterLastCount.)
 //   - Einzahlungen auf Bank  (CashMovement DEPOSIT_TO_BANK)
 //   + Abhebungen von Bank    (CashMovement WITHDRAWAL_FROM_BANK)
 //   + Sonstige Bareinnahmen  (CashMovement OTHER_INCOME)
@@ -105,6 +109,27 @@ class CashCountService {
     }));
   }
 
+  /**
+   * Bar-Zahlungen von Kunden- und Lieferantenrechnungen dürfen nicht vor die letzte Kassenzählung
+   * datiert werden. Das Zählfenster läuft nach Zahldatum; eine nachträglich erfasste Zahlung mit
+   * Datum vor der letzten Zählung fiele in kein Fenster (für Rechnungen gibt es keinen unveränderlichen
+   * Erfassungszeitpunkt, updatedAt ändert sich z. B. beim Nachreichen des Scans).
+   * Wirft einen 400er-Fehler mit Meldung, sonst nichts.
+   */
+  async assertCashPaymentAfterLastCount(when, db = prisma) {
+    const t = when instanceof Date ? when : new Date(when);
+    if (Number.isNaN(t.getTime())) return;
+    const last = await db.cashCount.findFirst({ orderBy: { countedAt: 'desc' }, select: { countedAt: true } });
+    if (last && t.getTime() <= new Date(last.countedAt).getTime()) {
+      const at = new Date(last.countedAt);
+      const fmt = `${at.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} um ${at.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr`;
+      const err = new Error(`Eine Bar-Zahlung kann nicht vor die letzte Kassenzählung (${fmt}) datiert werden, sonst fehlt sie im Kassen-Soll. Bitte als Zahldatum heute bzw. einen Zeitpunkt nach der Zählung wählen.`);
+      err.statusCode = 400;
+      err.userFacing = true;
+      throw err;
+    }
+  }
+
   async getById(id) {
     return toPlain(await prisma.cashCount.findUnique({
       where: { id },
@@ -160,7 +185,8 @@ class CashCountService {
         select: { id: true, documentNumber: true, supplier: true, totalAmount: true, paidAt: true, documentDate: true },
         orderBy: { documentDate: 'asc' }
       }),
-      cashMovementService.summarize(window),
+      // Kassenbewegungen: nach max(Datum, Erfassung), damit rückdatierte Nachträge nicht verloren gehen
+      cashMovementService.summarize(window, { cashCount: { since, until } }),
       // Bar bezahlte Kundenrechnungen: das Geld landet in der Kasse (Zahlungsart seit 09/2026;
       // Altbestand ohne Zahlungsart gilt als Bank und taucht hier nicht auf)
       prisma.invoice.findMany({
@@ -259,7 +285,6 @@ class CashCountService {
     return { ...preview, denominations: DENOMINATIONS };
   }
 
-  /** Wechselgeld-Sockel: Betrag, der nach dem Zählen in der Kasse bleibt (Rest kann zur Bank). */
   /** Einstellungen Kasse & Bank: Wechselgeld-Sockel und SumUp-Gebührensatz (%) */
   async getSettings() {
     const rows = await prisma.systemSetting.findMany({ where: { key: { in: [CASH_FLOAT_KEY, CARD_FEE_KEY] } } });

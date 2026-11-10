@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { Add, DeleteOutline } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DatePicker } from '../common/SafeDatePickers';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { endOfDay, format, isToday } from 'date-fns';
 import api from '../../services/api';

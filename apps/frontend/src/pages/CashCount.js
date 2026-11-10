@@ -15,7 +15,7 @@ import { useTheme } from '@mui/material/styles';
 import {
   AccountBalance, ChevronRight, DeleteOutline, ExpandLess, ExpandMore, MenuBook, PictureAsPdf, PointOfSale, Savings, Undo,
 } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DatePicker } from '../components/common/SafeDatePickers';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { endOfDay, format, isToday, isYesterday, startOfDay, subDays } from 'date-fns';
 import { de } from 'date-fns/locale';

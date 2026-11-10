@@ -44,8 +44,6 @@ import {
   PointOfSale,
   ExpandLess,
   ExpandMore,
-  WifiOff,
-  CloudSync
 } from '@mui/icons-material';
 import { useOffline } from '../../context/OfflineContext';
 import { useAuth } from '../../context/AuthContext';
@@ -53,13 +51,14 @@ import { useColorMode } from '../../theme';
 import { Snackbar, Alert } from '@mui/material';
 import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import ChangePasswordDialog from '../common/ChangePasswordDialog';
+import OfflineStatus from '../offline/OfflineStatus';
 
 import LogoNeon from '../../logo_neon_v2.png';
 
 const drawerWidth = 240;
 
 const Layout = () => {
-  const { isOnline, queue } = useOffline();
+  const { isOnline } = useOffline();
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
@@ -283,26 +282,8 @@ const Layout = () => {
               </Box>
             )}
 
-            {/* Offline Indicator */}
-            {!isOnline && (
-              <Box sx={{ mr: 2, display: 'flex', alignItems: 'center', color: 'primary.contrastText', bgcolor: 'error.lighter', px: 1.5, py: 0.5, borderRadius: 2 }}>
-                <WifiOff sx={{ mr: 1, fontSize: 20 }} />
-                <Typography variant="subtitle2" fontWeight={800} sx={{ display: { xs: 'none', sm: 'block' } }}>
-                  OFFLINE {queue.length > 0 && `(${queue.length})`}
-                </Typography>
-                {queue.length > 0 && <Typography variant="subtitle2" fontWeight={800} sx={{ display: { xs: 'block', sm: 'none' } }}>
-                  ({queue.length})
-                </Typography>}
-              </Box>
-            )}
-            {isOnline && queue.length > 0 && (
-              <Box sx={{ mr: 2, display: 'flex', alignItems: 'center', color: 'warning.main', bgcolor: 'warning.lighter', px: 1.5, py: 0.5, borderRadius: 2 }}>
-                <CloudSync sx={{ mr: 1, fontSize: 20, animation: 'spin 2s linear infinite' }} />
-                <Typography variant="subtitle2" fontWeight={800}>
-                  SYNC ({queue.length})
-                </Typography>
-              </Box>
-            )}
+            {/* Offline-Betrieb: offline / wartende / fehlgeschlagene Buchungen, antippen öffnet die Liste */}
+            <OfflineStatus />
 
             <IconButton
               color="inherit"

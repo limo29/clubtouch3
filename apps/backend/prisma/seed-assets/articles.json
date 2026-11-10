@@ -1,0 +1,252 @@
+{
+  "categoryOrder": [
+    "Bier",
+    "Alkoholfrei",
+    "Wein & Spritzer"
+  ],
+  "articles": [
+    {
+      "name": "Aperol",
+      "price": 0.9,
+      "category": "Wein & Spritzer",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 10,
+      "image": "154.jpg"
+    },
+    {
+      "name": "Bowle",
+      "price": 3,
+      "category": "Wein & Spritzer",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 3,
+      "image": null
+    },
+    {
+      "name": "CapriSonne",
+      "price": 1.8,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 10,
+      "image": "128.jpg"
+    },
+    {
+      "name": "Coca Cola",
+      "price": 1.8,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 24,
+      "image": "76.jpg"
+    },
+    {
+      "name": "Frucade ACE",
+      "price": 1.3,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "75.jpg"
+    },
+    {
+      "name": "Frucade Apfelschorle",
+      "price": 1.3,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "90.jpg"
+    },
+    {
+      "name": "Frucade ColaMix",
+      "price": 1.3,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "81.jpg"
+    },
+    {
+      "name": "Frucade Eistee",
+      "price": 1.3,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "86.jpg"
+    },
+    {
+      "name": "Frucade Orangen Limonade",
+      "price": 1.3,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "79.jpg"
+    },
+    {
+      "name": "Frucade Zitronen Limonade",
+      "price": 1.3,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "80.jpg"
+    },
+    {
+      "name": "Gluehwein",
+      "price": 1.8,
+      "category": "Wein & Spritzer",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 3,
+      "image": "118.jpg"
+    },
+    {
+      "name": "Kummert Doppelbock",
+      "price": 1.8,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 16,
+      "image": "121.jpg"
+    },
+    {
+      "name": "Lillet",
+      "price": 3,
+      "category": "Wein & Spritzer",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 5,
+      "image": "116.jpg"
+    },
+    {
+      "name": "Powerade",
+      "price": 2,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 12,
+      "image": null
+    },
+    {
+      "name": "Red Bull",
+      "price": 2,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 24,
+      "image": "127.jpg"
+    },
+    {
+      "name": "Schiessl Bier",
+      "price": 1.6,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "59.jpg"
+    },
+    {
+      "name": "Schiessl Pils",
+      "price": 1.2,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 24,
+      "image": "73.jpg"
+    },
+    {
+      "name": "Sekt",
+      "price": 2,
+      "category": "Wein & Spritzer",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 3,
+      "image": "114.jpg"
+    },
+    {
+      "name": "Wein",
+      "price": 2,
+      "category": "Wein & Spritzer",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 3,
+      "image": "141.jpg"
+    },
+    {
+      "name": "Winkler 1617",
+      "price": 1.2,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 24,
+      "image": "106.jpg"
+    },
+    {
+      "name": "Winkler Cola Mix",
+      "price": 1.3,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": null
+    },
+    {
+      "name": "Winkler Doppelbock",
+      "price": 2,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": null
+    },
+    {
+      "name": "Winkler Hell",
+      "price": 1.6,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "135.jpg"
+    },
+    {
+      "name": "Winkler Jubilatus Bock",
+      "price": 1.6,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 24,
+      "image": "113.jpg"
+    },
+    {
+      "name": "Winkler Naturradler",
+      "price": 1.2,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 24,
+      "image": "88.jpg"
+    },
+    {
+      "name": "Winkler Tafelwasser",
+      "price": 1,
+      "category": "Alkoholfrei",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": null
+    },
+    {
+      "name": "Winkler weizen",
+      "price": 1.2,
+      "category": "Bier",
+      "unit": "Flasche",
+      "purchaseUnit": "Kiste",
+      "unitsPerPurchase": 20,
+      "image": "108.jpg"
+    }
+  ]
+}

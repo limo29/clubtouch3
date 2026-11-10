@@ -16,7 +16,7 @@ import {
   Download, Description, TableChart, PictureAsPdf, Receipt, Inventory, People, Assessment, AccountBalance,
   CalendarToday, EuroSymbol, ChevronLeft, ChevronRight, PointOfSale, AddCard,
 } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DatePicker } from '../components/common/SafeDatePickers';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { format, addMonths, subMonths, startOfMonth } from 'date-fns';

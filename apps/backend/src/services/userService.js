@@ -130,6 +130,15 @@ class UserService {
     return { closedSessions: removed.count };
   }
 
+  // Immer deaktivieren (idempotent), Sessions beenden
+  async deactivateUser(id) {
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) throw new UserError('Benutzer nicht gefunden', 404);
+    const updated = await prisma.user.update({ where: { id }, data: { active: false }, select: { id: true, active: true } });
+    await prisma.session.deleteMany({ where: { userId: id } });
+    return updated;
+  }
+
   // Aktiviere/Deaktiviere User
   async toggleUserStatus(id) {
     const user = await prisma.user.findUnique({ where: { id } });

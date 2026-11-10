@@ -131,6 +131,8 @@ model Transaction {
   cancelledAt   DateTime?
   cancelledBy   String? // User ID
   instanceId    String? // Multi-Instanz-Support
+  // Idempotenzschlüssel des Clients (Offline-Warteschlange): dieselbe clientId wird nur einmal gebucht
+  clientId      String?         @unique
   createdAt     DateTime        @default(now())
 
   // Relationen
@@ -173,6 +175,8 @@ model AccountTopUp {
   amount    Decimal     @db.Decimal(10, 2)
   method    TopUpMethod
   reference String? // z.B. Überweisungsreferenz
+  // Idempotenzschlüssel des Clients (Offline-Warteschlange)
+  clientId  String?     @unique
   createdAt DateTime    @default(now())
 
   // Relationen

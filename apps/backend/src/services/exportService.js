@@ -8,6 +8,8 @@ const accountingService = require('./accountingService');
 const customerService = require('./customerService');
 const cashCountService = require('./cashCountService');
 const cashMovementService = require('./cashMovementService');
+const yearEndExtrasService = require('./yearEndExtrasService');
+const closedPeriod = require('../utils/closedPeriod');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 
 // Logo einmal beim Laden lesen; fehlt die Datei, wird ohne Logo gerendert.
@@ -64,30 +66,43 @@ class ExportService {
   _invoiceStatusLabel(st) {
     return ({ DRAFT: 'Entwurf', SENT: 'Versendet', PAID: 'Bezahlt', CANCELLED: 'Storniert' })[st] || (st || '—');
   }
+  /** Einheit passend zur Menge: "1 Flasche", "30 Flaschen", "2 Kisten", "3 Stück" */
+  _unitLabel(unit, n) {
+    if (!unit) return '';
+    if (Math.abs(Number(n)) === 1) return unit;
+    const plural = {
+      Flasche: 'Flaschen', Kiste: 'Kisten', Dose: 'Dosen', Glas: 'Gläser', Packung: 'Packungen', Kasten: 'Kästen',
+      Portion: 'Portionen', Tüte: 'Tüten', Fass: 'Fässer', Karton: 'Kartons', Tray: 'Trays', Stange: 'Stangen', Tafel: 'Tafeln',
+      Fl: 'Fl.', 'Fl.': 'Fl.'
+    };
+    if (plural[unit]) return plural[unit];
+    if (/(Stück|Liter|Becher|Beutel|Kanister|Eimer|Sack)$/.test(unit)) return unit;
+    if (/e$/.test(unit)) return `${unit}n`;
+    return unit;
+  }
+  /** Menge deutsch ohne unnötige Nachkommastellen ("3", "1,5") */
+  _fmtNum(n) {
+    const v = Number(n || 0);
+    return Number.isInteger(v) ? String(v) : v.toLocaleString('de-DE', { maximumFractionDigits: 2 });
+  }
+  /**
+   * Menge mit Einheit, ab einer vollen Kiste mit Aufschlüsselung:
+   *   "30 Flaschen (1 Kiste + 10)", "1 Flasche", "-34 Flaschen" (negativ: keine Kisten-Zerlegung)
+   */
   _fmtQty(n, unit, pUnit, pQty) {
     const val = Number(n || 0);
-    const absVal = Math.abs(val);
-    const sign = val < 0 ? '-' : '';
-
-    // Bedingung: Keine Umrechnung definiert oder Total < 1 Einheit oder pQty nicht valide
-    if (!pUnit || !pQty || pQty <= 1 || absVal < 1) {
-      if (!unit) return val.toFixed(0);
-      return `${val.toFixed(0)} ${unit}`;
-    }
-
-    const crates = Math.floor(absVal / pQty);
-    const remainder = Number((absVal % pQty).toFixed(2));
-
-    if (crates === 0) {
-      return `${val.toFixed(0)} ${unit}`;
-    }
-
-    const parts = [];
-    if (crates > 0) parts.push(`${crates} ${pUnit}`);
-    if (remainder > 0) parts.push(`${remainder} ${unit}`);
-
-    const human = parts.join(', ');
-    return `${sign}${human} (${val.toFixed(0)})`;
+    const base = `${this._fmtNum(val)}${unit ? ` ${this._unitLabel(unit, val)}` : ''}`;
+    const f = Number(pQty || 0);
+    if (!pUnit || !(f > 1) || val < f) return base;
+    const crates = Math.floor(val / f);
+    const rest = Math.round((val - crates * f) * 100) / 100;
+    // geschützte Leerzeichen: die Klammer bricht nur als Ganzes um
+    return `${base} (${crates}\u00A0${this._unitLabel(pUnit, crates)}${rest > 0 ? `\u00A0+\u00A0${this._fmtNum(rest)}` : ''})`;
+  }
+  /** Betrag mit Vorzeichen (+/-), für Differenzen */
+  _fmtSigned(n) {
+    const v = Math.round(Number(n || 0) * 100) / 100;
+    return `${v > 0 ? '+' : ''}${this._fmtEUR(v)}`;
   }
 
   /* ========= PDF-GRUNDGERÜST =========
@@ -224,6 +239,60 @@ class ExportService {
     doc.font(theme.font.regular).fillColor(theme.color.text);
   }
 
+  /** Zwischenüberschrift innerhalb einer Sektion (nie allein am Seitenende). */
+  _subheading(doc, theme, text) {
+    this._ensureRoom(doc, theme, 90);
+    doc.moveDown(0.3);
+    doc.font(theme.font.bold).fontSize(11).fillColor(theme.color.text)
+      .text(text, theme.page.margin, doc.y, { width: doc.page.width - theme.page.margin * 2 });
+    doc.moveDown(0.4);
+    doc.font(theme.font.regular).fontSize(10).fillColor(theme.color.text);
+  }
+
+  /** Hinweis auf gekürzte Listen: "… und n weitere" */
+  _moreNote(doc, theme, shown, total) {
+    if (total > shown) this._note(doc, theme, `… und ${total - shown} weitere (nicht einzeln gedruckt; Anzahl und Summen oben sind vollständig).`);
+  }
+
+  /**
+   * Kompakte zweispaltige Saldenliste (Name links, Betrag rechts je Spalte), spaltenweise
+   * von oben nach unten je Seite. rows: [{ label, value, color }]
+   */
+  _twoColumnList(doc, theme, rows, { fontSize = 8.5, lineH = 11.5 } = {}) {
+    const left = theme.page.margin;
+    const usable = doc.page.width - left * 2;
+    const gap = 18;
+    const colW = (usable - gap) / 2;
+    const valueW = 62;
+    let i = 0;
+    while (i < rows.length) {
+      this._ensureRoom(doc, theme, lineH * 3);
+      const perCol = Math.max(1, Math.floor((this._bottom(doc, theme) - doc.y - 4) / lineH));
+      const remaining = rows.length - i;
+      const take = Math.min(remaining, perCol * 2);
+      const leftCount = Math.min(perCol, Math.ceil(take / 2));
+      const y0 = doc.y;
+      for (let k = 0; k < take; k++) {
+        const r = rows[i + k];
+        const col = k < leftCount ? 0 : 1;
+        const rowIdx = col === 0 ? k : k - leftCount;
+        const x = left + col * (colW + gap);
+        const y = y0 + rowIdx * lineH;
+        if (rowIdx % 2 === 0) doc.save().rect(x, y - 1.5, colW, lineH).fill(theme.color.zebra).restore();
+        doc.font(theme.font.regular).fontSize(fontSize).fillColor(theme.color.text)
+          .text(String(r.label ?? ''), x + 2, y, { width: colW - valueW - 6, lineBreak: false, ellipsis: true });
+        doc.fillColor(r.color || theme.color.text)
+          .text(String(r.value ?? ''), x + colW - valueW - 2, y, { width: valueW, align: 'right', lineBreak: false });
+      }
+      i += take;
+      doc.y = y0 + leftCount * lineH + 4;
+      doc.x = left;
+      if (i < rows.length) doc.addPage();
+    }
+    doc.font(theme.font.regular).fontSize(10).fillColor(theme.color.text);
+    doc.moveDown(0.4);
+  }
+
   /** Kleiner Hinweistext unter einer Tabelle/Sektion. */
   _note(doc, theme, text) {
     this._ensureRoom(doc, theme, 30);
@@ -237,13 +306,18 @@ class ExportService {
    * Label/Wert-Liste mit rechtsbündigen Beträgen.
    * rows: [{ label, value, bold, color, rule, spacer }]
    */
-  _kvList(doc, theme, rows, { headerInfo, labelWidth } = {}) {
+  _kvList(doc, theme, rows, { headerInfo, labelWidth, keepTogether = false } = {}) {
     if (headerInfo) doc._ct.headerInfo = { ...doc._ct.headerInfo, ...headerInfo };
     const left = theme.page.margin;
     const usable = doc.page.width - left * 2;
     const valueW = 120;
     const labelW = labelWidth || usable - valueW;
     const lineH = 16;
+    // Block zusammenhalten (z. B. Herleitung bis zur Differenz), solange er auf eine Seite passt
+    if (keepTogether) {
+      const need = (rows || []).reduce((a, r) => a + (r.spacer ? 6 : lineH), 0) + 8;
+      if (need < this._bottom(doc, theme) - theme.page.top) this._ensureRoom(doc, theme, need);
+    }
     (rows || []).forEach(r => {
       if (r.spacer) { doc.y += 6; return; }
       this._ensureRoom(doc, theme, lineH + 4);
@@ -251,8 +325,9 @@ class ExportService {
       if (r.rule) {
         doc.moveTo(left, y - 3).lineTo(left + usable, y - 3).lineWidth(0.6).strokeColor(theme.color.border).stroke();
       }
+      // einzeilig: zu lange Beschriftungen werden mit … gekürzt statt in die nächste Zeile zu laufen
       doc.font(r.bold ? theme.font.bold : theme.font.regular).fontSize(10).fillColor(theme.color.text)
-        .text(String(r.label ?? ''), left, y, { width: labelW, lineBreak: false, ellipsis: true });
+        .text(String(r.label ?? ''), left, y, { width: labelW - 6, height: lineH - 2, ellipsis: true });
       doc.font(r.bold ? theme.font.bold : theme.font.regular).fontSize(10).fillColor(r.color || theme.color.text)
         .text(String(r.value ?? ''), left + labelW, y, { width: valueW, align: 'right', lineBreak: false });
       doc.y = y + lineH;
@@ -346,24 +421,40 @@ class ExportService {
     this._ensureRoom(doc, theme, headerH + rowPad * 2 + 40);
     renderHeader();
 
-    rows.forEach((row, i) => {
-      doc.font(theme.font.regular).fontSize(10);
-      const heights = columns.map((col, idx) => {
-        const txt = col.render ? col.render(row) : (row[col.key] ?? '');
-        return Math.max(doc.heightOfString(String(txt ?? ''), { width: widths[idx] - 4 }), 10);
-      });
-      const rowH = Math.max(...heights) + rowPad * 2;
+    // Schriftgröße je Zelle: Passt ein einzelnes Wort nicht in die Spalte, wird bis 8 pt verkleinert,
+    // statt das Wort mitten drin umzubrechen ("Lieferante nnamen").
+    const cellSize = (txt, w) => {
+      const words = String(txt ?? '').split(/\s+/).filter(Boolean);
+      let size = 10;
+      doc.font(theme.font.regular);
+      while (size > 8) {
+        doc.fontSize(size);
+        if (!words.some(word => doc.widthOfString(word) > w)) break;
+        size -= 0.5;
+      }
+      return size;
+    };
 
-      ensureRoom(rowH + 30);
+    rows.forEach((row, i) => {
+      const cells = columns.map((col, idx) => {
+        const txt = String((col.render ? col.render(row) : (row[col.key] ?? '')) ?? '');
+        const size = cellSize(txt, widths[idx] - 4);
+        doc.font(theme.font.regular).fontSize(size);
+        return { txt, size, h: Math.max(doc.heightOfString(txt, { width: widths[idx] - 4 }), 10) };
+      });
+      const rowH = Math.max(...cells.map(c => c.h)) + rowPad * 2;
+
+      // Zeile nie über den Seitenrand teilen: passt sie nicht mehr, neue Seite mit Kopfzeile.
+      // Die letzte Zeile nimmt die Summenzeile mit, damit diese nicht allein auf der Folgeseite steht.
+      ensureRoom(rowH + (sumRow && i === rows.length - 1 ? 52 : 30));
 
       if (i % 2 === 0) doc.save().rect(left, doc.y - 2, usableWidth, rowH + 4).fill(theme.color.zebra).restore();
 
       let x = left; const baseY = doc.y + rowPad;
       columns.forEach((col, idx) => {
-        const txt = col.render ? col.render(row) : (row[col.key] ?? '');
         const color = typeof col.color === 'function' ? col.color(row) : theme.color.text;
-        doc.fillColor(color).font(theme.font.regular).fontSize(10)
-          .text(String(txt ?? ''), x + 2, baseY, { width: widths[idx] - 4, align: col.align || 'left' });
+        doc.fillColor(color).font(theme.font.regular).fontSize(cells[idx].size)
+          .text(cells[idx].txt, x + 2, baseY, { width: widths[idx] - 4, align: col.align || 'left' });
         x += widths[idx];
       });
 
@@ -374,7 +465,10 @@ class ExportService {
     });
 
     if (sumRow) {
-      ensureRoom(28);
+      // Höhe der Summenzeile vorab messen, damit sie nie über den Seitenrand umbricht
+      doc.font(theme.font.bold).fontSize(10);
+      const sumH = Math.max(...sumRow.map((val, idx) => doc.heightOfString(String(val ?? ''), { width: Math.max(10, widths[idx] - 4) })), 12);
+      ensureRoom(sumH + 24);
       doc.moveDown(0.2);
       doc.moveTo(left, doc.y).lineTo(right, doc.y).lineWidth(0.6).strokeColor(theme.color.border).stroke();
       doc.moveDown(0.2);
@@ -386,7 +480,7 @@ class ExportService {
         x += widths[idx];
       });
       doc.font(theme.font.regular);
-      doc.y = baseY + 16;
+      doc.y = baseY + Math.max(16, sumH + 4);
     }
 
     doc.moveDown(1);
@@ -467,6 +561,38 @@ class ExportService {
     const hh = String(startHour).padStart(2, '0');
     const timeOf = (d) => new Date(d).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 
+    // Barbestand laut App: dieselbe Herleitung wie die Kassenzählung (since exklusiv, until inklusiv)
+    const winStart = new Date(summary.window.start);
+    const winEnd = new Date(summary.window.end);
+    const cashMv = await cashCountService.getCashMovements(new Date(winStart.getTime() - 1), winEnd);
+    const cashChange = Math.round((
+      cashMv.cashSales + cashMv.cashRefunds + cashMv.cashTopUps - cashMv.cashExpenses
+      + (cashMv.cashInvoices?.total || 0) - (cashMv.bankDeposits?.total || 0) + (cashMv.bankWithdrawals?.total || 0)
+      + (cashMv.otherIncome?.total || 0) - (cashMv.otherExpense?.total || 0)
+    ) * 100) / 100;
+    const cnt = (k) => (cashMv.counts && cashMv.counts[k]) || 0;
+
+    // Stornos: Art des Originals und Mehrfach-Stornos ermitteln (Vorzeichen der Gegenbuchung erklären)
+    const cancellations = summary.cancellations || [];
+    const origIds = [...new Set(cancellations.map(c => c.originalTransactionId).filter(Boolean))];
+    const [origRows, refundCounts] = origIds.length ? await Promise.all([
+      prisma.transaction.findMany({ where: { id: { in: origIds } }, select: { id: true, type: true } }),
+      prisma.transaction.groupBy({ by: ['originalTransactionId'], where: { type: 'REFUND', originalTransactionId: { in: origIds } }, _count: true })
+    ]) : [[], []];
+    const origType = new Map(origRows.map(o => [o.id, o.type]));
+    const refundsPerOrig = new Map(refundCounts.map(r => [r.originalTransactionId, r._count]));
+    const stornoOf = (r) => {
+      const t = r.originalTransactionId ? origType.get(r.originalTransactionId) : null;
+      const at = r.originalCreatedAt ? this._fmtDateTime(r.originalCreatedAt) : '';
+      if (!t) return 'ohne Original';
+      if (t === 'REFUND') return `Stornobuchung ${at} (!)`;
+      const label = ({ SALE: 'Verkauf', OWNER_USE: 'Eigenverbrauch', EXPIRED: 'Abgelaufen' })[t] || t;
+      return `${label} ${at}${(refundsPerOrig.get(r.originalTransactionId) || 0) > 1 ? ' (mehrfach storniert!)' : ''}`;
+    };
+    const stornoSum = Math.round(cancellations.reduce((a, r) => a + Number(r.amount || 0), 0) * 100) / 100;
+    const multiStorno = cancellations.filter(r => (refundsPerOrig.get(r.originalTransactionId) || 0) > 1).length;
+    const stornoOfStorno = cancellations.filter(r => origType.get(r.originalTransactionId) === 'REFUND').length;
+
     return new Promise((resolve, reject) => {
       try {
         const headerInfo = {
@@ -483,17 +609,32 @@ class ExportService {
           { label: `Bar-Umsatz (${sm.cashTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.cashRevenue) },
           { label: `Kundenkonto-Umsatz (${sm.accountTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.accountRevenue) },
           ...(Number(sm.cardTransactions || 0) > 0 ? [{ label: `Karten-Umsatz SumUp (${sm.cardTransactions} Verkäufe)`, value: this._fmtEUR(sm.cardRevenue) }] : []),
-          { label: `Gesamtumsatz (${sm.totalTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.totalRevenue), bold: true, color: theme.color.success, rule: true },
+          { label: `Gesamtumsatz (${sm.totalTransactions || 0} Verkäufe, ohne stornierte)`, value: this._fmtEUR(sm.totalRevenue), bold: true, color: theme.color.success, rule: true },
           { spacer: true },
-          { label: `Stornierte Verkäufe (${sm.cancelledTransactions || 0})`, value: this._fmtEUR(sm.cancelledRevenue), color: theme.color.danger },
+          { label: `Stornos des Tages (${cancellations.length} Gegenbuchungen, Liste unten)`, value: this._fmtSigned(stornoSum), color: theme.color.danger },
           { spacer: true },
           { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(sm.topUpsCash) },
           { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(sm.topUpsTransfer) },
-          ...(Number(sm.topUpsCard || 0) !== 0 ? [{ label: 'Aufladungen Kundenkonten per Karte (SumUp)', value: this._fmtEUR(sm.topUpsCard) }] : []),
-          { label: `Aufladungen gesamt (${sm.topUpsCount || 0})`, value: this._fmtEUR(sm.topUpsTotal), bold: true },
-          { spacer: true },
-          { label: 'Bargeld-Zufluss des Tages (Bar-Umsatz + Bar-Aufladungen)', value: this._fmtEUR(Number(sm.cashRevenue || 0) + Number(sm.topUpsCash || 0)), bold: true, rule: true }
+          { label: 'Aufladungen Kundenkonten per Karte (SumUp)', value: this._fmtEUR(sm.topUpsCard) },
+          { label: `Aufladungen gesamt (${sm.topUpsCount || 0})`, value: this._fmtEUR(sm.topUpsTotal), bold: true, rule: true }
         ], { headerInfo });
+
+        // Barbestand: alles, was die Kasse laut App bewegt hat (wie die Soll-Herleitung der Kassenzählung)
+        this._section(doc, theme, 'Veränderung Barbestand laut App', headerInfo);
+        const cashRows = [
+          { label: `+ Bar-Verkäufe (${cnt('sales')}, einschließlich später stornierter)`, value: this._fmtEUR(cashMv.cashSales) },
+          { label: `+ Bar-Stornos (${cnt('refunds')}, Geld zurückgegeben)`, value: this._fmtEUR(cashMv.cashRefunds) },
+          { label: `+ Bar-Aufladungen Kundenkonten (${cnt('topUps')})`, value: this._fmtEUR(cashMv.cashTopUps) }
+        ];
+        if (cnt('cashInvoices')) cashRows.push({ label: `+ Bar bezahlte Kundenrechnungen (${cnt('cashInvoices')})`, value: this._fmtEUR(cashMv.cashInvoices.total) });
+        if (cnt('expenses')) cashRows.push({ label: `- Bar bezahlte Lieferantenrechnungen (${cnt('expenses')})`, value: this._fmtEUR(-cashMv.cashExpenses) });
+        if (cnt('bankDeposits')) cashRows.push({ label: `- Einzahlungen auf Bank (${cnt('bankDeposits')})`, value: this._fmtEUR(-cashMv.bankDeposits.total) });
+        if (cnt('bankWithdrawals')) cashRows.push({ label: `+ Abhebungen von Bank (${cnt('bankWithdrawals')})`, value: this._fmtEUR(cashMv.bankWithdrawals.total) });
+        if (cnt('otherIncome')) cashRows.push({ label: `+ Sonstige Bareinnahmen (${cnt('otherIncome')})`, value: this._fmtEUR(cashMv.otherIncome.total) });
+        if (cnt('otherExpense')) cashRows.push({ label: `- Sonstige Barausgaben (${cnt('otherExpense')})`, value: this._fmtEUR(-cashMv.otherExpense.total) });
+        cashRows.push({ label: '= Veränderung Barbestand laut App', value: this._fmtSigned(cashChange), bold: true, rule: true });
+        this._kvList(doc, theme, cashRows, { headerInfo, keepTogether: true });
+        this._note(doc, theme, 'Ohne Kassenzählung: Ob das Geld tatsächlich in der Kasse ist, zeigt erst die nächste Kassenzählung (Soll/Ist).');
 
         this._section(doc, theme, 'Aufladungen (Kundenkonten)', headerInfo);
         this._table(doc, theme, {
@@ -501,8 +642,8 @@ class ExportService {
             { header: 'Uhrzeit', width: 70, render: r => timeOf(r.createdAt) },
             { header: 'Kunde', width: 220, render: r => r.customer },
             { header: 'Art', width: 100, render: r => r.method === 'CASH' ? 'Bar' : r.method === 'CARD' ? 'Karte' : 'Überweisung' },
-            { header: 'Referenz', width: 110, render: r => r.reference || '' },
-            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
+            { header: 'Referenz', width: 110, render: r => String(r.reference || '').startsWith('STORNO:') ? 'Storno einer Aufladung' : (r.reference || '') },
+            { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.amount), color: r => Number(r.amount) < 0 ? theme.color.danger : theme.color.success }
           ],
           rows: summary.topUps || [],
           sumRow: ['Summe', '', '', '', this._fmtEUR(sm.topUpsTotal)],
@@ -513,18 +654,24 @@ class ExportService {
         this._section(doc, theme, 'Stornos', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Uhrzeit', width: 70, render: r => timeOf(r.createdAt) },
-            { header: 'Original vom', width: 120, render: r => r.originalCreatedAt ? this._fmtDateTime(r.originalCreatedAt) : '—' },
-            { header: 'Kunde', width: 150, render: r => r.customer || 'Bar-Zahlung' },
-            { header: 'Zahlungsart', width: 90, render: r => this._paymentLabel(r.paymentMethod) },
-            { header: 'Kassierer/in', width: 110, render: r => r.cashier },
-            { header: 'Betrag', width: 80, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.danger }
+            { header: 'Uhrzeit', width: 55, render: r => timeOf(r.createdAt) },
+            { header: 'Storno von', width: 140, render: r => stornoOf(r) },
+            { header: 'Kunde', width: 120, render: r => r.customer || 'Bar-Zahlung' },
+            { header: 'Zahlung', width: 80, render: r => this._paymentLabel(r.paymentMethod) },
+            { header: 'Kassierer/in', width: 90, render: r => r.cashier },
+            { header: 'Gegenbuchung', width: 95, align: 'right', render: r => this._fmtSigned(r.amount), color: r => Number(r.amount) > 0 ? theme.color.warning : theme.color.danger }
           ],
-          rows: summary.cancellations || [],
-          sumRow: ['Summe', '', '', '', '', this._fmtEUR((summary.cancellations || []).reduce((a, r) => a + Number(r.amount || 0), 0))],
+          rows: cancellations,
+          sumRow: ['Summe', '', '', '', '', this._fmtSigned(stornoSum)],
           emptyHint: 'Keine Stornos an diesem Geschäftstag.',
           headerInfo
         });
+        if (cancellations.length) {
+          const hints = ['Gegenbuchung: minus = Betrag an den Gast zurück (bar oder Gutschrift aufs Kundenkonto); 0,00 € bei Eigenverbrauch/Abgelaufen (nur Bestand).'];
+          if (stornoOfStorno) hints.push(`${stornoOfStorno} Storno einer Stornobuchung (!): bucht den Betrag erneut ab, daher plus.`);
+          if (multiStorno) hints.push(`${multiStorno} Gegenbuchungen gehören zu mehrfach stornierten Verkäufen: bitte prüfen.`);
+          this._note(doc, theme, hints.join(' '));
+        }
 
         this._section(doc, theme, 'Top 10 Artikel', headerInfo);
         this._table(doc, theme, {
@@ -620,8 +767,12 @@ class ExportService {
         where: { createdAt: { gte: startDate, lte: endDate } },
         _sum: { amount: true }, _count: true
       }),
+      // Nach Zahldatum wie in der EÜR (accountingService.getProfitLoss): paidAt, Altbelege ohne paidAt nach documentDate
       prisma.purchaseDocument.aggregate({
-        where: { type: 'RECHNUNG', paid: true, documentDate: { gte: startDate, lte: endDate } },
+        where: {
+          type: 'RECHNUNG', paid: true,
+          OR: [{ paidAt: { gte: startDate, lte: endDate } }, { paidAt: null, documentDate: { gte: startDate, lte: endDate } }]
+        },
         _sum: { totalAmount: true }, _count: true
       }),
       prisma.transaction.aggregate({
@@ -729,6 +880,10 @@ class ExportService {
         this._kvList(doc, theme, [
           { label: 'Aufladungen im Zeitraum', value: this._fmtEUR(summary.totalTopUps), color: theme.color.success },
           { label: `Einkäufe im Zeitraum (${summary.transactionCount || 0} Buchungen)`, value: this._fmtEUR(summary.totalSpent), color: theme.color.danger },
+          ...(statement.openingBalance !== undefined ? [
+            { label: 'Kontostand zu Beginn des Zeitraums', value: this._fmtEUR(statement.openingBalance) },
+            { label: 'Kontostand am Ende des Zeitraums', value: this._fmtEUR(statement.closingBalance) }
+          ] : []),
           { label: 'Aktueller Kontostand', value: this._fmtEUR(customer.currentBalance), bold: true, rule: true,
             color: Number(customer.currentBalance) < 0 ? theme.color.danger : theme.color.text }
         ], { headerInfo });
@@ -751,7 +906,7 @@ class ExportService {
             }
           ],
           rows: movements,
-          sumRow: ['', '', 'Summe Zeitraum', this._fmtEUR(Number(summary.totalTopUps || 0) - Number(summary.totalSpent || 0)), this._fmtEUR(customer.currentBalance)],
+          sumRow: ['', '', 'Summe Zeitraum', this._fmtEUR(Number(summary.totalTopUps || 0) - Number(summary.totalSpent || 0)), this._fmtEUR(statement.closingBalance ?? customer.currentBalance)],
           emptyHint: 'Keine Kontobewegungen im gewählten Zeitraum.',
           headerInfo
         });
@@ -773,6 +928,8 @@ class ExportService {
   /* ========= PDF: EÜR (Datenbasis ausschließlich accountingService.getProfitLoss) ========= */
   async exportEURPDF(startDate, endDate, { createdBy } = {}) {
     const eur = await accountingService.getProfitLoss(startDate, endDate);
+    // Gästeguthaben zum Stichtag (Zeitraumende), nicht der heutige Stand
+    const guest = await yearEndExtrasService.getGuestBalances(parseLocalDate(startDate), endOfLocalDay(endDate));
     const d = eur.details;
     const byType = d.incomeByType || {};
     const byExpType = d.expensesByType || {};
@@ -823,8 +980,14 @@ class ExportService {
           { spacer: true },
           { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(eur.liquidity.topUps.cash) },
           { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(eur.liquidity.topUps.transfer) },
+          { label: 'Aufladungen Kundenkonten per Karte (SumUp)', value: this._fmtEUR(eur.liquidity.topUps.card || 0) },
           { label: 'Aufladungen gesamt (Zufluss, aber Verbindlichkeit gegenüber Gästen)', value: this._fmtEUR(eur.liquidity.topUps.total), bold: true },
-          { label: 'Gästeguthaben zum Stichtag (Summe aller Kundenkonten)', value: this._fmtEUR(eur.liquidity.guestBalanceEnd) },
+          {
+            label: guest.asOfIsNow
+              ? `Gästeguthaben Stand heute ${this._fmtDateTime(guest.asOf)} (Stichtag liegt in der Zukunft)`
+              : `Gästeguthaben zum Stichtag ${this._fmtDate(guest.stichtag)} (Summe aller Kundenkonten)`,
+            value: this._fmtEUR(guest.totals.net)
+          },
           { spacer: true },
           { label: `Offene Lieferantenrechnungen zum Stichtag (${eur.liabilities.unpaidPurchaseDocuments.count})`, value: this._fmtEUR(eur.liabilities.unpaidPurchaseDocuments.total), color: theme.color.danger },
           { label: `Offene Kundenrechnungen zum Stichtag (${eur.receivables.unpaidInvoices.count})`, value: this._fmtEUR(eur.receivables.unpaidInvoices.total) }
@@ -970,6 +1133,7 @@ class ExportService {
     const diffColor = (theme) => Math.abs(diff) < 0.005 ? theme.color.success : (diff < 0 ? theme.color.danger : theme.color.warning);
     const fmtDenom = (v) => v >= 1 ? `${v} €` : `${Math.round(v * 100)} Cent`;
     const n = (k) => (b.counts && b.counts[k]) || 0;
+    const isOpening = !!(cc.isOpening || b.isOpening);
 
     return new Promise((resolve, reject) => {
       try {
@@ -983,25 +1147,59 @@ class ExportService {
         this._decoratePage(doc, theme, headerInfo);
 
         this._section(doc, theme, 'Ergebnis', headerInfo);
-        this._kvList(doc, theme, [
-          { label: 'Soll laut System', value: this._fmtEUR(cc.expectedTotal) },
-          { label: 'Ist gezählt', value: this._fmtEUR(cc.countedTotal), bold: true },
-          { label: 'Differenz (Ist - Soll)', value: `${diff > 0 ? '+' : ''}${this._fmtEUR(diff)}`, bold: true, rule: true, color: diffColor(theme) }
-        ], { headerInfo });
+        if (isOpening) {
+          this._kvList(doc, theme, [
+            { label: 'Anfangsbestand beim Start mit ClubTouch3 (gezählt)', value: this._fmtEUR(cc.countedTotal), bold: true, rule: true }
+          ], { headerInfo });
+          this._note(doc, theme, 'Anfangsbestand beim Start – kein Soll-Vergleich. Die App übernimmt den gezählten Betrag als Ausgangswert; '
+            + 'Soll und Differenz gibt es erst ab der nächsten Zählung.'
+            + (Math.abs(Number(b.computedExpected || 0)) >= 0.005
+              ? ` Nachrichtlich: Vor dem Anfangsbestand waren bereits Barbuchungen über ${this._fmtEUR(b.computedExpected)} in der App erfasst; sie sind im Anfangsbestand enthalten.`
+              : ''));
+        } else {
+          this._kvList(doc, theme, [
+            { label: 'Soll laut System', value: this._fmtEUR(cc.expectedTotal) },
+            { label: 'Ist gezählt', value: this._fmtEUR(cc.countedTotal), bold: true },
+            { label: 'Differenz (Ist - Soll)', value: `${diff > 0 ? '+' : ''}${this._fmtEUR(diff)}`, bold: true, rule: true, color: diffColor(theme) }
+          ], { headerInfo });
+        }
         if (cc.note) this._note(doc, theme, `Notiz: ${cc.note}`);
 
         this._section(doc, theme, 'Stückelung', headerInfo);
-        this._table(doc, theme, {
-          columns: [
-            { header: 'Nennwert', width: 160, render: r => fmtDenom(r.value) },
-            { header: 'Anzahl', width: 120, align: 'right', render: r => String(r.count) },
-            { header: 'Betrag', width: 160, align: 'right', render: r => this._fmtEUR(r.amount) }
-          ],
-          rows: denomRows,
-          sumRow: ['Summe gezählt', String(denomRows.reduce((a, r) => a + r.count, 0)), this._fmtEUR(cc.countedTotal)],
-          headerInfo
-        });
+        const pieces = denomRows.reduce((a, r) => a + r.count, 0);
+        if (pieces === 0 && Number(cc.countedTotal || 0) > 0) {
+          // nur ein Betrag erfasst (Anfangsbestand ohne Stückelung)
+          this._kvList(doc, theme, [
+            { label: 'Betrag ohne Stückelung erfasst', value: this._fmtEUR(cc.countedTotal), bold: true }
+          ], { headerInfo });
+        } else {
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Nennwert', width: 160, render: r => fmtDenom(r.value) },
+              { header: 'Anzahl', width: 120, align: 'right', render: r => String(r.count) },
+              { header: 'Betrag', width: 160, align: 'right', render: r => this._fmtEUR(r.amount) }
+            ],
+            rows: denomRows,
+            sumRow: ['Summe gezählt', String(pieces), this._fmtEUR(cc.countedTotal)],
+            headerInfo
+          });
+        }
 
+        if (isOpening) {
+          this._signatureBlock(doc, theme, ['Gezählt von', 'Geprüft von'], headerInfo);
+          this._finishDoc(doc, theme, headerInfo);
+          const st = new Date(cc.countedAt);
+          const p2 = (x) => String(x).padStart(2, '0');
+          done.then(pdf => resolve({
+            data: pdf,
+            filename: `kassenzaehlung_${st.getFullYear()}-${p2(st.getMonth() + 1)}-${p2(st.getDate())}_${p2(st.getHours())}${p2(st.getMinutes())}_anfangsbestand.pdf`,
+            mimeType: 'application/pdf'
+          }));
+          return;
+        }
+
+        // Überschrift und Herleitung (13 Zeilen) gemeinsam auf eine Seite
+        this._ensureRoom(doc, theme, 270);
         this._section(doc, theme, 'Soll-Herleitung seit der letzten Zählung', headerInfo);
         const sinceLabel = b.hasBaseline && cc.previousCount
           ? `Vorzählung vom ${this._fmtDateTime(cc.previousCount.countedAt)}`
@@ -1020,7 +1218,7 @@ class ExportService {
           { label: '= Soll laut System', value: this._fmtEUR(cc.expectedTotal), bold: true, rule: true },
           { label: 'Ist gezählt', value: this._fmtEUR(cc.countedTotal), bold: true },
           { label: 'Differenz', value: `${diff > 0 ? '+' : ''}${this._fmtEUR(diff)}`, bold: true, color: diffColor(theme) }
-        ], { headerInfo });
+        ], { headerInfo, keepTogether: true });
 
         if (Array.isArray(b.expenseDocs) && b.expenseDocs.length) {
           this._section(doc, theme, 'Bar bezahlte Lieferantenrechnungen im Zählzeitraum', headerInfo);
@@ -1078,15 +1276,21 @@ class ExportService {
   /**
    * Geschlossenes Geschäftsjahr: alle Zahlen kommen aus YearEndReport.detailsJson.
    * Offenes Geschäftsjahr: Live-Entwurf in derselben Form, mit "ENTWURF" im Kopf.
+   * Snapshots vor version 4 haben keine Kassenzählungsliste, Stornos, Guthaben-Abstimmung und
+   * Geldbestand-Überleitung: diese Abschnitte sagen dann "bei diesem Abschluss noch nicht erfasst".
    */
   async exportYearEndReportPDF(fiscalYearId, { createdBy } = {}) {
     const { fiscalYear, snapshot: s } = await accountingService.getYearEndSnapshot(fiscalYearId);
     const draft = !!s.draft;
+    const v4 = Number(s.version || 0) >= 4;
+    const notCaptured = 'Bei diesem Abschluss noch nicht erfasst (Abschluss vor Einführung dieses Abschnitts).';
+    const LIST_LIMIT = 40;
 
-    const sum = (arr, sel) => (arr || []).reduce((acc, r) => acc + Number(sel(r) || 0), 0);
+    const sum = (arr, sel) => Math.round((arr || []).reduce((acc, r) => acc + Number(sel(r) || 0), 0) * 100) / 100;
+    const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
     const periodLabel = `${this._fmtDate(fiscalYear.startDate)} – ${this._fmtDate(fiscalYear.endDate)}`;
     const dataStateLabel = draft
-      ? `Datenstand: Live-Vorschau vom ${this._fmtDateTime(s.generatedAt || new Date())} (Geschäftsjahr noch nicht abgeschlossen)`
+      ? `Datenstand: Live-Vorschau vom ${this._fmtDateTime(s.generatedAt || new Date())}`
       : `Datenstand: Abschluss vom ${this._fmtDateTime(s.closedAt)}`;
 
     const income = s.summary || {};
@@ -1098,11 +1302,47 @@ class ExportService {
     const banksTotal = sum(banks, b => b.balance);
     const cash = s.cashCount || null;
     const cashTotal = cash ? Number(cash.countedTotal || 0) : 0;
-    const guestBalance = Number(s.liquidity?.guestBalanceEnd || 0);
     const unpaidInvSum = sum(s.unpaidInvoices, r => r.totalAmount);
     const unpaidPurchSum = sum(s.unpaidPurchaseDocs, r => r.totalAmount);
     const diffRows = (s.inventory && Array.isArray(s.inventory.diff)) ? s.inventory.diff : [];
     const expenseCount = (s.expenseDocs || []).length;
+
+    // Gästeguthaben: v4 zum Stichtag (bzw. Stand heute), ältere Abschlüsse: Stand beim Abschluss
+    const gb = v4 && s.guestBalances ? s.guestBalances : null;
+    const balances = Array.isArray(s.customerBalances) ? s.customerBalances : [];
+    const guestCredit = gb ? Number(gb.totals.credit) : sum(balances.filter(b => Number(b.balance) > 0), b => b.balance);
+    const guestDebit = gb ? Number(gb.totals.debit) : sum(balances.filter(b => Number(b.balance) < 0), b => b.balance);
+    const guestBalance = Number(s.liquidity?.guestBalanceEnd ?? r2(guestCredit + guestDebit));
+    const guestAsOf = gb
+      ? (gb.asOfIsNow ? `Stand heute ${this._fmtDateTime(gb.asOf)}` : `zum Stichtag ${this._fmtDate(gb.stichtag)}`)
+      : (draft ? 'Stand heute' : `Stand beim Abschluss ${this._fmtDate(s.closedAt)}`);
+    const corr = v4 ? (s.corrections || null) : null;
+    const counts = v4 ? (s.cashCounts || null) : null;
+
+    // Nachträgliche Änderungen nach dem Abschluss (nur geschlossene Jahre, LIVE erzeugt): protokollierte
+    // CLOSED_PERIOD_CHANGE-Einträge und Vergleich Snapshot-EÜR gegen die aktuelle EÜR des Zeitraums.
+    // Der Vergleich zeigt auch Abweichungen ohne Protokoll (Altfälle vor Einführung der Sperre).
+    let post = null;
+    if (!draft) {
+      const [entries, live] = await Promise.all([
+        closedPeriod.listForYear(fiscalYear.id),
+        accountingService.getProfitLoss(fiscalYear.startDate, fiscalYear.endDate)
+      ]);
+      const cmpRows = [['Betriebseinnahmen', 'totalIncome'], ['Betriebsausgaben', 'totalExpenses'], ['Überschuss / Fehlbetrag', 'profit']]
+        .map(([label, k]) => {
+          const closedVal = r2(income[k]);
+          const liveVal = r2(live.summary[k]);
+          return { label, closed: closedVal, live: liveVal, diff: r2(liveVal - closedVal) };
+        });
+      const profitDiff = cmpRows[2].diff;
+      const loggedEffect = r2(sum(entries, e => (e.changes && e.changes.effect) || 0));
+      post = {
+        entries, cmpRows, profitDiff, loggedEffect,
+        unexplained: r2(profitDiff - loggedEffect),
+        anyDiff: cmpRows.some(r => Math.abs(r.diff) >= 0.005),
+        generatedAt: new Date()
+      };
+    }
 
     return new Promise((resolve, reject) => {
       try {
@@ -1115,6 +1355,7 @@ class ExportService {
         };
         const { doc, done, theme } = this._createDocWithBuffer(headerInfo);
         const pageW = doc.page.width - theme.page.margin * 2;
+        const diffColor = (d) => Math.abs(Number(d || 0)) < 0.005 ? theme.color.success : (Number(d) < 0 ? theme.color.danger : theme.color.warning);
 
         // ---------- DECKBLATT ----------
         this._drawLogo(doc, theme, { x: doc.page.width - theme.page.margin - 70, y: 60, height: 70 });
@@ -1123,8 +1364,9 @@ class ExportService {
         doc.moveDown(0.4);
         doc.font(theme.font.regular).fontSize(12).fillColor(theme.color.subtext)
           .text(`Geschäftsjahr: ${fiscalYear.name} (${periodLabel})`, { width: pageW })
-          .text(draft ? 'Status: ENTWURF – Geschäftsjahr noch nicht abgeschlossen' : `Status: Abgeschlossen am ${this._fmtDateTime(s.closedAt)}`, { width: pageW })
-          .text(dataStateLabel, { width: pageW });
+          .text(draft
+            ? `Status: ENTWURF, noch nicht abgeschlossen · Live-Vorschau vom ${this._fmtDateTime(s.generatedAt || new Date())}`
+            : `Status: abgeschlossen am ${this._fmtDateTime(s.closedAt)} · Zahlen eingefroren`, { width: pageW });
         if (draft) {
           doc.moveDown(0.3);
           doc.font(theme.font.bold).fontSize(28).fillColor(theme.color.danger).opacity(0.25)
@@ -1133,7 +1375,9 @@ class ExportService {
 
         const panelX = theme.page.margin;
         const panelY = Math.max(280, doc.y + 24);
-        const panelH = 190;
+        const kpiRows = v4 ? 4 : 3;
+        const lineH = 40;
+        const panelH = 70 + kpiRows * lineH;
         doc.save();
         doc.roundedRect(panelX, panelY, pageW, panelH, 8).fill(theme.color.panelBg);
         doc.restore();
@@ -1142,28 +1386,62 @@ class ExportService {
           .text('Zusammenfassung zum Stichtag', panelX + 16, panelY + 12);
 
         const colW = pageW / 2 - 24;
-        const KPI = (label, value, x, y, color) => {
-          doc.font(theme.font.regular).fontSize(10).fillColor(theme.color.subtext).text(label, x, y, { width: colW, lineBreak: false });
-          doc.font(theme.font.bold).fontSize(12).fillColor(color || theme.color.text).text(value, x, y + 13, { width: colW, lineBreak: false });
+        const KPI = (label, value, x, y, color, valueFont) => {
+          doc.font(theme.font.regular).fontSize(10).fillColor(theme.color.subtext).text(label, x, y, { width: colW, lineBreak: false, ellipsis: true });
+          doc.font(valueFont || theme.font.bold).fontSize(12).fillColor(color || theme.color.text).text(value, x, y + 13, { width: colW, lineBreak: false, ellipsis: true });
         };
-        const col1x = panelX + 16, col2x = panelX + pageW / 2 + 8, lineH = 40, kpiY = panelY + 42;
+        const col1x = panelX + 16, col2x = panelX + pageW / 2 + 8, kpiY = panelY + 42;
         KPI('Betriebseinnahmen', this._fmtEUR(income.totalIncome), col1x, kpiY, theme.color.success);
         KPI('Betriebsausgaben', this._fmtEUR(income.totalExpenses), col1x, kpiY + lineH, theme.color.danger);
         KPI(Number(income.profit) < 0 ? 'Fehlbetrag' : 'Überschuss', this._fmtEUR(income.profit), col1x, kpiY + lineH * 2,
           Number(income.profit) < 0 ? theme.color.danger : theme.color.success);
-        if (cash) {
+        if (cash && cash.isOpening) {
+          KPI(`Kassenbestand (Anfangsbestand ${this._fmtDate(cash.countedAt)})`, this._fmtEUR(cashTotal), col2x, kpiY);
+        } else if (cash) {
           KPI(cash.manual ? 'Kassenbestand (manuell erfasst)' : `Kassenbestand (gezählt ${this._fmtDate(cash.countedAt)})`, this._fmtEUR(cashTotal), col2x, kpiY);
         } else {
           KPI('Kassenbestand', 'noch nicht gezählt', col2x, kpiY, theme.color.danger);
         }
-        KPI('Bankkonten gesamt', this._fmtEUR(banksTotal), col2x, kpiY + lineH);
-        KPI('Gästeguthaben (Verbindlichkeit)', this._fmtEUR(guestBalance), col2x, kpiY + lineH * 2, theme.color.danger);
+        if (banks.length) KPI('Bankkonten gesamt', this._fmtEUR(banksTotal), col2x, kpiY + lineH);
+        else if (draft) KPI('Bankkonten gesamt', 'wird beim Abschluss erfasst', col2x, kpiY + lineH, theme.color.subtext, theme.font.regular);
+        else KPI('Bankkonten gesamt', 'keine erfasst', col2x, kpiY + lineH, theme.color.subtext, theme.font.regular);
+        KPI(`Gästeguthaben netto (${gb ? (gb.asOfIsNow ? 'Stand heute' : 'Stichtag') : (draft ? 'Stand heute' : 'beim Abschluss')})`, this._fmtEUR(guestBalance), col2x, kpiY + lineH * 2, theme.color.danger);
+        if (v4) {
+          const cs = corr?.cancelledSales || { count: 0, total: 0 };
+          KPI(`Stornierte Verkäufe (${cs.count})`, this._fmtEUR(cs.total), col1x, kpiY + lineH * 3, cs.count ? theme.color.warning : theme.color.text);
+          const nCounts = counts ? counts.items.filter(c => !c.isOpening).length : 0;
+          KPI(`Kassendifferenzen (${nCounts} ${nCounts === 1 ? 'Zählung' : 'Zählungen'} im Jahr)`, this._fmtSigned(counts?.totalDifference || 0), col2x, kpiY + lineH * 3, diffColor(counts?.totalDifference || 0));
+        }
 
         if (s.legacy) {
           doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
             .text('Hinweis: Dieser Abschluss wurde vor Einführung des vollständigen Abschluss-Snapshots erstellt. '
               + 'Detail-Listen (Belege, Artikel, Gästeguthaben) liegen dafür nicht vor.',
               panelX, panelY + panelH + 16, { width: pageW });
+        } else if (!v4) {
+          doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
+            .text('Hinweis: Dieser Abschluss wurde vor Einführung von Kassenzählungsliste, Stornoübersicht, Guthaben-Abstimmung und Geldbestand-Überleitung erstellt; '
+              + 'diese Abschnitte fehlen hier. Gästeguthaben: Stand beim Abschluss.',
+              panelX, panelY + panelH + 16, { width: pageW });
+        }
+
+        // Hinweis auf nachträgliche Änderungen (live, siehe Nachtrag am Ende)
+        if (post) {
+          const hintY = (s.legacy || !v4) ? doc.y + 10 : panelY + panelH + 16;
+          const n = post.entries.length;
+          const clean = n === 0 && !post.anyDiff;
+          doc.font(theme.font.bold).fontSize(11).fillColor(clean ? theme.color.success : theme.color.warning)
+            .text(clean
+              ? 'Nachträgliche Änderungen nach dem Abschluss: keine'
+              : `Nachträgliche Änderungen nach dem Abschluss: ${n === 0 ? 'keine protokolliert' : `${n} protokolliert`}`
+                + (post.anyDiff ? ` · Abweichung Überschuss aktuell gegenüber Abschluss: ${this._fmtSigned(post.profitDiff)}` : ''),
+            panelX, hintY, { width: pageW });
+          doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
+            .text(clean
+              ? `Geprüft beim Erstellen dieses PDFs am ${this._fmtDateTime(post.generatedAt)}: keine protokollierte Änderung, aktuelle EÜR gleich dem Abschluss.`
+              : 'Die Zahlen dieses Berichts sind der Stand beim Abschluss. Einzelheiten im Nachtrag „Nachträgliche Änderungen nach dem Abschluss“ am Ende.',
+            panelX, doc.y + 2, { width: pageW });
+          doc.fillColor(theme.color.text);
         }
 
         // ---------- SEITE 2: EÜR ----------
@@ -1193,49 +1471,90 @@ class ExportService {
           label: Number(income.profit) < 0 ? 'Fehlbetrag' : 'Überschuss', value: this._fmtEUR(income.profit),
           bold: true, color: Number(income.profit) < 0 ? theme.color.danger : theme.color.success, rule: true
         });
-        this._kvList(doc, theme, eurRows, { headerInfo });
+        this._kvList(doc, theme, eurRows, { headerInfo, keepTogether: true });
 
         if (s.nonRevenue || (s.liquidity && s.liquidity.topUps)) {
           this._section(doc, theme, 'Nachrichtlich (kein Ertrag, keine Ausgabe)', headerInfo);
           const nr = s.nonRevenue || {};
           const tu = (s.liquidity && s.liquidity.topUps) || null;
           const infoRows = [];
-          if (nr.ownerUse) infoRows.push({ label: `Eigenverbrauch / Sachentnahme (${Number(nr.ownerUse.quantity || 0)} Stück, Warenwert)`, value: this._fmtEUR(nr.ownerUse.value) });
-          if (nr.expired) infoRows.push({ label: `Abgelaufen / Schwund (${Number(nr.expired.quantity || 0)} Stück, Warenwert)`, value: this._fmtEUR(nr.expired.value) });
+          if (nr.ownerUse) infoRows.push({ label: `Eigenverbrauch / Sachentnahme (${this._fmtNum(nr.ownerUse.quantity)} Stück, Warenwert)`, value: this._fmtEUR(nr.ownerUse.value) });
+          if (nr.expired) infoRows.push({ label: `Abgelaufen / Schwund (${this._fmtNum(nr.expired.quantity)} Stück, Warenwert)`, value: this._fmtEUR(nr.expired.value) });
           if (tu) {
+            // Karte als eigene Zeile, damit "gesamt" aus den Zeilen nachrechenbar ist
+            const card = tu.card != null ? Number(tu.card) : r2(Number(tu.total || 0) - Number(tu.cash || 0) - Number(tu.transfer || 0));
             infoRows.push({ label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(tu.cash) });
             infoRows.push({ label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(tu.transfer) });
-            infoRows.push({ label: 'Aufladungen gesamt (Zufluss, aber Verbindlichkeit gegenüber Gästen)', value: this._fmtEUR(tu.total), bold: true });
+            infoRows.push({ label: 'Aufladungen Kundenkonten per Karte (SumUp)', value: this._fmtEUR(card) });
+            infoRows.push({ label: 'Aufladungen gesamt (Zufluss, aber Verbindlichkeit gegenüber Gästen)', value: this._fmtEUR(tu.total), bold: true, rule: true });
           }
-          this._kvList(doc, theme, infoRows, { headerInfo });
+          this._kvList(doc, theme, infoRows, { headerInfo, keepTogether: true });
         }
 
         // ---------- KASSE & BANK ----------
         this._section(doc, theme, 'Kasse und Bank', headerInfo);
         const cashRows = [];
-        if (cash && !cash.manual) {
+        if (cash && !cash.manual && cash.isOpening) {
+          cashRows.push({ label: `Kassenzählung vom ${this._fmtDateTime(cash.countedAt)}${cash.countedBy ? ` (gezählt von ${cash.countedBy})` : ''}`, value: '' });
+          cashRows.push({ label: 'Anfangsbestand beim Start (kein Soll-Vergleich)', value: this._fmtEUR(cash.countedTotal), bold: true });
+          if (cash.note) cashRows.push({ label: `Notiz: ${cash.note}`, value: '' });
+        } else if (cash && !cash.manual) {
           cashRows.push({ label: `Kassenzählung vom ${this._fmtDateTime(cash.countedAt)}${cash.countedBy ? ` (gezählt von ${cash.countedBy})` : ''}`, value: '' });
           cashRows.push({ label: 'Soll laut System', value: this._fmtEUR(cash.expectedTotal) });
           cashRows.push({ label: 'Ist gezählt', value: this._fmtEUR(cash.countedTotal), bold: true });
           const d = Number(cash.difference || 0);
-          cashRows.push({ label: 'Differenz (Ist - Soll)', value: `${d > 0 ? '+' : ''}${this._fmtEUR(d)}`, bold: true, color: Math.abs(d) < 0.005 ? theme.color.success : (d < 0 ? theme.color.danger : theme.color.warning) });
+          cashRows.push({ label: 'Differenz (Ist - Soll)', value: this._fmtSigned(d), bold: true, color: diffColor(d) });
           if (cash.note) cashRows.push({ label: `Notiz: ${cash.note}`, value: '' });
         } else if (cash && cash.manual) {
           cashRows.push({ label: 'Barkasse (manuell erfasst, Abschluss vor Einführung der Kassenzählung)', value: this._fmtEUR(cashTotal), bold: true });
         } else {
           cashRows.push({ label: 'Kassenbestand: noch keine Kassenzählung im Geschäftsjahr (Pflicht vor dem Abschluss)', value: '—', bold: true, color: theme.color.danger });
         }
-        // Liquiditätsbewegungen Kasse ↔ Bank (ergebnisneutral; nur informativer Nachrichtlichcharakter)
+        // Liquiditätsbewegungen Kasse ↔ Bank (ergebnisneutral)
         if (cm) {
           cashRows.push({ spacer: true });
           cashRows.push({ label: `Einzahlungen auf Bank im Geschäftsjahr (${cm.bankDeposits?.count || 0}) [nur Liquidität, kein Ertrag]`, value: this._fmtEUR(cm.bankDeposits?.total || 0) });
           cashRows.push({ label: `Abhebungen von Bank im Geschäftsjahr (${cm.bankWithdrawals?.count || 0}) [nur Liquidität, keine Ausgabe]`, value: this._fmtEUR(cm.bankWithdrawals?.total || 0) });
         }
         cashRows.push({ spacer: true });
-        if (banks.length === 0) cashRows.push({ label: 'Bankkonten: keine erfasst', value: this._fmtEUR(0) });
+        if (banks.length === 0) {
+          cashRows.push(draft
+            ? { label: 'Bankkonten: Kontostände werden beim Abschluss erfasst', value: '—' }
+            : { label: 'Bankkonten: keine erfasst', value: this._fmtEUR(0) });
+        }
         banks.forEach(b => cashRows.push({ label: `Bankkonto ${b.name || ''}${b.iban ? ` (${b.iban})` : ''}`, value: this._fmtEUR(b.balance) }));
-        cashRows.push({ label: 'Liquide Mittel gesamt (Kasse + Bank)', value: this._fmtEUR(cashTotal + banksTotal), bold: true, rule: true });
-        this._kvList(doc, theme, cashRows, { headerInfo });
+        if (banks.length === 0 && draft) {
+          cashRows.push({ label: 'Liquide Mittel gesamt (Kasse + Bank): nach Erfassung der Kontostände', value: '—', bold: true, rule: true });
+        } else {
+          cashRows.push({ label: 'Liquide Mittel gesamt (Kasse + Bank)', value: this._fmtEUR(cashTotal + banksTotal), bold: true, rule: true });
+        }
+        this._kvList(doc, theme, cashRows, { headerInfo, keepTogether: true });
+
+        // ---------- ALLE KASSENZÄHLUNGEN DES JAHRES (v4) ----------
+        this._section(doc, theme, 'Kassenzählungen im Geschäftsjahr', headerInfo);
+        if (counts) {
+          const cItems = counts.items || [];
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Datum/Uhrzeit', width: 92, render: r => this._fmtDateTime(r.countedAt) },
+              { header: 'Gezählt von', width: 85, render: r => r.countedBy || '—' },
+              { header: 'Soll', width: 70, align: 'right', render: r => r.isOpening ? 'Anfangsbestand' : this._fmtEUR(r.expectedTotal) },
+              { header: 'Ist', width: 70, align: 'right', render: r => this._fmtEUR(r.countedTotal) },
+              { header: 'Differenz', width: 65, align: 'right', render: r => r.isOpening ? '—' : this._fmtSigned(r.difference), color: r => r.isOpening ? theme.color.subtext : diffColor(r.difference) },
+              { header: 'Notiz', width: 118, render: r => r.note || '' }
+            ],
+            rows: cItems,
+            sumRow: ['Summe', '', '', '', this._fmtSigned(counts.totalDifference), ''],
+            emptyHint: 'Keine Kassenzählung im Geschäftsjahr.',
+            headerInfo
+          });
+          const hints = [`Zählfenster ${this._fmtDate(counts.window?.start)} bis ${this._fmtDate(counts.window?.end)} (einschließlich des Tags nach dem Stichtag).`];
+          if (cItems.some(c => c.isOpening)) hints.push('Anfangsbestand: beim Start mit ClubTouch3 gezählt, Soll = Ist, kein Soll-Vergleich.');
+          hints.push('Jede Zählung rechnet ab der vorherigen Zählung; eine Differenz wird dadurch nicht in die nächste Zählung übertragen.');
+          this._note(doc, theme, hints.join(' '));
+        } else {
+          this._note(doc, theme, `${notCaptured} Oben steht nur die für den Abschluss verwendete Zählung.`);
+        }
 
         // ---------- BANK-ABSTIMMUNG ----------
         // Snapshot v3; Altabschlüsse haben das Feld nicht → Abschnitt entfällt
@@ -1256,7 +1575,7 @@ class ExportService {
             { label: `+ Aufladungen Kundenkonten per Überweisung (${cnt(inf.topUpsTransfer)})`, value: this._fmtEUR(tot(inf.topUpsTransfer)), color: theme.color.success },
             { label: `+ Bezahlte Kundenrechnungen per Überweisung (${cnt(inf.invoicesPaid)})`, value: this._fmtEUR(tot(inf.invoicesPaid)), color: theme.color.success },
             ...(cnt(inf.cardPayments) ? [{ label: `+ Kartenzahlungen SumUp (${cnt(inf.cardPayments)})`, value: this._fmtEUR(tot(inf.cardPayments)), color: theme.color.success }] : []),
-            ...(tot(outf.cardFees) ? [{ label: `- SumUp-Gebühren ${outf.cardFees.percent} % (geschätzt)`, value: this._fmtEUR(-tot(outf.cardFees)), color: theme.color.danger }] : []),
+            ...(tot(outf.cardFees) ? [{ label: `- SumUp-Gebühren ${String(outf.cardFees.percent).replace('.', ',')} % (geschätzt)`, value: this._fmtEUR(-tot(outf.cardFees)), color: theme.color.danger }] : []),
             { label: `- Per Überweisung bezahlte Lieferantenrechnungen (${cnt(outf.purchasesTransfer)})`, value: this._fmtEUR(-tot(outf.purchasesTransfer)), color: theme.color.danger },
             { label: `- Abhebungen für die Kasse (${cnt(outf.bankWithdrawals)})`, value: this._fmtEUR(-tot(outf.bankWithdrawals)), color: theme.color.danger },
             { label: 'Bank-Soll laut App', value: this._fmtEUR(br.expected), bold: true, rule: true }
@@ -1268,18 +1587,17 @@ class ExportService {
             const actual = br.actual != null ? Number(br.actual) : banksTotal;
             const bd = br.difference != null ? Number(br.difference) : (actual - Number(br.expected || 0));
             brRows.push({ label: `Eingetragene Kontostände (${banks.length} ${banks.length === 1 ? 'Konto' : 'Konten'})`, value: this._fmtEUR(actual), bold: true });
-            brRows.push({
-              label: 'Differenz (Ist - Soll)', value: `${bd > 0 ? '+' : ''}${this._fmtEUR(bd)}`, bold: true,
-              color: Math.abs(bd) < 0.005 ? theme.color.success : theme.color.warning
-            });
+            brRows.push({ label: 'Differenz (Ist - Soll)', value: this._fmtSigned(bd), bold: true, color: Math.abs(bd) < 0.005 ? theme.color.success : theme.color.warning });
           } else {
-            brRows.push({ label: draft ? 'Kontostände werden beim Abschluss erfasst' : 'Keine Kontostände erfasst', value: '—' });
+            brRows.push({ label: draft ? 'Ist-Kontostände: werden beim Abschluss erfasst' : 'Ist-Kontostände: keine erfasst', value: '—' });
           }
-          this._kvList(doc, theme, brRows, { headerInfo });
+          // Herleitung bis Ist/Differenz zusammenhalten
+          this._kvList(doc, theme, brRows, { headerInfo, keepTogether: true });
           this._note(doc, theme, br.notCovered || 'Nicht enthalten: Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden und alles, was nicht über die App gebucht wurde.');
 
           const brItems = Array.isArray(br.movements) ? br.movements : [];
-          const brNet = brItems.reduce((a, r) => a + Number(r.amount || 0), 0);
+          const brNet = sum(brItems, r => r.amount);
+          this._subheading(doc, theme, `Bankbewegungen über die App (${brItems.length})`);
           this._table(doc, theme, {
             columns: [
               { header: 'Datum', width: 90, render: r => this._fmtDate(r.date) },
@@ -1301,7 +1619,7 @@ class ExportService {
         // ---------- KASSENBEWEGUNGEN ----------
         this._section(doc, theme, 'Kassenbewegungen im Geschäftsjahr', headerInfo);
         const cmItems = (cm && Array.isArray(cm.items)) ? cm.items : [];
-        const cmNetTotal = cmItems.reduce((a, r) => a + Number(r.signedAmount || 0), 0);
+        const cmNetTotal = sum(cmItems, r => r.signedAmount);
         this._table(doc, theme, {
           columns: [
             { header: 'Datum/Uhrzeit', width: 110, render: r => this._fmtDateTime(r.occurredAt) },
@@ -1319,20 +1637,236 @@ class ExportService {
           emptyHint: 'Keine Kassenbewegungen im Geschäftsjahr.',
           headerInfo
         });
+        if (cmItems.length) this._note(doc, theme, 'Nur nicht stornierte Kassenbewegungen; stornierte stehen unter „Stornos und Korrekturen“.');
+
+        // ---------- GELDBESTAND ANFANG → ENDE (v4) ----------
+        this._section(doc, theme, 'Geldbestand zu Beginn und am Ende (Plausibilität)', headerInfo);
+        const lb = v4 ? (s.liquidityBridge || null) : null;
+        if (lb && lb.available) {
+          const prevName = lb.previousFiscalYear?.name || 'Vorjahr';
+          const lbRows = [
+            { label: `Kasse zu Beginn (laut Abschluss „${prevName}“)`, value: this._fmtEUR(lb.cashStart) },
+            { label: `Bank zu Beginn (laut Abschluss „${prevName}“)`, value: this._fmtEUR(lb.bankStart) },
+            { label: '= Geldbestand zu Beginn', value: this._fmtEUR(lb.startTotal), bold: true, rule: true },
+            { label: `+ ${Number(lb.profit) < 0 ? 'Fehlbetrag' : 'Überschuss'} laut EÜR`, value: this._fmtSigned(lb.profit) },
+            { label: '+ Veränderung Gästeguthaben (ohne Übernahme von Startguthaben)', value: this._fmtSigned(lb.guestChange) }
+          ];
+          if (Number(lb.cardFees || 0) > 0) lbRows.push({ label: '- SumUp-Gebühren (geschätzt, nicht in der EÜR)', value: this._fmtEUR(-lb.cardFees) });
+          lbRows.push({ label: '= rechnerischer Geldbestand am Ende', value: this._fmtEUR(lb.expectedEnd), bold: true, rule: true });
+          lbRows.push({ spacer: true });
+          lbRows.push(lb.cashEnd != null
+            ? { label: `Kasse gezählt (Zählung vom ${this._fmtDateTime(lb.cashCountedAt)})`, value: this._fmtEUR(lb.cashEnd) }
+            : { label: 'Kasse: noch nicht gezählt', value: '—', color: theme.color.danger });
+          lbRows.push(lb.bankEnd != null
+            ? { label: 'Bank laut eingetragenen Kontoständen', value: this._fmtEUR(lb.bankEnd) }
+            : { label: lb.bankPending ? 'Bank: Kontostände werden beim Abschluss erfasst' : 'Bank: keine Kontostände erfasst', value: '—' });
+          if (lb.actualEnd != null) {
+            const rest = r2(Number(lb.difference) - Number(lb.cashCountDifferences || 0) - Number(lb.bankDifference || 0));
+            lbRows.push({ label: '= tatsächlicher Geldbestand am Ende', value: this._fmtEUR(lb.actualEnd), bold: true, rule: true });
+            lbRows.push({ label: 'Differenz (tatsächlich - rechnerisch)', value: this._fmtSigned(lb.difference), bold: true, color: diffColor(lb.difference) });
+            lbRows.push({ label: '  davon Kassendifferenzen der Zählungen im Jahr', value: this._fmtSigned(lb.cashCountDifferences || 0) });
+            if (lb.bankDifference != null) lbRows.push({ label: '  davon Bank-Differenz laut Bank-Abstimmung', value: this._fmtSigned(lb.bankDifference) });
+            lbRows.push({ label: '  verbleibender Rest (zeitliche Abgrenzung)', value: this._fmtSigned(rest), color: Math.abs(rest) < 0.005 ? theme.color.success : theme.color.warning });
+          }
+          this._kvList(doc, theme, lbRows, { headerInfo, keepTogether: true });
+          this._note(doc, theme, 'Lesart: Der Überschuss erklärt die Veränderung des Geldbestands, korrigiert um Vorgänge ohne Geldfluss: Verkäufe über Kundenkonto sind Einnahme, aber kein Geld; '
+            + 'Aufladungen sind Geld, aber kein Ertrag (Veränderung Gästeguthaben); die Übernahme von Startguthaben ist nicht enthalten. '
+            + 'Ein Rest entsteht durch zeitliche Abgrenzung, z. B. wenn die Kasse erst nach dem Stichtag gezählt wurde (Verkäufe nach Mitternacht).');
+        } else if (lb && !lb.available) {
+          this._note(doc, theme, `Nicht herleitbar. ${(lb.reasons || []).join(' ')}`);
+          this._note(doc, theme, lb.explanation || '');
+        } else {
+          this._note(doc, theme, notCaptured);
+        }
+
+        // ---------- STORNOS UND KORREKTUREN (v4) ----------
+        this._section(doc, theme, 'Stornos und Korrekturen', headerInfo);
+        if (corr) {
+          const cs = corr.cancelledSales || { count: 0, total: 0, byPayment: {}, items: [] };
+          const oc = corr.otherCancellations || { count: 0, total: 0, items: [] };
+          const ct = corr.cancelledTopUps || { count: 0, total: 0, items: [] };
+          const cc = corr.cancelledCashMovements || { count: 0, total: 0, items: [] };
+          const sc = corr.stockCorrections || { count: 0, items: [] };
+          const bp = cs.byPayment || {};
+          const sumRows = [
+            { label: `Stornierte Verkäufe (${cs.count})`, value: this._fmtEUR(cs.total), bold: true },
+            ...Object.keys(bp).map(k => ({ label: `  davon ${this._paymentLabel(k)} (${bp[k].count})`, value: this._fmtEUR(bp[k].total) })),
+            ...(oc.count ? [{ label: `Sonstige Stornobuchungen (${oc.count}, Liste unten)`, value: this._fmtEUR(oc.total) }] : []),
+            { label: `Stornierte Aufladungen (${ct.count})`, value: this._fmtEUR(ct.total), bold: true },
+            { label: `Stornierte Kassenbewegungen (${cc.count})`, value: this._fmtEUR(cc.total), bold: true },
+            { label: 'Manuelle Bestandskorrekturen', value: `${sc.count} ${sc.count === 1 ? 'Buchung' : 'Buchungen'}`, bold: true }
+          ];
+          this._kvList(doc, theme, sumRows, { headerInfo, keepTogether: true });
+          if (cs.multipleCount) {
+            this._note(doc, theme, `Achtung: ${cs.multipleCount} Stornobuchungen betreffen mehrfach stornierte Verkäufe (doppelte Gegenbuchung). Bitte prüfen.`);
+          }
+
+          this._subheading(doc, theme, `Stornierte Verkäufe (${cs.count})`);
+          const csItems = (cs.items || []).slice(0, LIST_LIMIT);
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Verkauf am', width: 88, render: r => this._fmtDateTime(r.originalAt) },
+              { header: 'Storno am', width: 88, render: r => this._fmtDateTime(r.cancelledAt) },
+              { header: 'Kunde', width: 112, render: r => (r.customer || 'Bar') + (r.multiple ? ' (mehrfach storniert!)' : '') },
+              { header: 'Zahlung', width: 70, render: r => this._paymentLabel(r.paymentMethod) },
+              { header: 'Storniert von', width: 75, render: r => r.cancelledBy || '—' },
+              { header: 'Betrag', width: 67, align: 'right', render: r => this._fmtEUR(r.amount) }
+            ],
+            rows: csItems,
+            sumRow: ['Summe', '', '', '', '', this._fmtEUR(cs.total)],
+            emptyHint: 'Keine stornierten Verkäufe im Geschäftsjahr.',
+            headerInfo
+          });
+          this._moreNote(doc, theme, csItems.length, cs.count);
+
+          if (oc.count) {
+            this._subheading(doc, theme, `Sonstige Stornobuchungen (${oc.count})`);
+            const ocItems = (oc.items || []).slice(0, LIST_LIMIT);
+            this._table(doc, theme, {
+              columns: [
+                { header: 'Storno am', width: 90, render: r => this._fmtDateTime(r.cancelledAt) },
+                { header: 'Storno von', width: 150, render: r => `${r.originalLabel}${r.originalAt ? ` ${this._fmtDateTime(r.originalAt)}` : ''}` },
+                { header: 'Kunde', width: 110, render: r => r.customer || 'Bar' },
+                { header: 'Storniert von', width: 80, render: r => r.cancelledBy || '—' },
+                { header: 'Betrag', width: 70, align: 'right', render: r => this._fmtEUR(r.amount) }
+              ],
+              rows: ocItems,
+              sumRow: ['Summe', '', '', '', this._fmtEUR(oc.total)],
+              headerInfo
+            });
+            this._moreNote(doc, theme, ocItems.length, oc.count);
+            this._note(doc, theme, 'Eigenverbrauch/Abgelaufen haben 0,00 € (nur Bestand). Ein negativer Betrag bei „Stornobuchung“ heißt: eine Stornobuchung wurde ihrerseits storniert und hat den Betrag erneut belastet.');
+          }
+
+          this._subheading(doc, theme, `Stornierte Aufladungen (${ct.count})`);
+          const ctItems = (ct.items || []).slice(0, LIST_LIMIT);
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Aufgeladen am', width: 100, render: r => this._fmtDateTime(r.originalAt) },
+              { header: 'Storno am', width: 100, render: r => this._fmtDateTime(r.cancelledAt) },
+              { header: 'Kunde', width: 160, render: r => r.customer || '—' },
+              { header: 'Art', width: 70, render: r => ({ CASH: 'Bar', TRANSFER: 'Überweisung', CARD: 'Karte' })[r.method] || r.method },
+              { header: 'Betrag', width: 70, align: 'right', render: r => this._fmtEUR(r.amount) }
+            ],
+            rows: ctItems,
+            sumRow: ['Summe', '', '', '', this._fmtEUR(ct.total)],
+            emptyHint: 'Keine stornierten Aufladungen im Geschäftsjahr.',
+            headerInfo
+          });
+          this._moreNote(doc, theme, ctItems.length, ct.count);
+
+          this._subheading(doc, theme, `Stornierte Kassenbewegungen (${cc.count})`);
+          const ccItems = (cc.items || []).slice(0, LIST_LIMIT);
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Datum', width: 88, render: r => this._fmtDateTime(r.occurredAt) },
+              { header: 'Storniert am', width: 88, render: r => this._fmtDateTime(r.cancelledAt) },
+              { header: 'Typ', width: 90, render: r => cashMovementService.label(r.type) },
+              { header: 'Notiz', width: 100, render: r => r.note || '—' },
+              { header: 'Erfasst / storniert von', width: 75, render: r => `${r.createdBy || '—'} / ${r.cancelledBy || '—'}` },
+              { header: 'Betrag', width: 65, align: 'right', render: r => this._fmtEUR(r.amount) }
+            ],
+            rows: ccItems,
+            sumRow: ['Summe', '', '', '', '', this._fmtEUR(cc.total)],
+            emptyHint: 'Keine stornierten Kassenbewegungen im Geschäftsjahr.',
+            headerInfo
+          });
+          this._moreNote(doc, theme, ccItems.length, cc.count);
+
+          this._subheading(doc, theme, `Manuelle Bestandskorrekturen (${sc.count})`);
+          const scItems = (sc.items || []).slice(0, LIST_LIMIT);
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Datum', width: 88, render: r => this._fmtDateTime(r.createdAt) },
+              { header: 'Art', width: 70, render: r => r.type === 'INVENTORY' ? 'Inventur' : 'Korrektur' },
+              { header: 'Artikel', width: 140, render: r => r.article },
+              { header: 'Menge', width: 80, align: 'right', render: r => `${Number(r.quantity) > 0 ? '+' : ''}${this._fmtQty(r.quantity, r.unit)}` },
+              { header: 'Grund', width: 120, render: r => r.reason || '—' }
+            ],
+            rows: scItems,
+            emptyHint: 'Keine manuellen Bestandskorrekturen im Geschäftsjahr.',
+            headerInfo
+          });
+          this._moreNote(doc, theme, scItems.length, sc.count);
+          this._note(doc, theme, 'Ohne automatische Bestandsbuchungen aus Stornos und Beleg-/Rechnungskorrekturen. Zeitraum: Buchungszeitpunkt im Geschäftsjahr.');
+        } else {
+          this._note(doc, theme, notCaptured);
+        }
+
+        // ---------- GÄSTEGUTHABEN ----------
+        this._section(doc, theme, `Gästeguthaben ${guestAsOf}`, headerInfo);
+        if (gb && gb.asOfIsNow) {
+          this._note(doc, theme, `Der Stichtag ${this._fmtDate(gb.stichtag)} liegt in der Zukunft; die Guthaben zeigen den Stand heute (${this._fmtDateTime(gb.asOf)}).`);
+        }
+        if (gb) {
+          const rc = gb.reconciliation || {};
+          const tu = rc.topUps || {};
+          const t = (m) => tu[m] || { total: 0, count: 0 };
+          const startLabel = this._fmtDate(new Date(parseLocalDate(fiscalYear.startDate).getTime() - 1));
+          this._subheading(doc, theme, 'Guthaben-Abstimmung');
+          const gRows = [
+            { label: `Guthaben zu Beginn (laut Buchungen bis ${startLabel})`, value: this._fmtEUR(rc.opening), bold: true },
+            { label: `+ Aufladungen bar (${t('CASH').count})`, value: this._fmtEUR(t('CASH').total) },
+            { label: `+ Aufladungen per Überweisung (${t('TRANSFER').count})`, value: this._fmtEUR(t('TRANSFER').total) },
+            { label: `+ Aufladungen per Karte (${t('CARD').count})`, value: this._fmtEUR(t('CARD').total) },
+            { label: `+ Auslagen-Gutschriften (${t('REIMBURSEMENT').count}, abzüglich Storno Auslage)`, value: this._fmtEUR(t('REIMBURSEMENT').total) },
+            { label: `+ Übernahme Startguthaben Clubtouch 2.0 (${t('MIGRATION').count})`, value: this._fmtEUR(t('MIGRATION').total) },
+            { label: `- Stornierte Aufladungen (${rc.topUpStornos?.count || 0})`, value: this._fmtEUR(rc.topUpStornos?.total || 0) },
+            { label: `- Verkäufe über Kundenkonto (${rc.accountSales?.count || 0}, wie EÜR)`, value: this._fmtEUR(-(rc.accountSales?.total || 0)) },
+            { label: `- Später stornierte Kundenkonto-Verkäufe (${rc.accountSalesCancelled?.count || 0})`, value: this._fmtEUR(-(rc.accountSalesCancelled?.total || 0)) },
+            { label: `+ Stornos: Gutschrift aufs Kundenkonto (${rc.accountRefunds?.count || 0})`, value: this._fmtEUR(rc.accountRefunds?.total || 0) },
+            ...(Number(rc.otherAccountTx?.total || 0) !== 0 ? [{ label: `+/- Sonstige Kundenkonto-Buchungen (${rc.otherAccountTx.count})`, value: this._fmtEUR(rc.otherAccountTx.total) }] : []),
+            { label: '= Guthaben laut Buchungen', value: this._fmtEUR(rc.expectedEnd), bold: true, rule: true },
+            { label: 'Summe der Einzelkonten (Liste unten, netto)', value: this._fmtEUR(rc.accountsSum), bold: true },
+            {
+              label: Math.abs(Number(rc.deviation || 0)) < 0.005 ? 'Abweichung (stimmt überein)' : 'ABWEICHUNG Einzelkonten - Buchungen',
+              value: this._fmtSigned(rc.deviation), bold: true,
+              color: Math.abs(Number(rc.deviation || 0)) < 0.005 ? theme.color.success : theme.color.danger
+            }
+          ];
+          this._kvList(doc, theme, gRows, { headerInfo, keepTogether: true });
+          if (Math.abs(Number(rc.deviation || 0)) >= 0.005) {
+            this._note(doc, theme, 'Die Kontostände passen nicht zu den gebuchten Aufladungen und Verkäufen: Ein Guthaben wurde außerhalb der Buchungen verändert '
+              + 'oder eine Buchung fehlt. Betroffene Konten:');
+            const devs = (rc.deviations || []).slice(0, LIST_LIMIT);
+            this._table(doc, theme, {
+              columns: [
+                { header: 'Kunde', width: 220, render: r => r.nickname ? `${r.name} (${r.nickname})` : r.name },
+                { header: 'Kontostand', width: 90, align: 'right', render: r => this._fmtEUR(r.balance) },
+                { header: 'laut Buchungen', width: 90, align: 'right', render: r => this._fmtEUR(r.ledger) },
+                { header: 'Abweichung', width: 90, align: 'right', render: r => this._fmtSigned(r.difference), color: () => theme.color.danger }
+              ],
+              rows: devs,
+              headerInfo
+            });
+            this._moreNote(doc, theme, devs.length, rc.deviationsCount || devs.length);
+          }
+        } else {
+          this._note(doc, theme, `Guthaben-Abstimmung: ${notCaptured}`);
+        }
+
+        this._subheading(doc, theme, `Einzelkonten mit Saldo (${balances.length})`);
+        if (balances.length) {
+          this._twoColumnList(doc, theme, balances.map(b => ({
+            label: b.nickname ? `${b.name} (${b.nickname})` : b.name,
+            value: this._fmtEUR(b.balance),
+            color: Number(b.balance) < 0 ? theme.color.danger : theme.color.text
+          })));
+        } else {
+          this._note(doc, theme, s.legacy ? 'Keine Einzelliste im Abschluss vorhanden (Altbestand).' : 'Keine Kundenkonten mit Saldo.');
+        }
+        const nCredit = balances.filter(b => Number(b.balance) > 0).length;
+        const nDebit = balances.filter(b => Number(b.balance) < 0).length;
+        // Ohne Einzelliste (Altbestand) gibt es keine Aufteilung, nur den damals gespeicherten Nettobetrag
+        this._kvList(doc, theme, [
+          ...(balances.length || gb ? [
+            { label: `Guthaben der Gäste (Verbindlichkeit, ${nCredit} Konten)`, value: this._fmtEUR(guestCredit) },
+            { label: `Minus-Salden (Forderung an Gäste, ${nDebit} Konten)`, value: this._fmtEUR(guestDebit), color: guestDebit < 0 ? theme.color.danger : theme.color.text }
+          ] : []),
+          { label: 'Gästeguthaben netto', value: this._fmtEUR(guestBalance), bold: true, rule: true }
+        ], { headerInfo, keepTogether: true });
 
         // ---------- VERBINDLICHKEITEN & FORDERUNGEN ----------
-        this._section(doc, theme, 'Gästeguthaben (Verbindlichkeit gegenüber Mitgliedern)', headerInfo);
-        this._table(doc, theme, {
-          columns: [
-            { header: 'Name', width: 300, render: r => r.nickname ? `${r.name} (${r.nickname})` : r.name },
-            { header: 'Saldo', width: 120, align: 'right', render: r => this._fmtEUR(r.balance), color: r => Number(r.balance) < 0 ? theme.color.danger : theme.color.text }
-          ],
-          rows: s.customerBalances || [],
-          sumRow: ['Summe Gästeguthaben', this._fmtEUR(guestBalance)],
-          emptyHint: s.legacy ? 'Keine Einzelliste im Abschluss vorhanden (Altbestand).' : 'Keine Kundenkonten mit Saldo.',
-          headerInfo
-        });
-
         this._section(doc, theme, 'Offene Lieferantenrechnungen (Verbindlichkeiten)', headerInfo);
         this._table(doc, theme, {
           columns: [
@@ -1365,31 +1899,41 @@ class ExportService {
         });
 
         // ---------- WARENBESTAND ----------
+        // Deaktivierte Artikel nur mit Bestand; negativer Bestand zählt mit 0 € (sonst drückt er die Summe ins Minus)
+        const isNeg = (r) => Number(r.systemStock) < 0 || Number(r.physicalStock) < 0;
+        const invRows = diffRows.filter(r => !(r.active === false && Number(r.systemStock || 0) === 0 && Number(r.physicalStock || 0) === 0));
+        const hiddenInactive = diffRows.length - invRows.length;
+        const physVal = (r) => r2(Math.max(0, Number(r.physicalStock || 0)) * Number(r.price || 0));
+        const negCount = invRows.filter(isNeg).length;
         this._section(doc, theme, 'Warenbestand zum Stichtag (laut App / gezählt / Differenz)', headerInfo);
         this._table(doc, theme, {
           columns: [
-            { header: 'Artikel', width: 150, render: r => r.name },
-            { header: 'Laut App', width: 110, align: 'right', render: r => this._fmtQty(r.systemStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
-            { header: 'Gezählt', width: 110, align: 'right', render: r => this._fmtQty(r.physicalStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
-            { header: 'Differenz', width: 110, align: 'right', render: r => this._fmtQty(r.diff, r.unit, r.purchaseUnit, r.unitsPerPurchase), color: r => r.diff < 0 ? theme.color.danger : (r.diff > 0 ? theme.color.success : theme.color.text) },
-            { header: 'Wert gezählt', width: 80, align: 'right', render: r => this._fmtEUR(r.physicalValue) },
-            { header: 'Diff. Wert', width: 80, align: 'right', render: r => this._fmtEUR(r.diffValue), color: r => r.diffValue < 0 ? theme.color.danger : (r.diffValue > 0 ? theme.color.success : theme.color.text) }
+            {
+              header: 'Artikel', width: 150,
+              render: r => `${r.name}${r.active === false ? ' (inaktiv)' : ''}${isNeg(r) ? ' (!)' : ''}`,
+              color: r => isNeg(r) ? theme.color.warning : theme.color.text
+            },
+            { header: 'Laut App', width: 105, align: 'right', render: r => this._fmtQty(r.systemStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Gezählt', width: 105, align: 'right', render: r => this._fmtQty(r.physicalStock, r.unit, r.purchaseUnit, r.unitsPerPurchase) },
+            { header: 'Differenz', width: 80, align: 'right', render: r => `${Number(r.diff) > 0 ? '+' : ''}${this._fmtQty(r.diff, r.unit)}`, color: r => r.diff < 0 ? theme.color.danger : (r.diff > 0 ? theme.color.success : theme.color.text) },
+            { header: 'Wert gezählt', width: 75, align: 'right', render: r => this._fmtEUR(physVal(r)) },
+            { header: 'Diff. Wert', width: 75, align: 'right', render: r => this._fmtSigned(r.diffValue), color: r => r.diffValue < 0 ? theme.color.danger : (r.diffValue > 0 ? theme.color.success : theme.color.text) }
           ],
-          rows: diffRows,
-          sumRow: ['Summe', '', '', '', this._fmtEUR(sum(diffRows, r => r.physicalValue)), this._fmtEUR(sum(diffRows, r => r.diffValue))],
+          rows: invRows,
+          sumRow: ['Summe', '', '', '', this._fmtEUR(sum(invRows, physVal)), this._fmtSigned(sum(invRows, r => r.diffValue))],
           emptyHint: 'Keine Bestandsdaten.',
           headerInfo
         });
+        const invHints = [];
+        if (negCount) invHints.push(`(!) Bestand negativ: Wareneingang nicht gebucht? ${negCount} ${negCount === 1 ? 'Artikel hat' : 'Artikel haben'} einen negativen Bestand und ${negCount === 1 ? 'ist' : 'sind'} mit 0,00 € bewertet. Ein negativer Bestand heißt fast immer, dass ein Wareneingang (Lieferschein/Rechnung) nicht gebucht wurde.`);
+        if (hiddenInactive) invHints.push(`${hiddenInactive} deaktivierte Artikel ohne Bestand sind nicht aufgeführt.`);
+        if (invHints.length) this._note(doc, theme, invHints.join(' '));
         // Lesehilfe für die Kassenprüfung: was Plus und Minus bedeuten
-        doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
-          .text('Differenz = gezählt minus laut App. Plus: mehr da als gebucht (z. B. geschenkte Ware oder Einkauf ohne Lieferschein/Rechnung). '
-            + 'Minus: fehlt gegenüber den Buchungen (z. B. getrunken, verschenkt oder weggeschüttet ohne Buchung „Auf den Wirt“/„Abgelaufen“, nicht gebuchter Verkauf). '
-            + 'Werte zum Verkaufspreis.', theme.page.margin, doc.y, { width: pageW });
-        doc.moveDown(0.5);
+        this._note(doc, theme, 'Differenz = gezählt minus laut App. Plus: mehr da als gebucht (z. B. geschenkte Ware oder Einkauf ohne Lieferschein/Rechnung). '
+          + 'Minus: fehlt gegenüber den Buchungen (z. B. getrunken, verschenkt oder weggeschüttet ohne Buchung „Auf den Wirt“/„Abgelaufen“, nicht gebuchter Verkauf). '
+          + 'Bewertet zum Verkaufspreis.');
         if (draft) {
-          doc.font(theme.font.regular).fontSize(9).fillColor(theme.color.subtext)
-            .text('Im Entwurf entspricht der gezählte Bestand dem Bestand laut App; die Inventur wird erst beim Abschluss erfasst.', theme.page.margin, doc.y, { width: pageW });
-          doc.moveDown(1);
+          this._note(doc, theme, 'Im Entwurf entspricht der gezählte Bestand dem Bestand laut App; die Inventur wird erst beim Abschluss erfasst.');
         }
 
         // ---------- SCHWUND & EIGENVERBRAUCH ----------
@@ -1401,7 +1945,7 @@ class ExportService {
             { header: 'Warenwert', width: 100, align: 'right', render: r => this._fmtEUR(r.value) }
           ],
           rows: s.expiredArticles || [],
-          sumRow: ['Summe', String(sum(s.expiredArticles, r => r.quantity)), this._fmtEUR(sum(s.expiredArticles, r => r.value))],
+          sumRow: ['Summe', this._fmtNum(sum(s.expiredArticles, r => r.quantity)), this._fmtEUR(sum(s.expiredArticles, r => r.value))],
           emptyHint: 'Keine abgelaufenen Artikel.',
           headerInfo
         });
@@ -1414,7 +1958,7 @@ class ExportService {
             { header: 'Warenwert', width: 100, align: 'right', render: r => this._fmtEUR(r.value) }
           ],
           rows: s.ownerUseArticles || [],
-          sumRow: ['Summe', String(sum(s.ownerUseArticles, r => r.quantity)), this._fmtEUR(sum(s.ownerUseArticles, r => r.value))],
+          sumRow: ['Summe', this._fmtNum(sum(s.ownerUseArticles, r => r.quantity)), this._fmtEUR(sum(s.ownerUseArticles, r => r.value))],
           emptyHint: 'Kein Eigenverbrauch.',
           headerInfo
         });
@@ -1425,11 +1969,11 @@ class ExportService {
           columns: [
             { header: 'Artikel', width: 240, render: r => r.article },
             { header: 'Kategorie', width: 160, render: r => r.category || '-' },
-            { header: 'Menge', width: 80, align: 'right', render: r => Number(r.quantity || 0).toFixed(0) },
+            { header: 'Menge', width: 80, align: 'right', render: r => this._fmtNum(r.quantity) },
             { header: 'Betrag', width: 100, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
           ],
           rows: s.soldArticles || [],
-          sumRow: ['Summe', '', Number(sum(s.soldArticles, r => r.quantity)).toFixed(0), this._fmtEUR(sum(s.soldArticles, r => r.amount))],
+          sumRow: ['Summe', '', this._fmtNum(sum(s.soldArticles, r => r.quantity)), this._fmtEUR(sum(s.soldArticles, r => r.amount))],
           emptyHint: 'Keine Verkäufe.',
           headerInfo
         });
@@ -1467,6 +2011,61 @@ class ExportService {
 
         // ---------- UNTERSCHRIFTEN ----------
         this._signatureBlock(doc, theme, ['Kassenwart/in', 'Kassenprüfer/in 1', 'Kassenprüfer/in 2'], headerInfo);
+
+        // ---------- NACHTRAG: NACHTRÄGLICHE ÄNDERUNGEN (live) ----------
+        if (post) {
+          const annexHeader = {
+            ...headerInfo,
+            subtitle: `Geschäftsjahr ${fiscalYear.name} (${periodLabel}) · Nachtrag, Datenstand live vom ${this._fmtDateTime(post.generatedAt)}`
+          };
+          this._addPageDecorated(doc, theme, annexHeader);
+          this._section(doc, theme, 'Nachträgliche Änderungen nach dem Abschluss', annexHeader);
+          this._note(doc, theme, `Dieser Nachtrag wird bei jedem Abruf des Berichts live erzeugt (${this._fmtDateTime(post.generatedAt)}). `
+            + `Alle Zahlen davor sind eingefroren (Abschluss vom ${this._fmtDateTime(s.closedAt)}). Änderungen an Buchungen dieses Geschäftsjahres nach dem Abschluss `
+            + 'sind nur nach ausdrücklicher Bestätigung möglich und werden hier mit Zeitpunkt, Benutzer und Auswirkung aufgeführt.');
+
+          this._subheading(doc, theme, 'Vergleich laut Abschluss / aktueller Datenstand');
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Position', width: 190, render: r => r.label },
+              { header: 'Laut Abschluss', width: 110, align: 'right', render: r => this._fmtEUR(r.closed) },
+              { header: 'Aktueller Datenstand', width: 120, align: 'right', render: r => this._fmtEUR(r.live) },
+              { header: 'Abweichung', width: 100, align: 'right', render: r => this._fmtSigned(r.diff), color: r => diffColor(r.diff) }
+            ],
+            rows: post.cmpRows,
+            headerInfo: annexHeader
+          });
+          this._kvList(doc, theme, [
+            { label: 'Abweichung Überschuss (aktuell - Abschluss)', value: this._fmtSigned(post.profitDiff), bold: true, color: diffColor(post.profitDiff) },
+            { label: `davon durch protokollierte Änderungen (${post.entries.length})`, value: this._fmtSigned(post.loggedEffect) },
+            { label: 'davon ohne protokollierte Änderung', value: this._fmtSigned(post.unexplained), bold: true, color: diffColor(post.unexplained), rule: true }
+          ], { headerInfo: annexHeader, keepTogether: true });
+          if (Math.abs(post.unexplained) >= 0.005) {
+            this._note(doc, theme, 'Abweichung ohne protokollierte Änderung: Sie ist vor Einführung der Sperre für abgeschlossene Jahre oder außerhalb der App '
+              + '(z. B. direkt in der Datenbank) entstanden. Bitte anhand der Buchungen dieses Zeitraums klären.');
+          }
+
+          this._subheading(doc, theme, `Protokollierte Änderungen (${post.entries.length})`);
+          this._table(doc, theme, {
+            columns: [
+              { header: 'Zeitpunkt', width: 88, render: r => this._fmtDateTime(r.createdAt) },
+              { header: 'Benutzer', width: 80, render: r => (r.user && r.user.name) || '—' },
+              // Standardschrift kennt keinen Pfeil (→), daher ersetzen
+              { header: 'Änderung', width: 270, render: r => `${(r.changes && r.changes.operation) ? `${r.changes.operation}: ` : ''}${(r.changes && r.changes.description) || ''}`.replace(/→/g, '->') },
+              {
+                header: 'Auswirkung Überschuss', width: 82, align: 'right',
+                render: r => (r.changes && r.changes.effect != null) ? this._fmtSigned(r.changes.effect) : 'ergebnisneutral',
+                color: r => (r.changes && r.changes.effect != null) ? diffColor(r.changes.effect) : theme.color.subtext
+              }
+            ],
+            rows: post.entries,
+            sumRow: post.entries.length ? ['Summe', '', '', this._fmtSigned(post.loggedEffect)] : null,
+            emptyHint: 'Keine protokollierten Änderungen nach dem Abschluss.',
+            headerInfo: annexHeader
+          });
+          this._note(doc, theme, '„Ergebnisneutral“: Die Änderung betrifft Gästeguthaben, Bank-Kontostände, Entwürfe oder Eigenverbrauch/Schwund, nicht Einnahmen oder Ausgaben. '
+            + 'Offline gebuchte Verkäufe/Aufladungen, die erst nach dem Abschluss übertragen wurden, erscheinen als „Offline-Nachbuchung“.');
+        }
 
         this._finishDoc(doc, theme, headerInfo);
         done.then(pdf => resolve({

@@ -12,8 +12,10 @@ const {
 router.post('/login', validateLogin, handleValidationErrors, authController.login);
 router.post('/refresh', authController.refreshToken);
 
+// Logout ist bewusst ohne authenticate: auch mit abgelaufenem Token oder nach Session-Ende 200
+router.post('/logout', authController.logout);
+
 // Protected routes
-router.post('/logout', authenticate, authController.logout);
 router.get('/me', authenticate, authController.me);
 router.post('/change-password', authenticate, validateChangePassword, handleValidationErrors, authController.changePassword);
 

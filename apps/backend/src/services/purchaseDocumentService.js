@@ -1,12 +1,104 @@
 const prisma = require('../utils/prisma');
 const { Prisma } = require('@prisma/client');
+const { parseLocalDate } = require('../utils/businessDay');
+const { nextNumber, maxFromNumbers, withNumberRetry } = require('../utils/numberSequence');
+const cashCountService = require('./cashCountService');
+const closedPeriod = require('../utils/closedPeriod');
 
-// Fachlicher Fehler (Controller antwortet mit 400 und dieser Meldung)
-function userError(message) {
+// Fachlicher Fehler (Controller antwortet mit statusCode, Vorgabe 400, und dieser Meldung)
+function userError(message, statusCode = 400) {
   const err = new Error(message);
   err.userFacing = true;
+  err.statusCode = statusCode;
   return err;
 }
+
+const DOCUMENT_TYPES = ['RECHNUNG', 'LIEFERSCHEIN'];
+const PAYMENT_METHODS = ['CASH', 'TRANSFER', 'ACCOUNT', 'CARD', 'INVOICE'];
+
+/**
+ * Betrag aus Formular/JSON: "12,50", "12.50", 12.5 -> Decimal(12.50); leer -> null.
+ * Tausenderpunkte ("1.234,56") werden erkannt. Ungültig oder negativ -> 400.
+ */
+function parseAmount(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  let str = typeof value === 'number' ? String(value) : String(value).trim().replace(/\s|€/g, '');
+  if (str.includes(',')) str = str.replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  if (!/^-?\d+(\.\d+)?$/.test(str)) throw userError('Betrag ist ungültig (Beispiel: 12,50)');
+  const n = Number(str);
+  if (!Number.isFinite(n) || n < 0) throw userError('Betrag darf nicht negativ sein');
+  if (n > 99999999) throw userError('Betrag ist zu groß');
+  if (/\.\d{3,}$/.test(str)) throw userError('Betrag darf höchstens 2 Nachkommastellen haben');
+  return new Prisma.Decimal(str);
+}
+
+/** Datum (YYYY-MM-DD lokal oder ISO). leer -> null, ungültig -> 400 mit Feldname. */
+function parseDateField(value, label) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '' || value === 'null') return null;
+  const dt = parseLocalDate(value);
+  if (!dt) throw userError(`${label} ist ungültig`);
+  return dt;
+}
+
+/** Zahldatum: leer -> jetzt; ungültig oder in der Zukunft -> 400 */
+function parsePaidAt(value) {
+  const dt = parseDateField(value, 'Zahldatum');
+  if (!dt) return new Date();
+  if (dt.getTime() > Date.now() + 60 * 1000) throw userError('Zahldatum darf nicht in der Zukunft liegen');
+  return dt;
+}
+
+/** Kistenfaktor-Prüfung und Menge in Basiseinheit für eine Eingabezeile */
+function itemQuantities(article, item) {
+  const toDec = (v, label) => {
+    if (v === undefined || v === null || v === '') return new Prisma.Decimal(0);
+    const n = Number(String(v).replace(',', '.'));
+    if (!Number.isFinite(n) || n < 0) throw userError(`${label} für "${article.name}" ist ungültig`);
+    return new Prisma.Decimal(n);
+  };
+  const kistenQty = toDec(item.kisten, 'Anzahl Kisten');
+  const flaschenQty = toDec(item.flaschen, 'Anzahl Einzelstücke');
+  const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
+  // Ohne Kistenfaktor darf keine Kiste gebucht werden, sonst landen still 0 Flaschen im Bestand (B8)
+  if (kistenQty.gt(0) && unitsPerKiste.lte(0)) {
+    throw userError(`Artikel "${article.name}" hat keinen Kistenfaktor (Einheiten pro ${article.purchaseUnit || 'Kiste'}). Bitte im Artikel pflegen.`);
+  }
+  return { kistenQty, flaschenQty, total: kistenQty.times(unitsPerKiste).plus(flaschenQty) };
+}
+
+/** Zahltag, nach dem Kasse/Bank/EÜR rechnen (paidAt, ersatzweise documentDate) */
+const effectivePaidAt = (doc) => (doc.paidAt || doc.documentDate) ? new Date(doc.paidAt || doc.documentDate) : null;
+
+/**
+ * Bar bezahlte Lieferantenrechnung: Zahldatum nicht vor der letzten Kassenzählung.
+ * Nur prüfen, wenn sich am Bar-Zahlzustand etwas ändert (Neu bar bezahlt, anderes Zahldatum).
+ */
+async function assertCashPaidAt(tx, before, after) {
+  if (!(after.type === 'RECHNUNG' && after.paid && after.paymentMethod === 'CASH')) return;
+  const when = effectivePaidAt(after);
+  if (!when) return;
+  const prev = before && before.paid && before.paymentMethod === 'CASH' ? effectivePaidAt(before) : null;
+  if (prev && prev.getTime() === when.getTime()) return;
+  await cashCountService.assertCashPaymentAfterLastCount(when, tx);
+}
+
+/*
+ * Abgeschlossene Geschäftsjahre (utils/closedPeriod): maßgeblich sind das Belegdatum (Belegliste,
+ * Verbindlichkeiten, Wareneingang) und das Zahldatum (EÜR, Kasse, Bank), jeweils vor und nach der Änderung.
+ * Reines Bezahlen/Offen-Setzen schaut nur auf das Zahldatum: Eine Vorjahresrechnung im neuen Jahr zu
+ * bezahlen ändert am abgeschlossenen Jahr nichts (Verbindlichkeiten zählen „erst nach dem Stichtag bezahlt“ mit).
+ */
+const DOC_TYPE_LABEL = { RECHNUNG: 'Lieferantenrechnung', LIEFERSCHEIN: 'Lieferschein' };
+const docLabel = (doc) => `${DOC_TYPE_LABEL[doc.type] || 'Beleg'} ${doc.documentNumber} (${doc.supplier})`;
+const paidDateOf = (doc) => (doc && doc.type === 'RECHNUNG' && doc.paid ? effectivePaidAt(doc) : null);
+// Ausgabe dieses Belegs im Jahr fy (EÜR): Betrag, wenn bezahlt und Zahltag im Jahr, sonst 0
+const expenseIn = (doc, fy) => {
+  const when = paidDateOf(doc);
+  return when && closedPeriod.inYear(when, fy) ? Number(doc.totalAmount || 0) : 0;
+};
+const { fmtDate, fmtEUR } = closedPeriod;
 
 // „Eingetragen von“: freier Name, gekürzt; leer = null
 function cleanEnteredBy(value) {
@@ -69,39 +161,29 @@ class PurchaseDocumentService {
   }
 
   /**
-   * Generiert eine neue Belegnummer (z.B. RE-2025-0001)
+   * Neue Belegnummer innerhalb der Transaktion (EK-2026-0001 bzw. LS-2026-0001, Jahr = Erfassungsjahr).
+   * Der Zähler `purchase.lastNumber.<EK|LS>.<Jahr>` merkt sich die höchste je vergebene Nummer,
+   * gelöschte Belege geben ihre Nummer also nicht wieder frei.
    */
-  async generateDocumentNumber(type) {
+  async generateDocumentNumber(tx, type) {
     const prefix = type === 'RECHNUNG' ? 'EK' : 'LS';
     const year = new Date().getFullYear();
     const yearPrefix = `${prefix}-${year}-`;
-
-    const lastDocument = await prisma.purchaseDocument.findFirst({
-      where: {
-        documentNumber: {
-          startsWith: yearPrefix
-        },
-        type: type
-      },
-      orderBy: {
-        documentNumber: 'desc'
-      }
+    const existing = await tx.purchaseDocument.findMany({
+      where: { documentNumber: { startsWith: yearPrefix } },
+      select: { documentNumber: true }
     });
-
-    let nextNumber = 1;
-    if (lastDocument) {
-      const parts = lastDocument.documentNumber.split('-');
-      nextNumber = parseInt(parts[2]) + 1;
-    }
-
-    return `${yearPrefix}${nextNumber.toString().padStart(4, '0')}`;
+    const n = await nextNumber(tx, `purchase.lastNumber.${prefix}.${year}`,
+      maxFromNumbers(existing.map((r) => r.documentNumber), yearPrefix),
+      `Höchste vergebene Belegnummer ${prefix} ${year}`);
+    return `${yearPrefix}${String(n).padStart(4, '0')}`;
   }
 
   /**
    * Erstellt einen neuen Beleg (Lieferschein oder Rechnung)
    * und bucht optional den Wareneingang.
    */
-  async createDocument(data, userId, nachweisUrl) {
+  async createDocument(data, userId, nachweisUrl, { confirmClosed = false } = {}) {
     const {
       type,
       supplier,
@@ -110,6 +192,7 @@ class PurchaseDocumentService {
       enteredBy,
       totalAmount,
       paid,
+      paidAt,
       dueDate,
       paymentMethod,
       reimbursedCustomerId, // nur bei paymentMethod = ACCOUNT (Auslage)
@@ -117,35 +200,57 @@ class PurchaseDocumentService {
       lieferscheinIds // Optional: IDs von Lieferscheinen zum Verknüpfen
     } = data;
 
-    return prisma.$transaction(async (tx) => {
+    // Kopf prüfen (vor der Transaktion, damit Fehler sauber als 400 ankommen)
+    if (!DOCUMENT_TYPES.includes(type)) throw userError('Belegart fehlt oder ist ungültig (Lieferantenrechnung oder Lieferschein)');
+    const cleanSupplier = typeof supplier === 'string' ? supplier.trim() : '';
+    if (!cleanSupplier) throw userError('Lieferant fehlt');
+    if (cleanSupplier.length > 200) throw userError('Lieferant darf höchstens 200 Zeichen lang sein');
+    const docDate = parseDateField(documentDate, 'Belegdatum');
+    if (!docDate) throw userError('Belegdatum fehlt');
+    if (items !== undefined && items !== null && !Array.isArray(items)) throw userError("Ungültiges 'items' Format.");
+    const isRechnung = type === 'RECHNUNG';
+    const amount = isRechnung ? parseAmount(totalAmount) : null;
+    const due = isRechnung ? parseDateField(dueDate, 'Fälligkeitsdatum') : null;
+    const isPaid = isRechnung && !!paid;
+    if (isPaid && !PAYMENT_METHODS.includes(paymentMethod)) throw userError('Zahlungsart fehlt oder ist ungültig');
+    const paidDate = isPaid ? parsePaidAt(paidAt) : null;
+
+    return withNumberRetry(() => prisma.$transaction(async (tx) => {
+      // Abgeschlossenes Geschäftsjahr: Belegdatum oder Zahldatum darin → 409 ohne Bestätigung
+      const closedYears = await closedPeriod.guard([docDate, paidDate], confirmClosed, tx);
+
       // 1. Dokumenten-Kopf erstellen
-      const documentNumber = await this.generateDocumentNumber(type);
+      const documentNumber = await this.generateDocumentNumber(tx, type);
+
+      if (isPaid) {
+        await assertCashPaidAt(tx, null, { type, paid: true, paymentMethod, paidAt: paidDate, documentDate: docDate });
+      }
 
       const document = await tx.purchaseDocument.create({
         data: {
           type,
           documentNumber,
-          supplier,
-          documentDate: new Date(documentDate),
+          supplier: cleanSupplier,
+          documentDate: docDate,
           description,
           enteredBy: cleanEnteredBy(enteredBy),
           nachweisUrl,
-          totalAmount: totalAmount ? new Prisma.Decimal(totalAmount) : null,
-          paid: paid || false,
-          dueDate: dueDate ? new Date(dueDate) : null,
-          paymentMethod: paid ? paymentMethod : null,
-          paidAt: paid ? new Date() : null,
+          totalAmount: amount ?? null,
+          paid: isPaid,
+          dueDate: due ?? null,
+          paymentMethod: isPaid ? paymentMethod : null,
+          paidAt: paidDate,
           userId: userId,
         }
       });
 
       // 1a. Auslage dem Kundenkonto gutschreiben
-      if (paid && paymentMethod === 'ACCOUNT') {
+      if (isPaid && paymentMethod === 'ACCOUNT') {
         await this._bookReimbursement(tx, document, reimbursedCustomerId);
       }
 
       // 1b. Lieferscheine verknüpfen (falls vorhanden)
-      if (type === 'RECHNUNG' && lieferscheinIds && Array.isArray(lieferscheinIds) && lieferscheinIds.length > 0) {
+      if (isRechnung && lieferscheinIds && Array.isArray(lieferscheinIds) && lieferscheinIds.length > 0) {
         await tx.purchaseDocument.updateMany({
           where: {
             id: { in: lieferscheinIds },
@@ -161,34 +266,24 @@ class PurchaseDocumentService {
       // 2. Positionen verarbeiten & Lagerbestand buchen (falls vorhanden)
       if (items && items.length > 0) {
         for (const item of items) {
-          if (!item.articleId) continue;
+          if (!item || !item.articleId) continue;
 
           const article = await tx.article.findUnique({
-            where: { id: item.articleId }
+            where: { id: String(item.articleId) }
           });
 
           if (!article) {
-            throw new Error(`Artikel mit ID ${item.articleId} nicht gefunden.`);
+            throw userError(`Artikel mit ID ${item.articleId} nicht gefunden.`, 404);
           }
 
-          // Kisten/Flaschen-Logik aus deinem Mockup
-          const kistenQty = new Prisma.Decimal(item.kisten || 0);
-          const flaschenQty = new Prisma.Decimal(item.flaschen || 0);
-          const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
-
-          // Ohne Kistenfaktor darf keine Kiste gebucht werden, sonst landen still 0 Flaschen im Bestand (B8)
-          if (kistenQty.gt(0) && unitsPerKiste.lte(0)) {
-            throw new Error(`Artikel "${article.name}" hat keinen Kistenfaktor (Einheiten pro ${article.purchaseUnit || 'Kiste'}). Bitte im Artikel pflegen.`);
-          }
-
-          // Gesamtmenge in "Basiseinheit" (z.B. Flasche)
-          const totalQuantityToBook = (kistenQty.times(unitsPerKiste)).plus(flaschenQty);
+          // Kisten/Einzelstücke -> Gesamtmenge in Basiseinheit (z.B. Flasche); Kistenfaktor-Prüfung
+          const { kistenQty, flaschenQty, total: totalQuantityToBook } = itemQuantities(article, item);
 
           if (totalQuantityToBook.lte(0)) continue; // Nichts zu buchen
 
           // 2a. Lagerbestand erhöhen
           await tx.article.update({
-            where: { id: item.articleId },
+            where: { id: article.id },
             data: {
               stock: {
                 increment: totalQuantityToBook
@@ -199,18 +294,18 @@ class PurchaseDocumentService {
           // 2b. Bestandsbewegung loggen
           await tx.stockMovement.create({
             data: {
-              articleId: item.articleId,
+              articleId: article.id,
               type: 'DELIVERY', // Wareneingang
               quantity: totalQuantityToBook,
               reason: `Eingang ${documentNumber}`
             }
           });
 
-          // 2c. Beleg-Position speichern
+          // 2c. Beleg-Position speichern (Einkaufspreise je Position werden nicht erfasst, der Betrag steht im Kopf)
           await tx.purchaseDocumentItem.create({
             data: {
               documentId: document.id,
-              articleId: item.articleId,
+              articleId: article.id,
               description: article.name,
               quantity: totalQuantityToBook,
               unit: article.unit, // z.B. "Flasche"
@@ -218,21 +313,30 @@ class PurchaseDocumentService {
               purchaseUnitQuantity: kistenQty,
               baseUnit: article.unit,
               baseUnitQuantity: flaschenQty,
-              // Preislogik (für Sofortkauf)
-              // Annahme: Frontend schickt 'pricePerKiste' und 'pricePerFlasche'
-              // Hier vereinfacht, du kannst das anpassen:
-              pricePerUnit: new Prisma.Decimal(0), // TODO: Preislogik
-              totalPrice: new Prisma.Decimal(0)    // TODO: Preislogik
+              pricePerUnit: new Prisma.Decimal(0),
+              totalPrice: new Prisma.Decimal(0)
             }
           });
         }
+      }
+
+      if (closedYears.length) {
+        const amountTxt = isRechnung && amount != null ? `, ${fmtEUR(amount)}` : '';
+        await closedPeriod.logChange(tx, closedYears, {
+          kind: 'expense', userId, entityType: 'PurchaseDocument', entityId: document.id,
+          operation: 'Beleg nachträglich angelegt',
+          description: `${docLabel(document)} nachträglich angelegt, Belegdatum ${fmtDate(docDate)}${amountTxt}`
+            + (isPaid ? `, bezahlt am ${fmtDate(paidDate)}` : ''),
+          amountBefore: isRechnung ? 0 : null,
+          amountAfter: isRechnung ? (fy) => expenseIn(document, fy) : null,
+        });
       }
 
       return document;
     }, {
       maxWait: 10000, // 10s
       timeout: 20000, // 20s
-    });
+    }));
   }
 
   /**
@@ -304,36 +408,51 @@ class PurchaseDocumentService {
    * Verknüpft Lieferscheine mit einer Rechnung
    */
   async linkLieferscheineToRechnung(rechnungId, lieferscheinIds, userId) {
-    // TODO: Prüfen, ob rechnungId wirklich eine RECHNUNG ist
-    // TODO: Prüfen, ob Lieferscheine vom selben Lieferanten sind
-    // TODO: Prüfen, ob Lieferscheine noch nicht verknüpft sind
+    return prisma.$transaction(async (tx) => {
+      // Ziel muss eine vorhandene Lieferantenrechnung sein
+      const rechnung = await tx.purchaseDocument.findUnique({ where: { id: String(rechnungId) }, select: { id: true, type: true, supplier: true } });
+      if (!rechnung) throw userError('Rechnung nicht gefunden.', 404);
+      if (rechnung.type !== 'RECHNUNG') throw userError('Lieferscheine können nur einer Lieferantenrechnung zugeordnet werden.');
 
-    const count = await prisma.purchaseDocument.updateMany({
-      where: {
-        id: { in: lieferscheinIds },
-        type: 'LIEFERSCHEIN',
-        rechnungId: null // Nur unverknüpfte
-      },
-      data: {
-        rechnungId: rechnungId
-      }
-    });
+      const ids = [...new Set(lieferscheinIds.map(String))];
+      const docs = ids.length
+        ? await tx.purchaseDocument.findMany({ where: { id: { in: ids } }, select: { id: true, type: true, supplier: true, documentNumber: true } })
+        : [];
+      if (docs.length !== ids.length) throw userError('Mindestens ein Lieferschein wurde nicht gefunden.', 404);
+      const notLs = docs.find((x) => x.type !== 'LIEFERSCHEIN');
+      if (notLs) throw userError(`${notLs.documentNumber} ist kein Lieferschein.`);
+      // Gleicher Lieferant: das Frontend bietet ohnehin nur offene Lieferscheine dieses Lieferanten an
+      const foreign = docs.find((x) => x.supplier !== rechnung.supplier);
+      if (foreign) throw userError(`Lieferschein ${foreign.documentNumber} ist von „${foreign.supplier}“, die Rechnung von „${rechnung.supplier}“.`);
 
-    // Audit-Log
-    await prisma.auditLog.create({
-      data: {
-        userId: userId,
-        action: 'LINK_PURCHASE_DOCUMENTS',
-        entityType: 'PurchaseDocument',
-        entityId: rechnungId,
-        changes: {
-          linkedIds: lieferscheinIds,
-          count: count.count
+      // Bereits einer (anderen) Rechnung zugeordnete Lieferscheine bleiben unverändert (count zeigt das)
+      const count = await tx.purchaseDocument.updateMany({
+        where: {
+          id: { in: ids },
+          type: 'LIEFERSCHEIN',
+          rechnungId: null // Nur unverknüpfte
+        },
+        data: {
+          rechnungId: rechnung.id
         }
-      }
-    });
+      });
 
-    return count;
+      // Audit-Log
+      await tx.auditLog.create({
+        data: {
+          userId: userId,
+          action: 'LINK_PURCHASE_DOCUMENTS',
+          entityType: 'PurchaseDocument',
+          entityId: rechnung.id,
+          changes: {
+            linkedIds: ids,
+            count: count.count
+          }
+        }
+      });
+
+      return count;
+    });
   }
 
   /**
@@ -392,14 +511,17 @@ class PurchaseDocumentService {
     return rows.map((r) => r.enteredBy);
   }
   /**
-   * Markiert eine Rechnung als bezahlt.
+   * Markiert eine Rechnung als bezahlt. paidAt optional (Vorgabe jetzt, nicht in der Zukunft);
+   * das Zahldatum bestimmt EÜR, Kassen-Soll und Bank-Abstimmung.
    */
-  async markAsPaid(documentId, paymentMethod, userId, reimbursedCustomerId = null) {
+  async markAsPaid(documentId, paymentMethod, userId, reimbursedCustomerId = null, paidAt = undefined, { confirmClosed = false } = {}) {
+    if (!PAYMENT_METHODS.includes(paymentMethod)) throw userError('Zahlungsart fehlt oder ist ungültig');
+    const paidDate = parsePaidAt(paidAt);
     return prisma.$transaction(async (tx) => {
       const document = await tx.purchaseDocument.findUnique({ where: { id: documentId } });
 
       if (!document) {
-        throw userError('Beleg nicht gefunden.');
+        throw userError('Beleg nicht gefunden.', 404);
       }
       if (document.type !== 'RECHNUNG') {
         throw userError('Nur Rechnungen können als bezahlt markiert werden.');
@@ -407,12 +529,15 @@ class PurchaseDocumentService {
       if (hasReimbursement(document)) {
         throw userError('Die Rechnung ist bereits als Auslage gutgeschrieben.');
       }
+      // Zahldatum alt (falls schon bezahlt) und neu gegen abgeschlossene Jahre
+      const closedYears = await closedPeriod.guard([paidDateOf(document), paidDate], confirmClosed, tx);
+      await assertCashPaidAt(tx, document, { ...document, paid: true, paymentMethod, paidAt: paidDate });
 
       let updatedDocument = await tx.purchaseDocument.update({
         where: { id: documentId },
         data: {
           paid: true,
-          paidAt: new Date(),
+          paidAt: paidDate,
           paymentMethod: paymentMethod
         }
       });
@@ -429,24 +554,49 @@ class PurchaseDocumentService {
           entityId: documentId,
           changes: {
             paymentMethod: paymentMethod,
+            paidAt: paidDate,
+            previousPaidAt: document.paid ? document.paidAt : undefined,
             amount: updatedDocument.totalAmount,
             reimbursedCustomerId: updatedDocument.reimbursedCustomerId || undefined
           }
         }
       });
 
+      if (closedYears.length) {
+        const prev = paidDateOf(document);
+        await closedPeriod.logChange(tx, closedYears, {
+          kind: 'expense', userId, entityType: 'PurchaseDocument', entityId: documentId,
+          operation: prev ? 'Zahldatum geändert' : 'Als bezahlt markiert',
+          description: prev
+            ? `${docLabel(document)}: Zahldatum von ${fmtDate(prev)} auf ${fmtDate(paidDate)} geändert, ${fmtEUR(document.totalAmount)}`
+            : `${docLabel(document)} als bezahlt markiert (${fmtDate(paidDate)}), ${fmtEUR(document.totalAmount)}`,
+          amountBefore: (fy) => expenseIn(document, fy),
+          amountAfter: (fy) => expenseIn(updatedDocument, fy),
+        });
+      }
+
       return updatedDocument;
     });
   }
-  async markAsUnpaid(documentId, userId) {
+  async markAsUnpaid(documentId, userId, { confirmClosed = false } = {}) {
     return prisma.$transaction(async (tx) => {
       const document = await tx.purchaseDocument.findUnique({ where: { id: documentId } });
 
       if (!document) {
-        throw userError('Beleg nicht gefunden.');
+        throw userError('Beleg nicht gefunden.', 404);
       }
       if (document.type !== 'RECHNUNG') {
         throw userError('Nur Rechnungen können bearbeitet werden.');
+      }
+      const closedYears = await closedPeriod.guard([paidDateOf(document)], confirmClosed, tx);
+      if (closedYears.length) {
+        await closedPeriod.logChange(tx, closedYears, {
+          kind: 'expense', userId, entityType: 'PurchaseDocument', entityId: documentId,
+          operation: 'Zahlung zurückgenommen',
+          description: `${docLabel(document)} auf offen gesetzt (war bezahlt am ${fmtDate(paidDateOf(document))}), ${fmtEUR(document.totalAmount)}`,
+          amountBefore: (fy) => expenseIn(document, fy),
+          amountAfter: 0,
+        });
       }
 
       await this._reverseReimbursement(tx, document);
@@ -469,8 +619,10 @@ class PurchaseDocumentService {
           entityType: 'PurchaseDocument',
           entityId: documentId,
           changes: {
-            oldStatus: 'PAID',
+            oldStatus: document.paid ? 'PAID' : 'UNPAID',
             newStatus: 'UNPAID',
+            previousPaidAt: document.paidAt || undefined,
+            previousPaymentMethod: document.paymentMethod || undefined,
             reimbursementReversed: hasReimbursement(document) || undefined
           }
         }
@@ -530,19 +682,31 @@ class PurchaseDocumentService {
    * Aktualisiert einen kompletten Beleg (Kopfdaten & Positionen)
    * und korrigiert den Lagerbestand.
    */
-  async updateDocument(documentId, data, userId, nachweisUrl) {
+  async updateDocument(documentId, data, userId, nachweisUrl, { confirmClosed = false } = {}) {
     const {
       supplier,
       documentDate,
       description,
       enteredBy,
-      totalAmount,
+      totalAmount: totalAmountRaw,
       paid,
+      paidAt,
       dueDate,
       paymentMethod,
       reimbursedCustomerId, // nur bei paymentMethod = ACCOUNT (Auslage)
       items // Erwartet: [{ articleId, kisten, flaschen }] oder undefined
     } = data;
+
+    // Eingaben prüfen (400 statt 500 bei Unsinn)
+    if (supplier !== undefined && !(typeof supplier === 'string' && supplier.trim())) throw userError('Lieferant fehlt');
+    if (typeof supplier === 'string' && supplier.trim().length > 200) throw userError('Lieferant darf höchstens 200 Zeichen lang sein');
+    const docDate = parseDateField(documentDate, 'Belegdatum');
+    if (documentDate !== undefined && !docDate) throw userError('Belegdatum fehlt');
+    const totalAmount = parseAmount(totalAmountRaw);
+    const due = parseDateField(dueDate, 'Fälligkeitsdatum');
+    if (paid && paymentMethod !== undefined && !PAYMENT_METHODS.includes(paymentMethod)) throw userError('Zahlungsart ist ungültig');
+    const paidDate = paidAt !== undefined && paidAt !== '' && paidAt !== null ? parsePaidAt(paidAt) : undefined;
+    if (items !== undefined && items !== null && !Array.isArray(items)) throw userError("Ungültiges 'items' Format.");
 
     return prisma.$transaction(async (tx) => {
 
@@ -553,7 +717,7 @@ class PurchaseDocumentService {
       });
 
       if (!oldDocument) {
-        throw new Error('Beleg nicht gefunden.');
+        throw userError('Beleg nicht gefunden.', 404);
       }
 
       // Auslage: solange gutgeschrieben, sind Betrag, Kunde und Zahlungsart gesperrt (nur „offen“ setzen hebt sie auf)
@@ -594,14 +758,11 @@ class PurchaseDocumentService {
           for (const newItem of items) {
             if (!newItem.articleId) continue;
 
-            const article = await tx.article.findUnique({ where: { id: newItem.articleId } });
-            if (!article) throw new Error(`Artikel ${newItem.articleId} nicht gefunden.`);
+            const article = await tx.article.findUnique({ where: { id: String(newItem.articleId) } });
+            if (!article) throw userError(`Artikel ${newItem.articleId} nicht gefunden.`, 404);
 
-            const kistenQty = new Prisma.Decimal(newItem.kisten || 0);
-            const flaschenQty = new Prisma.Decimal(newItem.flaschen || 0);
-            const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
-
-            const totalNewQuantity = kistenQty.times(unitsPerKiste).plus(flaschenQty);
+            // gleiche Kistenfaktor-Prüfung wie beim Anlegen
+            const { total: totalNewQuantity } = itemQuantities(article, newItem);
 
             // Wir addieren den *positiven* Wert, um den Bestand zu erhöhen
             const currentCorrection = stockCorrections.get(newItem.articleId) || new Prisma.Decimal(0);
@@ -645,11 +806,8 @@ class PurchaseDocumentService {
           for (const newItem of items) {
             if (!newItem.articleId) continue;
 
-            const article = await tx.article.findUnique({ where: { id: newItem.articleId } });
-            const kistenQty = new Prisma.Decimal(newItem.kisten || 0);
-            const flaschenQty = new Prisma.Decimal(newItem.flaschen || 0);
-            const unitsPerKiste = new Prisma.Decimal(article.unitsPerPurchase || 0);
-            const totalNewQuantity = kistenQty.times(unitsPerKiste).plus(flaschenQty);
+            const article = await tx.article.findUnique({ where: { id: String(newItem.articleId) } });
+            const { kistenQty, flaschenQty, total: totalNewQuantity } = itemQuantities(article, newItem);
 
             if (totalNewQuantity.lte(0)) continue;
 
@@ -662,7 +820,7 @@ class PurchaseDocumentService {
               purchaseUnitQuantity: kistenQty,
               baseUnit: article.unit,
               baseUnitQuantity: flaschenQty,
-              pricePerUnit: new Prisma.Decimal(0), // TODO: Preislogik
+              pricePerUnit: new Prisma.Decimal(0), // Einkaufspreise je Position werden nicht erfasst
               totalPrice: new Prisma.Decimal(0)
             });
           }
@@ -671,8 +829,8 @@ class PurchaseDocumentService {
 
       // 7. Kopfdaten (Header) aktualisieren
       const updateData = {};
-      if (supplier !== undefined) updateData.supplier = supplier;
-      if (documentDate !== undefined) updateData.documentDate = new Date(documentDate);
+      if (supplier !== undefined) updateData.supplier = supplier.trim();
+      if (docDate) updateData.documentDate = docDate;
       if (description !== undefined) updateData.description = description;
       if (enteredBy !== undefined) updateData.enteredBy = cleanEnteredBy(enteredBy);
 
@@ -683,21 +841,28 @@ class PurchaseDocumentService {
       }
 
       if (oldDocument.type === 'RECHNUNG') {
-        if (totalAmount !== undefined) updateData.totalAmount = new Prisma.Decimal(totalAmount);
+        if (totalAmount !== undefined) updateData.totalAmount = totalAmount;
         if (paid !== undefined) {
           updateData.paid = paid;
           if (paid) {
             // Wenn bezahlt gesetzt wird, und Methode da ist
             if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
-            // Wenn vorher nicht bezahlt war, setze Datum
-            if (!oldDocument.paid) updateData.paidAt = new Date();
+            // Zahldatum: übergeben -> übernehmen; sonst beim Wechsel auf bezahlt jetzt
+            if (paidDate) updateData.paidAt = paidDate;
+            else if (!oldDocument.paid) updateData.paidAt = new Date();
           } else {
             updateData.paymentMethod = null;
             updateData.paidAt = null;
             updateData.reimbursedCustomerId = null;
           }
+        } else if (paidDate && oldDocument.paid) {
+          updateData.paidAt = paidDate;
         }
-        if (dueDate !== undefined) updateData.dueDate = new Date(dueDate);
+        // leeres Fälligkeitsdatum ("") = kein Datum
+        if (due !== undefined) updateData.dueDate = due;
+
+        // Bar bezahlt: Zahldatum nicht vor der letzten Kassenzählung (nur wenn sich daran etwas ändert)
+        await assertCashPaidAt(tx, oldDocument, { ...oldDocument, ...updateData });
       }
 
       if (nachweisUrl !== undefined) {
@@ -717,6 +882,49 @@ class PurchaseDocumentService {
         updatedDocument = await this._bookReimbursement(tx, updatedDocument, reimbursedCustomerId);
       }
 
+      // Abgeschlossenes Geschäftsjahr (Prüfung nach dem Rechnen, die Transaktion rollt bei 409 alles zurück):
+      // Zahldatum alt/neu immer; Belegdatum alt/neu nur, wenn sich am Beleg selbst etwas ändert
+      const changes = [];
+      const sameTime = (a, b) => (a ? new Date(a).getTime() : null) === (b ? new Date(b).getTime() : null);
+      if (updatedDocument.supplier !== oldDocument.supplier) changes.push(`Lieferant von „${oldDocument.supplier}“ auf „${updatedDocument.supplier}“`);
+      if (!sameTime(updatedDocument.documentDate, oldDocument.documentDate)) changes.push(`Belegdatum von ${fmtDate(oldDocument.documentDate)} auf ${fmtDate(updatedDocument.documentDate)}`);
+      if (Number(updatedDocument.totalAmount || 0) !== Number(oldDocument.totalAmount || 0)) changes.push(`Betrag von ${fmtEUR(oldDocument.totalAmount)} auf ${fmtEUR(updatedDocument.totalAmount)}`);
+      if ((updatedDocument.description || '') !== (oldDocument.description || '')) changes.push('Beschreibung geändert');
+      if ((updatedDocument.enteredBy || '') !== (oldDocument.enteredBy || '')) changes.push('„Eingetragen von“ geändert');
+      if (!sameTime(updatedDocument.dueDate, oldDocument.dueDate)) changes.push('Fälligkeit geändert');
+      if (nachweisUrl !== undefined) changes.push('Nachweis ersetzt');
+      if (newItemCreations !== undefined) {
+        const qtyMap = (list) => {
+          const m = new Map();
+          for (const it of list) if (it.articleId) m.set(String(it.articleId), (m.get(String(it.articleId)) || 0) + Number(it.quantity));
+          return [...m.entries()].sort().map(([k, v]) => `${k}:${v}`).join('|');
+        };
+        if (qtyMap(oldDocument.items) !== qtyMap(newItemCreations)) changes.push('Positionen/Wareneingang geändert');
+      }
+      const oldPaid = paidDateOf(oldDocument);
+      const newPaid = paidDateOf(updatedDocument);
+      const paymentChanged = !sameTime(oldPaid, newPaid) || (oldPaid && updatedDocument.paymentMethod !== oldDocument.paymentMethod);
+      if (paymentChanged) {
+        if (oldPaid && !newPaid) changes.push(`auf offen gesetzt (war bezahlt am ${fmtDate(oldPaid)})`);
+        else if (!oldPaid && newPaid) changes.push(`als bezahlt markiert (${fmtDate(newPaid)})`);
+        else changes.push(`Zahldatum von ${fmtDate(oldPaid)} auf ${fmtDate(newPaid)}`);
+      }
+      const contentChanged = changes.length > (paymentChanged ? 1 : 0);
+      // Ohne tatsächliche Änderung (Speichern ohne Änderung) keine Rückfrage
+      const closedYears = await closedPeriod.guard([
+        ...(paymentChanged || contentChanged ? [oldPaid, newPaid] : []),
+        ...(contentChanged ? [oldDocument.documentDate, updatedDocument.documentDate] : [])
+      ], confirmClosed, tx);
+      if (closedYears.length) {
+        await closedPeriod.logChange(tx, closedYears, {
+          kind: 'expense', userId, entityType: 'PurchaseDocument', entityId: documentId,
+          operation: 'Beleg geändert',
+          description: `${docLabel(oldDocument)} geändert: ${changes.join(', ')}`,
+          amountBefore: oldDocument.type === 'RECHNUNG' ? (fy) => expenseIn(oldDocument, fy) : null,
+          amountAfter: oldDocument.type === 'RECHNUNG' ? (fy) => expenseIn(updatedDocument, fy) : null,
+        });
+      }
+
       // Audit-Log
       await tx.auditLog.create({
         data: {
@@ -734,7 +942,7 @@ class PurchaseDocumentService {
   /**
    * Löscht einen Beleg und storniert alle zugehörigen Wareneingänge.
    */
-  async deleteDocument(documentId, userId) {
+  async deleteDocument(documentId, userId, { confirmClosed = false } = {}) {
     return prisma.$transaction(async (tx) => {
 
       // 1. Hole den Beleg und seine Positionen
@@ -748,7 +956,20 @@ class PurchaseDocumentService {
       });
 
       if (!document) {
-        throw new Error('Beleg nicht gefunden.');
+        throw userError('Beleg nicht gefunden.', 404);
+      }
+
+      const closedYears = await closedPeriod.guard([document.documentDate, paidDateOf(document)], confirmClosed, tx);
+      if (closedYears.length) {
+        const isRe = document.type === 'RECHNUNG';
+        await closedPeriod.logChange(tx, closedYears, {
+          kind: 'expense', userId, entityType: 'PurchaseDocument', entityId: documentId,
+          operation: 'Beleg gelöscht',
+          description: `${docLabel(document)} gelöscht, Belegdatum ${fmtDate(document.documentDate)}`
+            + (isRe ? `, ${fmtEUR(document.totalAmount)}${paidDateOf(document) ? `, bezahlt am ${fmtDate(paidDateOf(document))}` : ', offen'}` : ''),
+          amountBefore: isRe ? (fy) => expenseIn(document, fy) : null,
+          amountAfter: isRe ? 0 : null,
+        });
       }
 
       // 1b. Auslage-Gutschrift zurückbuchen (die TopUps bleiben, purchaseDocumentId wird null, reference behält die Nummer)

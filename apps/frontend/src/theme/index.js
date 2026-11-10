@@ -130,9 +130,49 @@ export default function ColorModeProvider({ children }) {
               fontWeight: 700,
               borderRadius: 8,
             },
+            // Touch: jeder Knopf mindestens 40 px hoch
+            sizeSmall: { '@media (pointer: coarse)': { minHeight: 40 } },
+            sizeMedium: { '@media (pointer: coarse)': { minHeight: 40 } },
             containedPrimary: {
               boxShadow: isDark ? '0 0 10px rgba(57, 255, 20, 0.4)' : undefined, // Neon Glow
             }
+          },
+        },
+        // Touch-Ziele: auf Geräten mit Fingerbedienung mindestens 40 px hoch (Maus bleibt kompakt)
+        MuiChip: {
+          styleOverrides: {
+            root: {
+              '@media (pointer: coarse)': {
+                '&.MuiChip-clickable, &.MuiChip-deletable': { height: 40, minHeight: 40 },
+              },
+            },
+          },
+        },
+        MuiIconButton: {
+          styleOverrides: {
+            sizeSmall: { '@media (pointer: coarse)': { minWidth: 40, minHeight: 40 } },
+          },
+        },
+        MuiToggleButton: { styleOverrides: { root: { '@media (pointer: coarse)': { minHeight: 40 } } } },
+        MuiLink: {
+          styleOverrides: {
+            // Textknöpfe (z. B. Aufklapper im Kassen-Soll): Fläche vergrößern, ohne die Schrift zu ändern
+            root: { '@media (pointer: coarse)': { '&.MuiLink-button': { minHeight: 40, display: 'inline-flex', alignItems: 'center' } } },
+          },
+        },
+        MuiAutocomplete: {
+          styleOverrides: {
+            root: {
+              '@media (pointer: coarse)': {
+                '& .MuiAutocomplete-popupIndicator, & .MuiAutocomplete-clearIndicator': { width: 40, height: 40, marginRight: -6 },
+              },
+            },
+          },
+        },
+        MuiInputBase: {
+          styleOverrides: {
+            // unter 16 px zoomt iOS beim Antippen ins Feld
+            input: { '@media (pointer: coarse), (max-width: 899.95px)': { fontSize: '1rem' } },
           },
         },
         MuiDialog: { styleOverrides: { paper: { borderRadius: 16 } } },

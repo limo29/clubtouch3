@@ -110,7 +110,10 @@ class PublicController {
                     id: true,
                     name: true,
                     balance: true,
+                    // REFUND-Zeilen (Gegenbuchung eines Stornos) nicht als eigene Zeile: der stornierte
+                    // Einkauf steht mit Betrag 0 und cancelled: true da, damit ist die Liste saldoneutral
                     transactions: {
+                        where: { type: 'SALE' },
                         take: 5,
                         orderBy: { createdAt: 'desc' },
                         include: {
@@ -131,13 +134,16 @@ class PublicController {
                 return res.status(404).json({ error: 'Kunde nicht gefunden' });
             }
 
-            // Format history similar to customerService.getHistory but simplified
+            // Historie wie customerService.getHistory, vereinfacht. amount = Wirkung auf das Guthaben:
+            // bar/Karte bezahlte Einkäufe 0 (paymentMethod sagt, wie bezahlt wurde), stornierte 0.
             const history = [
                 ...customer.transactions.map(t => ({
                     type: 'PURCHASE',
+                    txType: t.type,
                     date: t.createdAt,
-                    amount: t.cancelled ? 0 : -Number(t.totalAmount),
-                    items: t.items.map(i => `${i.quantity}x ${i.article.name}`).join(', '),
+                    amount: t.cancelled || t.paymentMethod !== 'ACCOUNT' ? 0 : -Number(t.totalAmount),
+                    paymentMethod: t.paymentMethod,
+                    items: t.items.map(i => `${Number(i.quantity)}x ${i.article.name}`).join(', '),
                     cancelled: t.cancelled
                 })),
                 ...customer.accountTopUps.map(t => ({

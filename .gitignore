@@ -4,3 +4,10 @@ dist/
 build/
 *.sqlite
 docker/*.log
+
+# Laufzeit-Uploads (Artikelbilder, Belege, Werbung, Gruppenbilder) sind Daten, kein Code.
+# Die Standard-Artikelbilder liegen unter apps/backend/prisma/seed-assets/ und kommen über den Seed.
+apps/backend/uploads/
+apps/backend/exports/
+docker/apps/
+docker/.env

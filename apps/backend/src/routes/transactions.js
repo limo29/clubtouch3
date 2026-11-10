@@ -4,7 +4,6 @@ const transactionController = require('../controllers/transactionController');
 const { authenticate, authorize } = require('../middleware/auth');
 const { 
   validateSale,
-  validateQuickSale,
   handleValidationErrors 
 } = require('../middleware/validation');
 
@@ -26,14 +25,6 @@ router.post('/',
   validateSale,
   handleValidationErrors,
   transactionController.createSale
-);
-
-// Schnellverkauf (nur Kassierer und Admins)
-router.post('/quick-sale',
-  authorize('ADMIN', 'CASHIER'),
-  validateQuickSale,
-  handleValidationErrors,
-  transactionController.quickSale
 );
 
 // Transaktion stornieren (nur Kassierer und Admins)

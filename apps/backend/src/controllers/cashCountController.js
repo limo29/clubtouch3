@@ -63,7 +63,6 @@ class CashCountController {
       const known = /Stückelung|Anzahl für|Benutzer fehlt|Anfangsbestand/.test(error.message || '');
       res.status(known ? 400 : 500).json({
         error: known ? error.message : 'Fehler beim Speichern der Kassenzählung',
-        ...(known ? {} : { details: error.message })
       });
     }
   }

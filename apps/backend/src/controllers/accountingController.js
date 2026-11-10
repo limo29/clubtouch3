@@ -3,6 +3,7 @@ const receiptService = require('../services/receiptService');
 const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 const exportService = require('../services/exportService'); // für PDF
 const prisma = require('../utils/prisma');
+const closedPeriod = require('../utils/closedPeriod');
 
 const bankBalanceHandlers = {
   async listBankBalances(req, res) {
@@ -12,14 +13,28 @@ const bankBalanceHandlers = {
   async addBankBalance(req, res) {
     try {
       const { date, isOpening, accounts, note } = req.body || {};
-      const row = await accountingService.addBankBalance({ date, isOpening: isOpening === true || isOpening === 'true', accounts, note, userId: req.user.id });
+      const row = await accountingService.addBankBalance({ date, isOpening: isOpening === true || isOpening === 'true', accounts, note, userId: req.user.id, confirmClosed: closedPeriod.isConfirmed(req) });
       res.status(201).json({ bankBalance: row });
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) {
+      if (closedPeriod.sendClosedPeriod(res, e)) return;
+      res.status(400).json({ error: e.message });
+    }
   },
   async deleteBankBalance(req, res) {
-    try { await accountingService.deleteBankBalance(req.params.id, req.user.id); res.json({ ok: true }); }
-    catch (e) { res.status(e.code === 'P2025' ? 404 : 400).json({ error: e.code === 'P2025' ? 'Kontostand nicht gefunden' : e.message }); }
+    try { await accountingService.deleteBankBalance(req.params.id, req.user.id, { confirmClosed: closedPeriod.isConfirmed(req) }); res.json({ ok: true }); }
+    catch (e) {
+      if (closedPeriod.sendClosedPeriod(res, e)) return;
+      res.status(e.code === 'P2025' ? 404 : 400).json({ error: e.code === 'P2025' ? 'Kontostand nicht gefunden' : e.message });
+    }
   },
+};
+
+// Zeitraum aus der URL: beide Daten lesbar, plausibles Jahr, Start nicht nach Ende
+const validRange = (startDate, endDate) => {
+  const s = parseLocalDate(startDate);
+  const e = parseLocalDate(endDate);
+  const ok = (d) => d && !Number.isNaN(d.getTime()) && d.getFullYear() >= 1990 && d.getFullYear() <= 2200;
+  return ok(s) && ok(e) && s <= e;
 };
 
 class AccountingController {
@@ -27,6 +42,7 @@ class AccountingController {
     try {
       const { startDate, endDate } = req.query;
       if (!startDate || !endDate) return res.status(400).json({ error: 'startDate und endDate erforderlich' });
+      if (!validRange(startDate, endDate)) return res.status(400).json({ error: 'Ungültiger Zeitraum' });
       const data = await accountingService.getProfitLoss(startDate, endDate);
       res.json(data);
     } catch (e) {
@@ -40,6 +56,7 @@ class AccountingController {
     try {
       const { startDate, endDate } = req.query;
       if (!startDate || !endDate) return res.status(400).json({ error: 'startDate und endDate erforderlich' });
+      if (!validRange(startDate, endDate)) return res.status(400).json({ error: 'Ungültiger Zeitraum' });
       const data = await accountingService.getBankReconciliation(startDate, endDate);
       res.json({ bankReconciliation: data });
     } catch (e) {
@@ -87,7 +104,7 @@ class AccountingController {
       res.status(201).json({ fiscalYear: fy });
     } catch (e) {
       console.error(e);
-      const known = /erforderlich|Ungültiges Datum|liegt vor/.test(e.message || '');
+      const known = /erforderlich|Ungültiges Datum|liegt vor|überschneidet/.test(e.message || '');
       res.status(known ? 400 : 500).json({ error: known ? e.message : 'Fehler beim Anlegen des Geschäftsjahres' });
     }
   }

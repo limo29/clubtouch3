@@ -17,9 +17,9 @@ import {
  CreditCard
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DatePicker } from '../components/common/SafeDatePickers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format, startOfDay, subDays, isToday, isYesterday } from 'date-fns';
+import { format, subDays, isSameDay } from 'date-fns';
 import { de } from 'date-fns/locale';
 import api from '../services/api';
 import { API_ENDPOINTS } from '../config/api';
@@ -28,6 +28,7 @@ import StickyToolbar, { FilterChips } from '../components/common/StickyToolbar';
 import { invalidate } from '../utils/invalidate';
 import { useAuth } from '../context/AuthContext';
 import { money, num } from '../utils/format';
+import { businessDayStart } from '../utils/businessDay';
 
 // Stornierbar sind Verkäufe und die geldlosen Buchungen (Eigenverbrauch, Abgelaufen).
 // Ein REFUND ist selbst schon der Storno und wird nie storniert.
@@ -94,7 +95,14 @@ const itemsText = (t, max = 3) => {
 };
 const moneyFlows = (t) => t.type === 'SALE' && !t.cancelled; // zählt zum Umsatz
 const topUpFlows = (t) => t.type === 'TOPUP' && t.method !== 'MIGRATION'; // echte Aufladungen (inkl. Storno)
-const dayLabel = (d) => (isToday(d) ? 'Heute' : isYesterday(d) ? 'Gestern' : format(d, 'EEEE, d. MMMM yyyy', { locale: de }));
+// Gruppiert wird nach Geschäftstag (06:00 bis 06:00), damit „Heute“ zur Kennzahl „Umsatz heute“ passt.
+// `d` ist der Beginn des Geschäftstags (06:00).
+const dayLabel = (d) => {
+  const today = businessDayStart();
+  if (isSameDay(d, today)) return 'Heute';
+  if (isSameDay(d, subDays(today, 1))) return 'Gestern';
+  return format(d, 'EEEE, d. MMMM yyyy', { locale: de });
+};
 
 const COLS = '64px minmax(160px, 1.2fr) minmax(200px, 2fr) 120px 110px 24px';
 
@@ -170,7 +178,7 @@ export default function Transactions() {
   const params = useMemo(() => {
     const p = { includeItems: true, includeTopUps: true, includeMigration: true };
     const def = PERIODS.find((x) => x.key === period);
-    if (def?.days !== undefined) p.startDate = format(subDays(startOfDay(new Date()), def.days), 'yyyy-MM-dd');
+    if (def?.days !== undefined) p.startDate = format(subDays(businessDayStart(), def.days), 'yyyy-MM-dd');
     if (period === 'custom') {
       if (range.start) p.startDate = format(range.start, 'yyyy-MM-dd');
       if (range.end) p.endDate = format(range.end, 'yyyy-MM-dd');
@@ -198,8 +206,9 @@ export default function Transactions() {
   const days = useMemo(() => {
     const m = new Map();
     for (const t of visible) {
-      const key = format(new Date(t.createdAt), 'yyyy-MM-dd');
-      if (!m.has(key)) m.set(key, { date: startOfDay(new Date(t.createdAt)), items: [], revenue: 0, topUps: 0, hasTopUps: false });
+      const dayStart = businessDayStart(new Date(t.createdAt));
+      const key = format(dayStart, 'yyyy-MM-dd');
+      if (!m.has(key)) m.set(key, { date: dayStart, items: [], revenue: 0, topUps: 0, hasTopUps: false });
       const g = m.get(key);
       g.items.push(t);
       if (moneyFlows(t)) g.revenue += num(t.totalAmount);
@@ -277,7 +286,10 @@ export default function Transactions() {
             <Card key={g.date.toISOString()}>
               <Stack direction="row" alignItems="baseline" justifyContent="space-between"
                 sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'action.hover', flexWrap: 'wrap', columnGap: 2, rowGap: 0.25 }}>
-                <Typography fontWeight={800}>{dayLabel(g.date)}</Typography>
+                <Typography fontWeight={800}>
+                  {dayLabel(g.date)}
+                  <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1, fontWeight: 500 }}>06:00 – 06:00 Uhr</Typography>
+                </Typography>
                 <Typography variant="body2" color="text.secondary">
                   <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{g.items.length} {g.items.length === 1 ? 'Buchung' : 'Buchungen'} · </Box>Umsatz <Box component="strong" sx={{ color: 'text.primary' }}>{money(g.revenue)}</Box>
                   {g.hasTopUps && <> · Aufladungen <Box component="strong" sx={{ color: 'success.main' }}>{money(g.topUps)}</Box></>}

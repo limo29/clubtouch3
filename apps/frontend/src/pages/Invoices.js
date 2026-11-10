@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   Box, Grid, Card, CardContent, TextField, InputAdornment, Typography,
   Stack, IconButton, List, ListItemText, Button, Dialog, DialogTitle,
@@ -15,7 +15,7 @@ import {
   MarkEmailRead, Warning, CheckCircle, Drafts,
   Payments, AccountBalance
 } from '@mui/icons-material';
-import { DatePicker, MobileDatePicker, DesktopDatePicker } from '@mui/x-date-pickers';
+import { DatePicker, MobileDatePicker, DesktopDatePicker } from '../components/common/SafeDatePickers';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -231,9 +231,10 @@ export default function Invoices() {
       invalidate(queryClient, 'invoices', 'finance');
     }
   });
-  const setStatus = (inv, status, extra = {}) => {
+  // Der Status-Dialog schließt erst bei Erfolg; ein Fehler (z. B. „Bar-Zahlung vor letzter Kassenzählung“) bleibt darin sichtbar
+  const setStatus = (inv, status, extra = {}, onSuccess) => {
     if (updateStatusMutation.isPending) return;
-    updateStatusMutation.mutate({ id: inv.id, status, ...extra });
+    updateStatusMutation.mutate({ id: inv.id, status, ...extra }, { onSuccess });
   };
 
   const invoices = useMemo(() => invoicesData?.invoices || [], [invoicesData]);
@@ -276,7 +277,7 @@ export default function Invoices() {
   const [payStep, setPayStep] = useState(false);
   const [payMethod, setPayMethod] = useState('TRANSFER');
   const [payDate, setPayDate] = useState(new Date());
-  const openStatusSheet = (inv) => { setPayStep(false); setPayMethod('TRANSFER'); setPayDate(new Date()); setStatusSheet({ open: true, inv }); };
+  const openStatusSheet = (inv) => { updateStatusMutation.reset(); setPayStep(false); setPayMethod('TRANSFER'); setPayDate(new Date()); setStatusSheet({ open: true, inv }); };
   const closeStatusSheet = () => { setStatusSheet({ open: false, inv: null }); setPayStep(false); };
   const confirmPaid = () => {
     if (!statusSheet.inv || !payMethod || !payDate || Number.isNaN(payDate.getTime())) return;
@@ -285,8 +286,7 @@ export default function Invoices() {
     const today = new Date();
     if (when.toDateString() === today.toDateString()) when.setTime(today.getTime());
     else when.setHours(12, 0, 0, 0);
-    setStatus(statusSheet.inv, 'PAID', { paymentMethod: payMethod, paidAt: when.toISOString() });
-    closeStatusSheet();
+    setStatus(statusSheet.inv, 'PAID', { paymentMethod: payMethod, paidAt: when.toISOString() }, closeStatusSheet);
   };
 
   const filteredCustomers = useMemo(() => {
@@ -390,7 +390,7 @@ export default function Invoices() {
 
   /* ========= UI ========= */
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', pb: 10, overflowX: 'hidden', '& input': { fontSize: { xs: 16, sm: 14 } } }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', pb: 10, overflowX: 'hidden', '& input': { fontSize: 16 } }}>
       {/* Header (gleicher Aufbau wie Einkauf) */}
       <Box sx={{ mb: 4 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
@@ -773,7 +773,7 @@ export default function Invoices() {
           ) : (
             <Stack spacing={1}>
               {statusSheet.inv && statusSheet.inv.status === 'DRAFT' && (
-                <Button fullWidth variant="outlined" onClick={() => { setStatus(statusSheet.inv, 'SENT'); closeStatusSheet(); }}>
+                <Button fullWidth variant="outlined" onClick={() => setStatus(statusSheet.inv, 'SENT', {}, closeStatusSheet)}>
                   Auf „Versendet“ setzen
                 </Button>
               )}
@@ -783,12 +783,12 @@ export default function Invoices() {
                 </Button>
               )}
               {statusSheet.inv && statusSheet.inv.status === 'PAID' && (
-                <Button fullWidth variant="outlined" color="warning" onClick={() => { setStatus(statusSheet.inv, 'SENT'); closeStatusSheet(); }}>
+                <Button fullWidth variant="outlined" color="warning" onClick={() => setStatus(statusSheet.inv, 'SENT', {}, closeStatusSheet)}>
                   Zahlung zurücknehmen (wieder „Versendet“)
                 </Button>
               )}
               {statusSheet.inv && statusSheet.inv.status !== 'CANCELLED' && (
-                <Button fullWidth variant="outlined" color="error" onClick={() => { setStatus(statusSheet.inv, 'CANCELLED'); closeStatusSheet(); }}>
+                <Button fullWidth variant="outlined" color="error" onClick={() => setStatus(statusSheet.inv, 'CANCELLED', {}, closeStatusSheet)}>
                   Stornieren
                 </Button>
               )}
@@ -820,12 +820,30 @@ function ThreeColumnPOS(props) {
     recipientName, setRecipientName, recipientAddress, setRecipientAddress,
     lines, setLines,
     dueDate, setDueDate, description, setDescription,
-    total, submitDisabled, submitInvoice, onClose, editInvoice,
+    total, submitInvoice, onClose, editInvoice,
     selectedCustomerId, saveAddressToCustomer, setSaveAddressToCustomer, canSeeContact
   } = props;
 
   const DuePicker = isMobile ? MobileDatePicker : DesktopDatePicker;
-  const [mobileTab, setMobileTab] = useState(1);
+  // Handy: Pflichtfeld (Empfänger) liegt im ersten Tab, dort starten
+  const [mobileTab, setMobileTab] = useState(0);
+  const [triedSubmit, setTriedSubmit] = useState(false);
+  const recipientRef = useRef(null);
+  const missingRecipient = !recipientName.trim();
+  const missingLines = !lines.length;
+
+  // Speichern ohne Pflichtfelder: nichts still verwerfen, sondern zum Feld springen und es markieren
+  const handleSubmit = () => {
+    if (missingRecipient || missingLines) {
+      setTriedSubmit(true);
+      if (missingRecipient) {
+        setMobileTab(0);
+        setTimeout(() => recipientRef.current?.focus(), 80);
+      }
+      return;
+    }
+    submitInvoice();
+  };
 
   const sidebar = (
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -834,6 +852,9 @@ function ThreeColumnPOS(props) {
           label="Empfängername *"
           value={recipientName}
           onChange={(e) => setRecipientName(e.target.value)}
+          inputRef={recipientRef}
+          error={triedSubmit && missingRecipient}
+          helperText={triedSubmit && missingRecipient ? 'Bitte einen Empfänger eingeben' : undefined}
           fullWidth size="small"
           variant="filled"
         />
@@ -908,8 +929,13 @@ function ThreeColumnPOS(props) {
         />
       )}
       <Typography variant="h5" align="right" sx={{ fontWeight: 900, color: 'primary.main' }} aria-live="polite">Gesamt: {money(total)}</Typography>
+      {triedSubmit && (missingRecipient || missingLines) && (
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          {missingRecipient ? 'Bitte einen Empfänger eingeben.' : 'Bitte mindestens einen Artikel oder eine freie Zeile hinzufügen.'}
+        </Alert>
+      )}
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
-        <Button variant="contained" size="large" fullWidth onClick={submitInvoice} disabled={submitDisabled} sx={{ fontWeight: 800 }}>
+        <Button variant="contained" size="large" fullWidth onClick={handleSubmit} sx={{ fontWeight: 800 }}>
           {editInvoice ? 'Speichern' : 'Erstellen (Entwurf)'}
         </Button>
         <Button variant="outlined" color="error" onClick={onClose}>
@@ -970,14 +996,15 @@ function InvoiceSettingsDialog({ open, onClose }) {
         {!isLoading && (
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="subtitle2" color="primary">Absender & Kontakt</Typography>
-            <TextField label="Firmenname / Zahlungsempfänger" value={values.INVOICE_PAYEE_NAME || ''} onChange={e => handleChange('INVOICE_PAYEE_NAME', e.target.value)} fullWidth size="small" />
+            <TextField label="Absender (Name auf der Rechnung)" value={values.INVOICE_SENDER_NAME || ''} onChange={e => handleChange('INVOICE_SENDER_NAME', e.target.value)} fullWidth size="small" />
+            <TextField label="Kontoinhaber / Zahlungsempfänger" value={values.INVOICE_PAYEE_NAME || ''} onChange={e => handleChange('INVOICE_PAYEE_NAME', e.target.value)} fullWidth size="small" />
             <TextField label="Straße & Hausnr." value={values.INVOICE_ADDRESS_STREET || ''} onChange={e => handleChange('INVOICE_ADDRESS_STREET', e.target.value)} fullWidth size="small" />
             <TextField label="PLZ & Stadt" value={values.INVOICE_ADDRESS_CITY || ''} onChange={e => handleChange('INVOICE_ADDRESS_CITY', e.target.value)} fullWidth size="small" />
-            <TextField label="E-Mail" value={values.INVOICE_EMAIL || ''} onChange={e => handleChange('INVOICE_EMAIL', e.target.value)} fullWidth size="small" />
+            <TextField label="E-Mail (optional)" value={values.INVOICE_EMAIL || ''} onChange={e => handleChange('INVOICE_EMAIL', e.target.value)} fullWidth size="small" />
 
             <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>Bankverbindung</Typography>
             <TextField label="IBAN" value={values.INVOICE_IBAN || ''} onChange={e => handleChange('INVOICE_IBAN', e.target.value)} fullWidth size="small" />
-            <TextField label="BIC" value={values.INVOICE_BIC || ''} onChange={e => handleChange('INVOICE_BIC', e.target.value)} fullWidth size="small" />
+            <TextField label="BIC (optional)" value={values.INVOICE_BIC || ''} onChange={e => handleChange('INVOICE_BIC', e.target.value)} fullWidth size="small" />
 
             <Typography variant="subtitle2" color="primary" sx={{ mt: 2 }}>Sonstiges</Typography>
             <TextField label="Referenz-Präfix (z.B. RE)" value={values.INVOICE_REF_PREFIX || ''} onChange={e => handleChange('INVOICE_REF_PREFIX', e.target.value)} fullWidth size="small" />

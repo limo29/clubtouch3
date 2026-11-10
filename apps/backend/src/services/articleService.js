@@ -1,4 +1,5 @@
 const prisma = require('../utils/prisma');
+const { userError } = require('../utils/httpError');
 
 function triggerRefreshBoards() {
   try {
@@ -87,40 +88,50 @@ class ArticleService {
   }
 
   // Update Artikel
-  async updateArticle(id, data) {
+  // userId: für den Audit-Eintrag bei negativem Bestand nach einer Bestandsanpassung
+  async updateArticle(id, data, userId = null) {
     const { stockAdjustment, adjustmentReason, ...updateData } = data;
+    const delta = stockAdjustment === undefined || stockAdjustment === null || stockAdjustment === ''
+      ? 0
+      : Number(stockAdjustment);
+    if (!Number.isFinite(delta)) throw userError('Bestandsanpassung muss eine Zahl sein');
 
     // Vorherigen Stand laden, um Änderungen an highscore-relevanten Feldern zu erkennen
     const before = await prisma.article.findUnique({ where: { id }, select: { countsForHighscore: true, active: true } });
+    if (!before) throw userError('Artikel nicht gefunden', 404);
 
-    const article = await prisma.article.update({
-      where: { id },
-      data: {
-        name: updateData.name,
-        price: updateData.price,
-        minStock: updateData.minStock,
-        unit: updateData.unit,
-        category: updateData.category,
-        order: updateData.order !== undefined ? Number(updateData.order) : undefined,
-        // undefined = unverändert, null = Bild entfernt
-        imageUrl: updateData.imageUrl,
-        imageThumbnail: updateData.imageThumbnail,
-        imageSmall: updateData.imageSmall,
-        imageMedium: updateData.imageMedium,
-        imageLarge: updateData.imageLarge,
-        countsForHighscore:
-          typeof updateData.countsForHighscore === 'boolean'
-            ? updateData.countsForHighscore
-            : undefined,
-        active: typeof updateData.active === 'boolean' ? updateData.active : undefined,
-        purchaseUnit: updateData.purchaseUnit ?? undefined,
-        unitsPerPurchase: updateData.unitsPerPurchase ?? undefined,
-      },
+    // Stammdaten und Bestandsanpassung gemeinsam: scheitert die Anpassung, bleibt alles unverändert
+    const article = await prisma.$transaction(async (tx) => {
+      const updated = await tx.article.update({
+        where: { id },
+        data: {
+          name: updateData.name,
+          price: updateData.price,
+          minStock: updateData.minStock,
+          unit: updateData.unit,
+          category: updateData.category,
+          order: updateData.order !== undefined ? Number(updateData.order) : undefined,
+          // undefined = unverändert, null = Bild entfernt
+          imageUrl: updateData.imageUrl,
+          imageThumbnail: updateData.imageThumbnail,
+          imageSmall: updateData.imageSmall,
+          imageMedium: updateData.imageMedium,
+          imageLarge: updateData.imageLarge,
+          countsForHighscore:
+            typeof updateData.countsForHighscore === 'boolean'
+              ? updateData.countsForHighscore
+              : undefined,
+          active: typeof updateData.active === 'boolean' ? updateData.active : undefined,
+          purchaseUnit: updateData.purchaseUnit ?? undefined,
+          unitsPerPurchase: updateData.unitsPerPurchase ?? undefined,
+        },
+      });
+
+      if (delta !== 0) {
+        return this._adjustStockTx(tx, id, delta, adjustmentReason || 'Manuelle Anpassung', 'CORRECTION', userId);
+      }
+      return updated;
     });
-
-    if (stockAdjustment && stockAdjustment !== 0) {
-      await this.adjustStock(id, stockAdjustment, adjustmentReason || 'Manuelle Anpassung');
-    }
 
     // Highscore neu berechnen falls relevante Felder geändert wurden
     if (before) {
@@ -136,38 +147,41 @@ class ArticleService {
   // Aktivieren/Deaktivieren
   async toggleArticleStatus(id) {
     const article = await prisma.article.findUnique({ where: { id } });
-    if (!article) throw new Error('Artikel nicht gefunden');
+    if (!article) throw userError('Artikel nicht gefunden', 404);
     const updated = await prisma.article.update({ where: { id }, data: { active: !article.active } });
     // active geändert → Highscore aktualisieren
     triggerRefreshBoards();
     return updated;
   }
 
-  // Bestand anpassen
-  async adjustStock(articleId, quantity, reason, type = 'CORRECTION') {
-    const article = await prisma.article.findUnique({ where: { id: articleId } });
-    if (!article) throw new Error('Artikel nicht gefunden');
+  // Bestand anpassen (relativ, transaktional). Negativer Bestand ist erlaubt (Warnung + Audit),
+  // außer ALLOW_NEGATIVE_STOCK=false.
+  async adjustStock(articleId, quantity, reason, type = 'CORRECTION', userId = null) {
+    return prisma.$transaction((tx) => this._adjustStockTx(tx, articleId, quantity, reason, type, userId));
+  }
+
+  async _adjustStockTx(tx, articleId, quantity, reason, type = 'CORRECTION', userId = null) {
+    const delta = Number(quantity);
+    if (!Number.isFinite(delta)) throw userError('Bestandsanpassung muss eine Zahl sein');
 
     const allowNegative = String(process.env.ALLOW_NEGATIVE_STOCK || 'true').toLowerCase() === 'true';
 
-    // bisheriger Bestand + Änderung
-    const current = Number(article.stock);
-    const delta = Number(quantity);
-    const newStock = current + delta;
-
-    // WENN negatives Lager verboten ist -> wie vorher blockieren
-    if (!allowNegative && newStock < 0) {
-      throw new Error(
-        `Bestand kann nicht negativ werden. Aktuell: ${current}, Änderung: ${delta}`
-      );
+    // increment statt absolut setzen: ein gleichzeitiger Verkauf geht nicht verloren
+    const changed = await tx.article.updateMany({
+      where: allowNegative ? { id: articleId } : { id: articleId, stock: { gte: -delta } },
+      data: { stock: { increment: delta } },
+    });
+    if (changed.count === 0) {
+      const exists = await tx.article.findUnique({ where: { id: articleId }, select: { stock: true } });
+      if (!exists) throw userError('Artikel nicht gefunden', 404);
+      throw userError(`Bestand kann nicht negativ werden. Aktuell: ${Number(exists.stock)}, Änderung: ${delta}`);
     }
 
-    const updatedArticle = await prisma.article.update({
-      where: { id: articleId },
-      data: { stock: newStock }, // negative Werte sind erlaubt
-    });
+    const updatedArticle = await tx.article.findUnique({ where: { id: articleId } });
+    const newStock = Number(updatedArticle.stock);
+    const previous = newStock - delta;
 
-    await prisma.stockMovement.create({
+    await tx.stockMovement.create({
       data: {
         articleId,
         type,
@@ -176,36 +190,20 @@ class ArticleService {
       },
     });
 
-    // optional: Audit-Log mit Negativ-Warnung
-    if (newStock < 0) {
-      await prisma.auditLog.create({
+    // Audit mit Negativ-Warnung (nur mit echtem Benutzer, AuditLog.userId ist ein Fremdschlüssel)
+    if (newStock < 0 && userId) {
+      await tx.auditLog.create({
         data: {
-          userId: 'system', // oder req.user.id an Aufruferstellen durchreichen
+          userId,
           action: 'NEGATIVE_STOCK_WARNING',
           entityType: 'Article',
           entityId: articleId,
-          changes: { previous: current, delta, newStock, reason },
+          changes: { previous, delta, newStock, reason },
         },
       });
     }
 
     return updatedArticle;
-  }
-
-
-  // Wareneingang
-  async processDelivery(articleId, quantity, reason = 'Wareneingang') {
-    if (quantity <= 0) throw new Error('Menge muss größer als 0 sein');
-    return this.adjustStock(articleId, quantity, reason, 'DELIVERY');
-  }
-
-  // Inventur
-  async processInventory(articleId, actualStock, reason = 'Inventur') {
-    const article = await prisma.article.findUnique({ where: { id: articleId } });
-    if (!article) throw new Error('Artikel nicht gefunden');
-    const difference = Number(actualStock) - Number(article.stock);
-    if (difference === 0) return article;
-    return this.adjustStock(articleId, difference, reason, 'INVENTORY');
   }
 
   // Bestandswarnungen
@@ -220,11 +218,12 @@ class ArticleService {
   async getArticleStats(articleId) {
     const [article, salesCount, totalRevenue] = await Promise.all([
       prisma.article.findUnique({ where: { id: articleId } }),
+      // Nur echte, nicht stornierte Verkäufe (keine REFUND-Gegenbuchungen, kein „Auf den Wirt“/„Abgelaufen“)
       prisma.transactionItem.count({
-        where: { articleId, transaction: { cancelled: false } },
+        where: { articleId, transaction: { cancelled: false, type: 'SALE' } },
       }),
       prisma.transactionItem.aggregate({
-        where: { articleId, transaction: { cancelled: false } },
+        where: { articleId, transaction: { cancelled: false, type: 'SALE' } },
         _sum: { totalPrice: true },
       }),
     ]);

@@ -39,7 +39,7 @@ fi
 case "$1" in
     start)
         echo -e "${GREEN}Starting Clubtouch3...${NC}"
-        docker-compose up -d
+        docker compose up -d
         echo -e "${GREEN}Clubtouch3 is running!${NC}"
         echo "Frontend: http://localhost"
         echo "Backend: http://localhost:3001"
@@ -48,7 +48,7 @@ case "$1" in
     
     start-dev)
         echo -e "${GREEN}Starting Clubtouch3 with dev tools...${NC}"
-        docker-compose --profile dev up -d
+        docker compose --profile dev up -d
         echo -e "${GREEN}Clubtouch3 is running with dev tools!${NC}"
         echo "Frontend: http://localhost"
         echo "Backend: http://localhost:3001"
@@ -58,41 +58,41 @@ case "$1" in
     
     stop)
         echo -e "${YELLOW}Stopping Clubtouch3...${NC}"
-        docker-compose down
+        docker compose down
         echo -e "${GREEN}Clubtouch3 stopped.${NC}"
         ;;
     
     restart)
         echo -e "${YELLOW}Restarting Clubtouch3...${NC}"
-        docker-compose restart
+        docker compose restart
         echo -e "${GREEN}Clubtouch3 restarted.${NC}"
         ;;
     
     rebuild)
         echo -e "${YELLOW}Rebuilding Clubtouch3...${NC}"
-        docker-compose down
-        docker-compose build --no-cache
-        docker-compose up -d
+        docker compose down
+        docker compose build --no-cache
+        docker compose up -d
         echo -e "${GREEN}Clubtouch3 rebuilt and started.${NC}"
         ;;
     
     logs)
-        docker-compose logs
+        docker compose logs
         ;;
     
     logs-f)
-        docker-compose logs -f
+        docker compose logs -f
         ;;
     
     status)
         echo -e "${GREEN}Clubtouch3 Status:${NC}"
-        docker-compose ps
+        docker compose ps
         ;;
     
     backup)
         echo -e "${GREEN}Creating database backup...${NC}"
         mkdir -p backups
-        docker-compose exec -T db pg_dump -U clubtouch3 clubtouch3 > backups/backup_$(date +%Y%m%d_%H%M%S).sql
+        docker compose exec -T db pg_dump -U clubtouch3 clubtouch3 > backups/backup_$(date +%Y%m%d_%H%M%S).sql
         echo -e "${GREEN}Backup created in backups/ directory.${NC}"
         ;;
     
@@ -109,7 +109,7 @@ case "$1" in
         fi
         
         echo -e "${YELLOW}Restoring database from $2...${NC}"
-        docker-compose exec -T db psql -U clubtouch3 clubtouch3 < "$2"
+        docker compose exec -T db psql -U clubtouch3 clubtouch3 < "$2"
         echo -e "${GREEN}Database restored.${NC}"
         ;;
     
@@ -118,7 +118,7 @@ case "$1" in
         read -p "Are you sure? (y/N) " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            docker-compose down -v
+            docker compose down -v
             echo -e "${GREEN}All containers and volumes removed.${NC}"
         fi
         ;;

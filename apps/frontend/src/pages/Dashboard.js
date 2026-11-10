@@ -108,7 +108,7 @@ const NavCard = ({ title, icon: Icon, color, to }) => {
             color: isDark ? color[1] : "white",
             textTransform: "uppercase",
             // lange Titel (Kundenrechnungen, Kassenprüfung) brechen am weichen Trennstrich um statt abgeschnitten zu werden
-            fontSize: title.length > 10 ? { xs: "0.5rem", sm: "0.66rem", md: "0.74rem" } : { xs: "0.6rem", sm: "0.80rem", md: "0.9rem" },
+            fontSize: title.length > 10 ? { xs: "0.5rem", sm: "0.62rem", md: "0.66rem" } : { xs: "0.6rem", sm: "0.80rem", md: "0.9rem" },
             letterSpacing: { xs: 0, sm: "0.5px" },
             lineHeight: 1.2,
             textShadow: isDark ? "none" : "0 2px 4px rgba(0,0,0,0.2)",
