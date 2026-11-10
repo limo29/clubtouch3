@@ -412,7 +412,7 @@ class CustomerService {
             ? topUp.reference || 'Auslage'
             : topUp.method === 'MIGRATION'
             ? topUp.reference || 'Übernahme Clubtouch 2.0'
-            : `Aufladung (${topUp.method === 'CASH' ? 'Bar' : 'Überweisung'})`,
+            : `Aufladung (${topUp.method === 'CASH' ? 'Bar' : topUp.method === 'CARD' ? 'Karte' : 'Überweisung'})`,
         amount: topUp.amount,
         balance: 0, // Wird später berechnet
       });

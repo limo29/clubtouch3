@@ -4,6 +4,24 @@ const { parseLocalDate, endOfLocalDay } = require('../utils/businessDay');
 const exportService = require('../services/exportService'); // für PDF
 const prisma = require('../utils/prisma');
 
+const bankBalanceHandlers = {
+  async listBankBalances(req, res) {
+    try { res.json(await accountingService.listBankBalances()); }
+    catch (e) { console.error('List bank balances error:', e); res.status(500).json({ error: 'Kontostände konnten nicht geladen werden' }); }
+  },
+  async addBankBalance(req, res) {
+    try {
+      const { date, isOpening, accounts, note } = req.body || {};
+      const row = await accountingService.addBankBalance({ date, isOpening: isOpening === true || isOpening === 'true', accounts, note, userId: req.user.id });
+      res.status(201).json({ bankBalance: row });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  },
+  async deleteBankBalance(req, res) {
+    try { await accountingService.deleteBankBalance(req.params.id, req.user.id); res.json({ ok: true }); }
+    catch (e) { res.status(e.code === 'P2025' ? 404 : 400).json({ error: e.code === 'P2025' ? 'Kontostand nicht gefunden' : e.message }); }
+  },
+};
+
 class AccountingController {
   async profitLoss(req, res) {
     try {
@@ -163,4 +181,4 @@ class AccountingController {
 
 }
 
-module.exports = new AccountingController();
+module.exports = Object.assign(new AccountingController(), bankBalanceHandlers);

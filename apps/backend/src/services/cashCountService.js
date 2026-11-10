@@ -26,6 +26,8 @@
 
 const prisma = require('../utils/prisma');
 const cashMovementService = require('./cashMovementService');
+const CASH_FLOAT_KEY = 'cash.float';
+const CARD_FEE_KEY = 'card.feePercent';
 
 const DENOMINATIONS = [200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01];
 const DENOMINATION_KEYS = DENOMINATIONS.map(d => String(d));
@@ -241,7 +243,7 @@ class CashCountService {
       hasBaseline: !!previous,
       previousCount: previous ? {
         id: previous.id, countedAt: previous.countedAt,
-        countedTotal: dec(previous.countedTotal), user: previous.user || null
+        countedTotal: dec(previous.countedTotal), isOpening: !!previous.isOpening, user: previous.user || null
       } : null,
       since: since || null,
       until,
@@ -257,17 +259,52 @@ class CashCountService {
     return { ...preview, denominations: DENOMINATIONS };
   }
 
-  /** Zählung anlegen; Ist-Betrag wird serverseitig aus der Stückelung berechnet. */
-  async createCount({ denominations, note, userId }) {
+  /** Wechselgeld-Sockel: Betrag, der nach dem Zählen in der Kasse bleibt (Rest kann zur Bank). */
+  /** Einstellungen Kasse & Bank: Wechselgeld-Sockel und SumUp-Gebührensatz (%) */
+  async getSettings() {
+    const rows = await prisma.systemSetting.findMany({ where: { key: { in: [CASH_FLOAT_KEY, CARD_FEE_KEY] } } });
+    const get = (k) => round2(Number(rows.find((r) => r.key === k)?.value) || 0);
+    return { float: get(CASH_FLOAT_KEY), cardFeePercent: get(CARD_FEE_KEY) };
+  }
+
+  async setSettings({ float, cardFeePercent } = {}) {
+    const put = (key, v, description) => prisma.systemSetting.upsert({
+      where: { key }, update: { value: String(v) }, create: { key, value: String(v), description },
+    });
+    if (float !== undefined) await put(CASH_FLOAT_KEY, Math.max(0, round2(Number(String(float).replace(',', '.')) || 0)), 'Wechselgeld-Sockel der Barkasse in €');
+    if (cardFeePercent !== undefined) {
+      const pct = Math.min(20, Math.max(0, round2(Number(String(cardFeePercent).replace(',', '.')) || 0)));
+      await put(CARD_FEE_KEY, pct, 'SumUp-Gebühr in % (für das Bank-Soll)');
+    }
+    return this.getSettings();
+  }
+
+  /**
+   * Zählung anlegen; Ist-Betrag wird serverseitig aus der Stückelung berechnet.
+   * isOpening: Anfangsbestand beim Start – Soll = Ist, keine Differenz. Ohne Stückelung darf dann
+   * auch nur ein Betrag (amount) übergeben werden.
+   */
+  async createCount({ denominations, note, userId, isOpening = false, amount }) {
     if (!userId) throw new Error('Benutzer fehlt');
-    const normalized = this.normalizeDenominations(denominations);
-    const countedTotal = this.sumDenominations(normalized);
+    // Anfangsbestand nur, solange es noch keine Zählung gibt – sonst ließe sich ein Fehlbetrag „wegbuchen“
+    if (isOpening && await prisma.cashCount.count() > 0) {
+      throw new Error('Anfangsbestand nicht möglich: Es gibt schon eine Kassenzählung. Bitte normal zählen.');
+    }
+    const normalized = this.normalizeDenominations(denominations || {});
+    let countedTotal = this.sumDenominations(normalized);
+    if (isOpening && countedTotal === 0 && amount !== undefined && amount !== null && amount !== '') {
+      countedTotal = round2(Number(String(amount).replace(',', '.')));
+      if (!Number.isFinite(countedTotal) || countedTotal < 0) throw new Error('Anfangsbestand muss ein Betrag ab 0 € sein');
+    }
     const countedAt = new Date();
 
-    const expected = await this.getExpectedCash(undefined, countedAt);
-    const difference = round2(countedTotal - expected.expectedTotal);
+    const computed = await this.getExpectedCash(undefined, countedAt);
+    const expected = isOpening ? { ...computed, expectedTotal: countedTotal } : computed;
+    const difference = isOpening ? 0 : round2(countedTotal - expected.expectedTotal);
 
     const breakdown = {
+      isOpening: !!isOpening,
+      computedExpected: computed.expectedTotal, // was die App ohne Anfangsbestand erwartet hätte
       hasBaseline: expected.hasBaseline,
       baseline: expected.baseline,
       since: expected.since,
@@ -295,6 +332,7 @@ class CashCountService {
           difference,
           breakdownJson: breakdown,
           note: note ? String(note).trim() || null : null,
+          isOpening: !!isOpening,
           userId,
           previousCountId: expected.previousCount ? expected.previousCount.id : null
         },
@@ -307,7 +345,7 @@ class CashCountService {
       await tx.auditLog.create({
         data: {
           userId,
-          action: 'CASH_COUNT',
+          action: isOpening ? 'CASH_OPENING' : 'CASH_COUNT',
           entityType: 'CashCount',
           entityId: row.id,
           changes: {

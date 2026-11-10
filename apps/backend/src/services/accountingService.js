@@ -53,7 +53,7 @@ class AccountingService {
       expenseAgg, expensesBySupplierRaw, expenseDocsRaw,
       paidInvoicesRaw, unpaidInvoicesRaw, unpaidPurchaseDocsRaw,
       topUpsCashAgg, topUpsTransferAgg, guestBalanceAgg,
-      cmSummarize
+      cmSummarize, txCard, topUpsCardAgg, cardFeeSetting
     ] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', cancelled: false, paymentMethod: 'CASH', createdAt: { gte: start, lte: end } },
@@ -122,8 +122,20 @@ class AccountingService {
         _sum: { amount: true }, _count: true
       }),
       prisma.customer.aggregate({ _sum: { balance: true } }),
-      cashMovementService.summarize({ gte: start, lte: end })
+      cashMovementService.summarize({ gte: start, lte: end }),
+      // Kartenzahlungen (SumUp)
+      prisma.transaction.aggregate({
+        where: { type: 'SALE', cancelled: false, paymentMethod: 'CARD', createdAt: { gte: start, lte: end } },
+        _sum: { totalAmount: true }, _count: true
+      }),
+      prisma.accountTopUp.aggregate({
+        where: { method: 'CARD', createdAt: { gte: start, lte: end } },
+        _sum: { amount: true }, _count: true
+      }),
+      prisma.systemSetting.findUnique({ where: { key: 'card.feePercent' } })
     ]);
+    // SumUp-Gebühren: nur Schätzung als Hinweis. In die EÜR gehören die echten Gebühren laut SumUp-Abrechnung (als Beleg).
+    const cardFeePercentEur = Math.max(0, Number(cardFeeSetting?.value) || 0);
 
     const mapArticleRows = (rows) => (rows || []).map(r => ({
       articleId: r.articleId,
@@ -141,7 +153,8 @@ class AccountingService {
 
     const incomeCash = round2(dec(txCash._sum.totalAmount));
     const incomeAccount = round2(dec(txAccount._sum.totalAmount));
-    const incomeSales = round2(incomeCash + incomeAccount);
+    const incomeCard = round2(dec(txCard._sum.totalAmount));
+    const incomeSales = round2(incomeCash + incomeAccount + incomeCard);
     const paidInvoices = (paidInvoicesRaw || []).map(r => ({ ...r, totalAmount: dec(r.totalAmount) }));
     const incomeInvoices = sumBy(paidInvoices, r => r.totalAmount);
 
@@ -190,6 +203,7 @@ class AccountingService {
           transactions: incomeSales,
           cash: incomeCash,
           account: incomeAccount,
+          card: incomeCard,
           invoices: incomeInvoices,
           ownerUse: 0, // bleibt für alte Clients, siehe nonRevenue
           otherCash: cmOtherIncome.total  // sonstige Bareinnahmen
@@ -199,7 +213,13 @@ class AccountingService {
           purchaseDocuments: expensesFromDocs,
           otherCash: cmOtherExpense.total
         },
-        transactionCounts: { cash: txCash._count || 0, account: txAccount._count || 0 },
+        transactionCounts: { cash: txCash._count || 0, account: txAccount._count || 0, card: txCard._count || 0 },
+        // Hinweis: geschätzte SumUp-Gebühren (nicht in den Ausgaben enthalten)
+        cardFeesHint: (incomeCard + round2(dec(topUpsCardAgg._sum.amount))) > 0 ? {
+          gross: round2(incomeCard + round2(dec(topUpsCardAgg._sum.amount))),
+          percent: cardFeePercentEur,
+          estimated: round2((incomeCard + round2(dec(topUpsCardAgg._sum.amount))) * cardFeePercentEur / 100)
+        } : null,
         expiredItems,
         ownerUseItems,
         paidInvoices,
@@ -218,10 +238,11 @@ class AccountingService {
       // Liquidität: Aufladungen fließen in die Kasse, sind aber Verbindlichkeit gegenüber den Gästen
       liquidity: {
         topUps: {
-          total: round2(topUpsCash + topUpsTransfer),
+          total: round2(topUpsCash + topUpsTransfer + round2(dec(topUpsCardAgg._sum.amount))),
           cash: topUpsCash,
           transfer: topUpsTransfer,
-          count: (topUpsCashAgg._count || 0) + (topUpsTransferAgg._count || 0)
+          card: round2(dec(topUpsCardAgg._sum.amount)),
+          count: (topUpsCashAgg._count || 0) + (topUpsTransferAgg._count || 0) + (topUpsCardAgg._count || 0)
         },
         guestBalanceEnd: round2(dec(guestBalanceAgg._sum.balance)),
         // Kassenbewegungen: Kasse ↔ Bank (ergebnisneutral) und sonstige Bar-Posten (in EÜR)
@@ -270,17 +291,32 @@ class AccountingService {
    * Nicht enthalten (läuft nicht durch die App): Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden.
    * Alle Beträge sind Number; movements sind nach Datum aufsteigend sortiert, amount signiert.
    */
-  async getBankReconciliation(startDate, endDate) {
-    const start = parseLocalDate(startDate);
-    const end = endOfLocalDay(endDate);
-    const window = { gte: start, lte: end };
+  async getBankReconciliation(startDate, endDate, { endAt = null } = {}) {
+    const requestedStart = parseLocalDate(startDate);
+    // endAt: genauer Zeitpunkt (z. B. Uhrzeit eines Abgleichs) statt Tagesende
+    const end = endAt ? new Date(endAt) : endOfLocalDay(endDate);
 
-    const [prevYear, cm, topUps, invoices, purchases, cashInvoicesAgg] = await Promise.all([
+    // Ausgangsstand: Vorjahresabschluss – oder, wenn neuer bzw. ohne Vorjahr, der zuletzt erfasste
+    // Anfangsstand (Start mit ClubTouch3). Dann zählen nur Bewegungen nach diesem Zeitpunkt.
+    const [prevYear, openingRow] = await Promise.all([
       prisma.fiscalYear.findFirst({
-        where: { closed: true, endDate: { lt: start }, report: { isNot: null } },
+        where: { closed: true, endDate: { lt: requestedStart }, report: { isNot: null } },
         orderBy: [{ endDate: 'desc' }, { createdAt: 'desc' }],
         include: { report: { select: { bankAccountsJson: true, createdAt: true } } }
       }),
+      prisma.bankBalance.findFirst({ where: { isOpening: true, date: { lte: end } }, orderBy: { date: 'desc' } }),
+    ]);
+    const useOpening = openingRow && (!prevYear || openingRow.date > prevYear.endDate);
+    // Das Soll rechnet immer ab dem Ausgangsstand: Anfangsstand-Zeitpunkt bzw. Tag nach dem Vorjahresende.
+    // Sonst gingen Buchungen zwischen Ausgangsstand und angefragtem Start verloren.
+    const start = useOpening
+      ? openingRow.date
+      : prevYear
+        ? new Date(endOfLocalDay(prevYear.endDate).getTime() + 1)
+        : requestedStart;
+    const window = { gte: start, lte: end };
+
+    const [cm, topUps, invoices, purchases, cashInvoicesAgg, cardSales, cardTopUps, cardFeePercent] = await Promise.all([
       cashMovementService.summarize(window),
       prisma.accountTopUp.findMany({
         where: { method: 'TRANSFER', createdAt: window },
@@ -305,12 +341,22 @@ class AccountingService {
       prisma.invoice.aggregate({
         where: { status: 'PAID', paymentMethod: 'CASH', paidAt: window },
         _sum: { totalAmount: true }, _count: true
-      })
+      }),
+      // Kartenzahlungen am SumUp-Terminal: SumUp zahlt (abzüglich Gebühr) aufs Konto aus
+      prisma.transaction.findMany({
+        where: { type: 'SALE', cancelled: false, paymentMethod: 'CARD', createdAt: window },
+        select: { createdAt: true, totalAmount: true }
+      }),
+      prisma.accountTopUp.findMany({
+        where: { method: 'CARD', createdAt: window },
+        select: { createdAt: true, amount: true }
+      }),
+      prisma.systemSetting.findUnique({ where: { key: 'card.feePercent' } }).then((r) => Math.max(0, Number(r?.value) || 0))
     ]);
 
     const prevBanks = prevYear && Array.isArray(prevYear.report?.bankAccountsJson) ? prevYear.report.bankAccountsJson : [];
-    const opening = sumBy(prevBanks, b => b.balance);
-    const openingSource = prevYear ? 'VORJAHRESABSCHLUSS' : 'KEIN_VORJAHR';
+    const opening = useOpening ? round2(dec(openingRow.total)) : sumBy(prevBanks, b => b.balance);
+    const openingSource = useOpening ? 'ANFANGSSTAND' : prevYear ? 'VORJAHRESABSCHLUSS' : 'KEIN_VORJAHR';
 
     const movements = [];
     cm.bankDeposits.items.forEach(m => movements.push({
@@ -333,12 +379,32 @@ class AccountingService {
       id: p.id, date: p.paidAt || p.documentDate, kind: 'PURCHASE_TRANSFER', label: `Einkauf per Überweisung${p.supplier ? ` (${p.supplier})` : ''}`,
       reference: p.documentNumber || null, amount: round2(-dec(p.totalAmount))
     }));
+    // Kartenzahlungen je Tag zusammengefasst (SumUp zahlt gesammelt aus)
+    const cardByDay = new Map();
+    for (const c of [...cardSales.map((t) => ({ date: t.createdAt, amount: dec(t.totalAmount) })), ...cardTopUps.map((t) => ({ date: t.createdAt, amount: dec(t.amount) }))]) {
+      const d = new Date(c.date);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59);
+      const e = cardByDay.get(key) || { date: dayEnd > end ? new Date(end) : dayEnd, amount: 0, count: 0 };
+      e.amount += c.amount; e.count += 1;
+      cardByDay.set(key, e);
+    }
+    for (const e of cardByDay.values()) {
+      movements.push({ id: `card-${e.date.toISOString()}`, date: e.date, kind: 'CARD', label: `Kartenzahlungen SumUp (${e.count})`, reference: null, amount: round2(e.amount) });
+      if (cardFeePercent > 0) {
+        movements.push({ id: `cardfee-${e.date.toISOString()}`, date: e.date, kind: 'CARD_FEE', label: `SumUp-Gebühr ${cardFeePercent.toString().replace('.', ',')} % (geschätzt)`, reference: null, amount: round2(-e.amount * cardFeePercent / 100) });
+      }
+    }
     movements.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const cardGross = round2(sumBy(cardSales, (t) => t.totalAmount) + sumBy(cardTopUps, (t) => t.amount));
+    const cardFees = round2(cardGross * cardFeePercent / 100);
 
     const inflows = {
       bankDeposits: { total: cm.bankDeposits.total, count: cm.bankDeposits.count },
       topUpsTransfer: { total: sumBy(topUps, t => t.amount), count: topUps.length },
-      invoicesPaid: { total: sumBy(invoices, i => i.totalAmount), count: invoices.length }
+      invoicesPaid: { total: sumBy(invoices, i => i.totalAmount), count: invoices.length },
+      cardPayments: { total: cardGross, count: cardSales.length + cardTopUps.length, sales: sumBy(cardSales, (t) => t.totalAmount), topUps: sumBy(cardTopUps, (t) => t.amount) }
     };
     // Nachrichtlich: bar bezahlte Kundenrechnungen laufen über die Kasse, nicht über die Bank
     const invoicesPaidCash = {
@@ -347,16 +413,18 @@ class AccountingService {
     };
     const outflows = {
       purchasesTransfer: { total: sumBy(purchases, p => p.totalAmount), count: purchases.length },
-      bankWithdrawals: { total: cm.bankWithdrawals.total, count: cm.bankWithdrawals.count }
+      bankWithdrawals: { total: cm.bankWithdrawals.total, count: cm.bankWithdrawals.count },
+      cardFees: { total: cardFees, percent: cardFeePercent, estimated: true }
     };
-    const inflowTotal = round2(inflows.bankDeposits.total + inflows.topUpsTransfer.total + inflows.invoicesPaid.total);
-    const outflowTotal = round2(outflows.purchasesTransfer.total + outflows.bankWithdrawals.total);
+    const inflowTotal = round2(inflows.bankDeposits.total + inflows.topUpsTransfer.total + inflows.invoicesPaid.total + inflows.cardPayments.total);
+    const outflowTotal = round2(outflows.purchasesTransfer.total + outflows.bankWithdrawals.total + outflows.cardFees.total);
 
     return {
       period: { startDate: start, endDate: end, label: `${fmtDateDE(start)} - ${fmtDateDE(end)}` },
       opening,
       openingSource,
-      openingFiscalYear: prevYear ? { id: prevYear.id, name: prevYear.name, endDate: prevYear.endDate, accounts: prevBanks } : null,
+      openingFiscalYear: prevYear && !useOpening ? { id: prevYear.id, name: prevYear.name, endDate: prevYear.endDate, accounts: prevBanks } : null,
+      openingBalance: useOpening ? { id: openingRow.id, date: openingRow.date, accounts: openingRow.accountsJson || [], total: round2(dec(openingRow.total)) } : null,
       inflows,
       outflows,
       invoicesPaidCash,
@@ -366,6 +434,63 @@ class AccountingService {
       movements,
       notCovered: 'Nicht enthalten: Bankgebühren, Zinsen, Mitgliedsbeiträge, Spenden und alles, was nicht über die App gebucht wurde. Bar bezahlte Kundenrechnungen laufen über die Kasse.'
     };
+  }
+
+  /* ---------------- Kontostände (Anfangsstand + Abgleich laut Kontoauszug) ---------------- */
+
+  _normalizeAccounts(accounts) {
+    return (Array.isArray(accounts) ? accounts : [])
+      .map((a) => ({ name: String(a?.name || '').trim() || 'Konto', iban: String(a?.iban || '').trim() || undefined, balance: round2(dec(String(a?.balance ?? 0).replace(',', '.'))) }))
+      .filter((a) => Number.isFinite(a.balance));
+  }
+
+  async addBankBalance({ date, isOpening = false, accounts, note, userId }) {
+    const list = this._normalizeAccounts(accounts);
+    if (!list.length) throw new Error('Mindestens ein Konto mit Kontostand angeben');
+    const when = date ? new Date(date) : new Date();
+    if (Number.isNaN(when.getTime())) throw new Error('Ungültiges Datum');
+    if (when > new Date(Date.now() + 60_000)) throw new Error('Datum liegt in der Zukunft');
+    const row = await prisma.bankBalance.create({
+      data: { date: when, isOpening: !!isOpening, accountsJson: list, total: sumBy(list, (a) => a.balance), note: note ? String(note).trim() || null : null, userId },
+    });
+    await prisma.auditLog.create({
+      data: { userId, action: isOpening ? 'BANK_OPENING' : 'BANK_BALANCE_CHECK', entityType: 'BankBalance', entityId: row.id, changes: { date: when, total: row.total, accounts: list } },
+    });
+    return row;
+  }
+
+  async deleteBankBalance(id, userId) {
+    const row = await prisma.bankBalance.delete({ where: { id } });
+    await prisma.auditLog.create({ data: { userId, action: 'BANK_BALANCE_DELETE', entityType: 'BankBalance', entityId: id, changes: { date: row.date, total: row.total, isOpening: row.isOpening } } });
+    return row;
+  }
+
+  /** Anfangsstand + Abgleiche, je Abgleich mit Bank-Soll der App zum selben Zeitpunkt und Differenz */
+  async listBankBalances() {
+    const rows = await prisma.bankBalance.findMany({ orderBy: { date: 'desc' }, take: 50, include: { user: { select: { id: true, name: true } } } });
+    const ymd = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+    const plain = (r) => ({ id: r.id, date: r.date, isOpening: r.isOpening, accounts: r.accountsJson || [], total: round2(dec(r.total)), note: r.note, user: r.user });
+    const opening = rows.find((r) => r.isOpening);
+    // Soll zum genauen Zeitpunkt jedes Abgleichs. Eine Abstimmung je Kalenderjahr (bis zum letzten Abgleich),
+    // daraus das Soll je Abgleich = Ausgangsstand + Bewegungen bis zu seinem Zeitpunkt.
+    const checkRows = rows.filter((x) => !x.isOpening);
+    const byYear = new Map();
+    for (const r of checkRows) {
+      const y = new Date(r.date).getFullYear();
+      if (!byYear.has(y) || new Date(r.date) > byYear.get(y)) byYear.set(y, new Date(r.date));
+    }
+    const recons = new Map();
+    for (const [y, last] of byYear) recons.set(y, await this.getBankReconciliation(`${y}-01-01`, ymd(last), { endAt: last }));
+    const checks = [];
+    for (const r of checkRows) {
+      const at = new Date(r.date);
+      let recon = recons.get(at.getFullYear());
+      // Anderer Ausgangsstand (z. B. Anfangsstand erst nach diesem Abgleich erfasst): einzeln rechnen
+      if (new Date(recon.period.startDate) > at) recon = await this.getBankReconciliation(`${at.getFullYear()}-01-01`, ymd(at), { endAt: at });
+      const expected = round2(recon.opening + sumBy(recon.movements.filter((m) => new Date(m.date) <= at), (m) => m.amount));
+      checks.push({ ...plain(r), expected, difference: round2(dec(r.total) - expected), openingSource: recon.openingSource });
+    }
+    return { opening: opening ? plain(opening) : null, checks };
   }
 
   /** Bank-Abstimmung inkl. Ist/Differenz aus erfassten Kontoständen (für Snapshot und Abschluss). */

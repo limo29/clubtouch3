@@ -8,7 +8,8 @@ Stand der Beschreibung: Oktober 2026. Technische Details für Entwickler stehen 
 
 ### Verkauf
 - Artikel-Kacheln mit Kategorien und Suche; langes Tippen öffnet die Mengenauswahl, Warenkorb-Zeilen lassen sich wegwischen (mit „Rückgängig“).
-- Bezahlt wird **bar**, **auf ein Mitgliedskonto** oder **„auf den Wirt“** (Eigenverbrauch ohne Umsatz). Konten dürfen bis 10 € überzogen werden (fest für alle).
+- Bezahlt wird **bar**, **mit Karte**, **auf ein Mitgliedskonto** oder **„auf den Wirt“** (Eigenverbrauch ohne Umsatz). Konten dürfen bis 10 € überzogen werden (fest für alle).
+- **Karte:** Das SumUp-Terminal ist nicht angebunden. Erst am Terminal kassieren, dann in der App „Zahlung erfolgreich“ bestätigen. Kartenzahlungen sind Umsatz, kommen aber nicht in die Kasse, sondern zählen zum Bank-Soll (abzüglich des eingestellten SumUp-Gebührensatzes). Guthaben lässt sich auch per Karte aufladen.
 - **Handy:** Die Artikel bleiben sichtbar, darunter eine Leiste „Wer zahlt?“ mit Warenkorb und Buchen-Knopf; Kundenwahl und Warenkorb öffnen sich von unten. Beim gewählten Kunden: Verlauf (mit Storno) und Guthaben aufladen.
 - Nach jedem Verkauf 5 Sekunden „Rückgängig“: storniert den Verkauf und legt die Artikel zurück in den Warenkorb.
 - Kundenliste: „Heute an der Theke“ (zuletzt aktiv zuerst) und alle Kunden alphabetisch.
@@ -25,7 +26,8 @@ Stand der Beschreibung: Oktober 2026. Technische Details für Entwickler stehen 
 ### Finanzen
 - **Einkauf:** Lieferantenrechnungen und Lieferscheine mit Nachweis (Foto/PDF) und „Eingetragen von“ (vorbelegt mit dem Kontonamen, am Gemeinschafts-Tablet die Person auswählen); Lieferscheine lassen sich einer Rechnung zuordnen. Hat ein Mitglied privat bezahlt („Auslage“), wird der Betrag seinem Konto gutgeschrieben.
 - **Kundenrechnungen:** Rechnungen an Mitglieder, Gäste oder Vereine mit PDF, Status und Zahlungsart.
-- **Kasse & Bank:** Kassenzählung nach Scheinen und Münzen mit Soll/Ist, Kassenbewegungen (Einzahlung zur Bank, sonstige Einnahmen/Ausgaben), Bank-Abstimmung.
+- **Kasse & Bank** (eine Seite): Soll in der Kasse und Bank-Soll nebeneinander. Kasse zählen nach Scheinen und Münzen (Differenz erst nach der Eingabe, Notiz bei Differenz Pflicht, Vorschlag zum Abschöpfen bis auf den Wechselgeld-Sockel), Kassenbewegungen (zur Bank gebracht, Wechselgeld geholt, sonstige Einnahme/Ausgabe), Kassenbuch mit Zeitraum. Beim Start einmalig **Anfangsstände** für Kasse und Konten erfassen; danach jederzeit **Kontostand abgleichen** (Stand laut Auszug gegen Bank-Soll). In den Bank-Details: Konten, Abgleiche, Herleitung des Bank-Solls und der SumUp-Gebührensatz.
+- **SumUp-Gebühren:** Der Gebührensatz dient nur der Schätzung des Bank-Solls. In der EÜR zählen Kartenzahlungen voll als Einnahme; die echten Gebühren laut SumUp-Abrechnung als Beleg unter Einkauf erfassen (die EÜR erinnert daran).
 - **Kassenprüfung:** Geschäftsjahre mit geführtem Abschluss (Zeitraum, Kasse, Bank, Belege, Inventur, Prüfen), Belegliste als ZIP und Jahresabschluss-PDF.
 - **Berichte:** Transaktionen, Inventur, Tagesabschluss, Monatsbericht, Kundenliste, Einnahmen & Ausgaben (EÜR), Kontoauszug, Kassenzählung.
 - Der Geschäftstag beginnt um **6:00 Uhr**, damit die Nacht an der Bar ein Tag bleibt.
@@ -62,6 +64,7 @@ Es gibt drei Rollen. Die Oberfläche blendet aus, was eine Rolle nicht darf; ver
 | Kundenrechnungen anlegen/ändern, Status, Storno | ✅ | ✅ | nur lesen + PDF |
 | Rechnungs-Einstellungen (IBAN, Absender) | ✅ | – | – |
 | Kasse zählen, Kassenbewegung buchen | ✅ | ✅ | ✅ |
+| Anfangsstände (Kasse/Bank), Kontostand abgleichen und Abgleiche löschen, Wechselgeld-Sockel, SumUp-Gebühr | ✅ | – | ✅ |
 | Kassenbewegung stornieren | ✅ | – | ✅ |
 | EÜR, Bank-Abstimmung, Belege, Jahresabschluss ansehen | ✅ | ✅ | ✅ |
 | Geschäftsjahr anlegen und abschließen | ✅ | – | ✅ |

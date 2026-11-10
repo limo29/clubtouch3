@@ -7,6 +7,11 @@ router.use(authenticate);
 
 router.get('/profit-loss', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.profitLoss);
 
+// Kontostände laut Kontoauszug: Anfangsstand beim Start und Abgleiche unterm Jahr
+router.get('/bank-balances', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.listBankBalances);
+router.post('/bank-balances', authorize('ADMIN','ACCOUNTANT'), accountingController.addBankBalance);
+router.delete('/bank-balances/:id', authorize('ADMIN','ACCOUNTANT'), accountingController.deleteBankBalance);
+
 // Bank-Abstimmung (Soll aus Vorjahresabschluss + Überweisungsbewegungen)
 router.get('/bank-reconciliation', authorize('ADMIN','ACCOUNTANT','CASHIER'), accountingController.bankReconciliation);
 

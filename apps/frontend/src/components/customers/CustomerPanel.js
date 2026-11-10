@@ -11,6 +11,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import {
   AccountBalance, Add, Close, Edit, Inventory2Outlined, LocalAtm, ReceiptLong, SettingsBackupRestore, SwapHoriz, Undo,
+ CreditCard
 } from '@mui/icons-material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../services/api';
@@ -32,8 +33,8 @@ const fromCustomer = (c) => Object.fromEntries(Object.keys(emptyForm).map((k) =>
 
 /* ------------------------------ Verlauf ------------------------------ */
 
-const TOPUP_LABEL = { CASH: 'Aufladung bar', TRANSFER: 'Aufladung Überweisung', REIMBURSEMENT: 'Auslage (Einkauf)', MIGRATION: 'Übernahme Clubtouch 2.0' };
-const TOPUP_ICON = { CASH: LocalAtm, TRANSFER: AccountBalance, REIMBURSEMENT: ReceiptLong, MIGRATION: SettingsBackupRestore };
+const TOPUP_LABEL = { CASH: 'Aufladung bar', CARD: 'Aufladung Karte', TRANSFER: 'Aufladung Überweisung', REIMBURSEMENT: 'Auslage (Einkauf)', MIGRATION: 'Übernahme Clubtouch 2.0' };
+const TOPUP_ICON = { CASH: LocalAtm, CARD: CreditCard, TRANSFER: AccountBalance, REIMBURSEMENT: ReceiptLong, MIGRATION: SettingsBackupRestore };
 
 function HistoryRow({ entry: e }) {
   let Icon; let title; let sub; let color = 'text.primary'; let strike = false;

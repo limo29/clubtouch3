@@ -1,289 +1,148 @@
 /**
- * Kasse & Bank (Route /cash-count), zwei Tabs:
- *   Kasse (Standard): freie Kassenzählung als eigener Vorgang (jederzeit, nicht täglich) + Kassenbewegungen.
- *   Bank (?tab=bank): components/finance/BankOverview (Kontostände, Bank-Abstimmung, Bewegungen im Zeitraum).
- * Kasse-Tab:
- * Oben die Soll-Herleitung aus /cash-counts/preview, in der Mitte der Stückelungszähler
- * (14 Nennwerte), unten die bisherigen Zählungen. Das Backend rechnet Ist/Soll/Differenz
- * selbst; hier wird nur live vorgerechnet.
+ * Kasse & Bank (Route /cash-count) – eine Seite:
+ *   oben Kasse (Soll, „Kasse zählen“) und Bank (Bank-Soll, „Kontostand abgleichen“) nebeneinander,
+ *   darunter die Kassenbewegungen als Knöpfe, die kompakte Soll-Herleitung und das Kassenbuch
+ *   (Zeitraum, Standard „seit letzter Zählung“), unten aufklappbar die Bank-Details.
+ * „Zur Bank gebracht“ ändert Kasse und Bank – beide Karten zeigen die Wirkung sofort.
+ * ?tab=bank (alte Links) klappt die Bank-Details auf und scrollt dorthin.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Box, Card, CardContent, Typography, Grid, Table, TableBody, TableCell, TableHead, TableRow,
-  Button, TextField, Alert, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
-  IconButton, Chip, Skeleton, Tooltip, useTheme, useMediaQuery,
-  ToggleButtonGroup, ToggleButton, Autocomplete, Snackbar, Tabs, Tab,
+  Alert, Avatar, Box, Button, Card, Chip, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Link, Skeleton, Stack,
+  Typography, useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
-  Save, PictureAsPdf, Refresh, PointOfSale,
-  AccountBalance, ArrowUpward, ArrowDownward, AddCircleOutline, RemoveCircleOutline, Undo,
+  AccountBalance, ChevronRight, DeleteOutline, ExpandLess, ExpandMore, MenuBook, PictureAsPdf, PointOfSale, Savings, Undo,
 } from '@mui/icons-material';
-import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
-import { useSearchParams } from 'react-router-dom';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { endOfDay, format, isToday, isYesterday, startOfDay, subDays } from 'date-fns';
+import { de } from 'date-fns/locale';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { money, num } from '../utils/format';
 import { downloadFile, apiErrorMessage } from '../utils/download';
 import { useAuth } from '../context/AuthContext';
-import CashMovementList from '../components/finance/CashMovementList';
-import BankOverview from '../components/finance/BankOverview';
-import CashCountForm, { CASH_COUNTS_QUERY_KEY, TotalBox, signed, diffColor } from '../components/finance/CashCountForm';
+import BankDetails, { BankStatusCard, useBankData } from '../components/finance/BankOverview';
+import { CASH_COUNTS_QUERY_KEY } from '../components/finance/CashCountForm';
+import CountDialog from '../components/finance/CountDialog';
+import MovementDialog, { MOVEMENT_ACTIONS } from '../components/finance/MovementDialog';
+import BankBalanceDialog from '../components/finance/BankBalanceDialog';
+import { FilterChips } from '../components/common/StickyToolbar';
 
 export { CASH_COUNTS_QUERY_KEY };
 
-const fmtDateTime = (iso) => (iso ? format(new Date(iso), 'dd.MM.yyyy HH:mm') : '—');
-const fmtDate = (iso) => (iso ? format(new Date(iso), 'dd.MM.yyyy') : '—');
+const signed = (v) => (num(v) > 0.004 ? '+' : '') + money(v);
+const dayLabel = (d) => (isToday(d) ? 'Heute' : isYesterday(d) ? 'Gestern' : format(d, 'EEEE, d. MMMM yyyy', { locale: de }));
 
 /* ------------------------------ Soll-Herleitung ------------------------------ */
 
-function ExpectedTable({ preview, isLoading, error }) {
-  if (isLoading) return <Skeleton variant="rounded" height={180} />;
-  if (error) return <Alert severity="error">Soll konnte nicht geladen werden.</Alert>;
-  if (!preview) return null;
+function ExpectedBreakdown({ preview, onShowBook }) {
+  const navigate = useNavigate();
+  const [all, setAll] = useState(false);
+  if (!preview) return <Skeleton variant="rounded" height={200} />;
   const c = preview.counts || {};
-  const bd = preview.bankDeposits || {};
-  const bw = preview.bankWithdrawals || {};
-  const oi = preview.otherIncome || {};
-  const oe = preview.otherExpense || {};
-  const ci = preview.cashInvoices || {};
+  const t = (x) => num(x?.total);
   const rows = [
-    preview.hasBaseline
-      ? { label: `Vorzählung vom ${fmtDateTime(preview.previousCount?.countedAt)}`, value: preview.baseline }
-      : { label: 'Anfangsbestand (keine Vorzählung)', value: 0 },
-    { label: `+ Bar-Verkäufe (${c.sales ?? 0})`, value: preview.cashSales },
-    { label: `+ Stornos bar (${c.refunds ?? 0})`, value: preview.cashRefunds },
-    { label: `+ Bar-Aufladungen (${c.topUps ?? 0})`, value: preview.cashTopUps },
-    { label: `− Bar-Ausgaben (${c.expenses ?? 0})`, value: num(preview.cashExpenses) > 0 ? -num(preview.cashExpenses) : 0 },
-    { label: `+ Bar bezahlte Kundenrechnungen (${ci.count ?? 0})`, value: num(ci.total) },
-    { label: `− Einzahlungen auf Bank (${bd.count ?? 0})`, value: num(bd.total) > 0 ? -num(bd.total) : 0 },
-    { label: `+ Abhebungen von Bank (${bw.count ?? 0})`, value: num(bw.total) },
-    { label: `+ Sonstige Bareinnahmen (${oi.count ?? 0})`, value: num(oi.total) },
-    { label: `− Sonstige Barausgaben (${oe.count ?? 0})`, value: num(oe.total) > 0 ? -num(oe.total) : 0 },
+    { label: `Bar-Verkäufe (${c.sales ?? 0})`, value: num(preview.cashSales), to: '/transactions' },
+    { label: `Stornos bar (${c.refunds ?? 0})`, value: num(preview.cashRefunds), to: '/transactions' },
+    { label: `Bar-Aufladungen (${c.topUps ?? 0})`, value: num(preview.cashTopUps), to: '/transactions' },
+    { label: `Bar bezahlte Kundenrechnungen (${preview.cashInvoices?.count ?? 0})`, value: t(preview.cashInvoices), to: '/invoices' },
+    { label: `Bar bezahlte Einkäufe (${c.expenses ?? 0})`, value: -num(preview.cashExpenses), to: '/purchases' },
+    { label: `Zur Bank gebracht (${preview.bankDeposits?.count ?? 0})`, value: -t(preview.bankDeposits), book: true },
+    { label: `Wechselgeld geholt (${preview.bankWithdrawals?.count ?? 0})`, value: t(preview.bankWithdrawals), book: true },
+    { label: `Sonstige Einnahmen (${preview.otherIncome?.count ?? 0})`, value: t(preview.otherIncome), book: true },
+    { label: `Sonstige Ausgaben (${preview.otherExpense?.count ?? 0})`, value: -t(preview.otherExpense), book: true },
   ];
+  const nonzero = rows.filter((r) => Math.abs(r.value) >= 0.005);
+  const shown = all ? rows : nonzero;
+  const line = (labelNode, value, opts = {}) => (
+    <Stack direction="row" justifyContent="space-between" spacing={2} sx={{ py: 0.75, ...(opts.rule ? { borderTop: '2px solid', borderColor: 'divider', mt: 0.5, pt: 1 } : {}) }}>
+      <Box sx={{ minWidth: 0 }}>{labelNode}</Box>
+      <Typography sx={{ fontWeight: opts.strong ? 800 : 500, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: opts.color }}>{opts.raw ? value : signed(value)}</Typography>
+    </Stack>
+  );
   return (
-    <>
-      {!preview.hasBaseline && (
-        <Alert severity="info" sx={{ mb: 2 }}>Erste Zählung: Soll ohne Anfangsbestand.</Alert>
+    <Box>
+      {line(
+        <Typography fontWeight={700}>{preview.hasBaseline ? `${preview.previousCount?.isOpening ? 'Anfangsbestand' : 'Letzte Zählung'} ${format(new Date(preview.previousCount?.countedAt || preview.since), 'dd.MM. HH:mm')}` : 'Kein Anfangsbestand'}</Typography>,
+        money(preview.baseline), { raw: true, strong: true },
       )}
-      <Table size="small">
-        <TableBody>
-          {rows.map((r) => (
-            <TableRow key={r.label}>
-              <TableCell sx={{ border: 0, py: 0.75 }}>{r.label}</TableCell>
-              <TableCell align="right" sx={{ border: 0, py: 0.75, whiteSpace: 'nowrap' }}>{money(r.value)}</TableCell>
-            </TableRow>
-          ))}
-          <TableRow>
-            <TableCell sx={{ borderTop: '2px solid', borderColor: 'divider', fontWeight: 800 }}>= Soll</TableCell>
-            <TableCell align="right" sx={{ borderTop: '2px solid', borderColor: 'divider', fontWeight: 800, whiteSpace: 'nowrap' }}>
-              {money(preview.expectedTotal)}
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-      {preview.since && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          Zeitraum: {fmtDateTime(preview.since)} bis jetzt
-        </Typography>
+      {shown.map((r) => line(
+        r.to ? <Link component="button" type="button" onClick={() => navigate(r.to)} underline="hover" color="inherit" sx={{ textAlign: 'left' }}>{r.label}</Link>
+          : <Link component="button" type="button" onClick={onShowBook} underline="hover" color="inherit" sx={{ textAlign: 'left' }}>{r.label}</Link>,
+        r.value, { color: Math.abs(r.value) < 0.005 ? 'text.disabled' : r.value > 0 ? 'success.main' : 'error.main' },
+      ))}
+      {shown.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ py: 0.75 }}>Seitdem keine Bewegungen.</Typography>}
+      {line(<Typography fontWeight={800}>= Soll in der Kasse</Typography>, money(preview.expectedTotal), { raw: true, strong: true, rule: true })}
+      {rows.length > nonzero.length && (
+        <Button size="small" onClick={() => setAll((a) => !a)} sx={{ mt: 0.5 }}>{all ? 'Nur Posten mit Betrag' : `Alle Posten zeigen (${rows.length - nonzero.length} ohne Betrag)`}</Button>
       )}
-    </>
+    </Box>
   );
 }
 
-/* ------------------------------ Kassenbewegung ------------------------------ */
+/* --------------------------------- Kassenbuch -------------------------------- */
 
-const MOVEMENT_TYPES = [
-  { value: 'DEPOSIT_TO_BANK',      label: 'Einzahlung auf Bank', short: 'Einzahlung', icon: <AccountBalance />, subIcon: <ArrowUpward />,    bank: true,  noteReq: false },
-  { value: 'WITHDRAWAL_FROM_BANK', label: 'Abhebung von Bank',   short: 'Abhebung',   icon: <AccountBalance />, subIcon: <ArrowDownward />,  bank: true,  noteReq: false },
-  { value: 'OTHER_INCOME',         label: 'Sonstige Einnahme',   short: 'Einnahme',   icon: <AddCircleOutline />, subIcon: null,             bank: false, noteReq: true  },
-  { value: 'OTHER_EXPENSE',        label: 'Sonstige Ausgabe',    short: 'Ausgabe',    icon: <RemoveCircleOutline />, subIcon: null,           bank: false, noteReq: true  },
+function bookDays(counts, movements, start, end) {
+  const inRange = (d) => (!start || d >= start) && (!end || d <= end);
+  const list = [
+    ...counts.map((cc) => ({ kind: 'COUNT', id: cc.id, date: new Date(cc.countedAt), data: cc })),
+    ...movements.map((m) => ({ kind: 'MOVE', id: m.id, date: new Date(m.occurredAt), data: m })),
+  ].filter((e) => inRange(e.date)).sort((a, b) => b.date - a.date);
+  const days = [];
+  for (const e of list) {
+    const key = format(e.date, 'yyyy-MM-dd');
+    if (!days.length || days[days.length - 1].key !== key) days.push({ key, date: startOfDay(e.date), items: [] });
+    days[days.length - 1].items.push(e);
+  }
+  return { days, count: list.length };
+}
+
+function BookRow({ e, onOpen }) {
+  let Icon; let title; let sub; let right;
+  if (e.kind === 'COUNT') {
+    const cc = e.data;
+    Icon = Savings;
+    title = cc.isOpening ? 'Anfangsbestand' : 'Kassenzählung';
+    sub = `Ist ${money(cc.countedTotal)}${cc.user?.name ? ` · ${cc.user.name}` : ''}`;
+    const ok = Math.abs(num(cc.difference)) < 0.005;
+    right = cc.isOpening ? <Chip size="small" label="Start" variant="outlined" />
+      : <Chip size="small" color={ok ? 'success' : 'error'} variant={ok ? 'outlined' : 'filled'} label={ok ? 'stimmt' : signed(cc.difference)} />;
+  } else {
+    const m = e.data;
+    const meta = MOVEMENT_ACTIONS[m.type] || MOVEMENT_ACTIONS.OTHER_INCOME;
+    Icon = m.cancelled ? Undo : meta.Icon;
+    title = meta.title;
+    sub = [m.note, m.bankAccount, m.user?.name].filter(Boolean).join(' · ') || ' ';
+    right = (
+      <Typography fontWeight={800} sx={{ whiteSpace: 'nowrap', textDecoration: m.cancelled ? 'line-through' : 'none', color: m.cancelled ? 'text.disabled' : meta.sign > 0 ? 'success.main' : 'error.main' }}>
+        {meta.sign > 0 ? '+' : '−'}{money(m.amount)}
+      </Typography>
+    );
+  }
+  return (
+    <Box onClick={() => onOpen(e)} role="button" tabIndex={0} onKeyDown={(ev) => ev.key === 'Enter' && onOpen(e)}
+      sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1.1, cursor: 'pointer', borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 'none' }, '&:hover': { bgcolor: 'action.hover' }, opacity: e.data.cancelled ? 0.6 : 1 }}>
+      <Avatar sx={{ width: 34, height: 34, bgcolor: 'action.hover', color: 'text.secondary' }}><Icon fontSize="small" /></Avatar>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography fontWeight={700} noWrap>{title}</Typography>
+        <Typography variant="body2" color="text.secondary" noWrap>{format(e.date, 'HH:mm')} · {sub}</Typography>
+      </Box>
+      {right}
+      <ChevronRight sx={{ color: 'text.disabled' }} />
+    </Box>
+  );
+}
+
+const PERIODS = [
+  { key: 'since', label: 'Seit letzter Zählung' },
+  { key: 'today', label: 'Heute', days: 0 },
+  { key: '7', label: '7 Tage', days: 6 },
+  { key: '30', label: '30 Tage', days: 29 },
+  { key: 'custom', label: 'Zeitraum…' },
 ];
-
-const emptyForm = () => ({ type: 'DEPOSIT_TO_BANK', amountStr: '', occurredAt: new Date(), bankAccount: '', note: '' });
-
-function CashMovementForm({ onSuccess }) {
-  const [form, setForm] = useState(emptyForm());
-  const [formError, setFormError] = useState({});
-  const [apiError, setApiError] = useState(null);
-  const [snack, setSnack] = useState(false);
-  const qc = useQueryClient();
-
-  const typeMeta = MOVEMENT_TYPES.find((t) => t.value === form.type) || MOVEMENT_TYPES[0];
-
-  const { data: bankAccountsData } = useQuery({
-    queryKey: ['cash-movements', 'bank-accounts'],
-    queryFn: async () => (await api.get('/cash-movements/bank-accounts')).data,
-    staleTime: 60 * 1000,
-  });
-  const bankAccountOptions = bankAccountsData?.bankAccounts || [];
-
-  const validate = () => {
-    const errs = {};
-    const amt = num(form.amountStr.replace(',', '.'));
-    if (!amt || amt <= 0) errs.amountStr = 'Betrag muss größer 0 sein.';
-    if (typeMeta.noteReq && form.note.trim().length < 3) errs.note = 'Pflicht bei sonstigen Einnahmen/Ausgaben – wofür? (mind. 3 Zeichen)';
-    return errs;
-  };
-
-  const mutation = useMutation({
-    mutationFn: async () => {
-      const errs = validate();
-      if (Object.keys(errs).length > 0) { setFormError(errs); throw new Error('Validierungsfehler'); }
-      setFormError({});
-      const payload = {
-        type: form.type,
-        amount: num(form.amountStr.replace(',', '.')),
-        note: form.note.trim() || undefined,
-        occurredAt: form.occurredAt ? form.occurredAt.toISOString() : undefined,
-      };
-      if (typeMeta.bank && form.bankAccount.trim()) payload.bankAccount = form.bankAccount.trim();
-      return (await api.post('/cash-movements', payload)).data;
-    },
-    onSuccess: () => {
-      setApiError(null);
-      setForm(emptyForm());
-      setFormError({});
-      setSnack(true);
-      qc.invalidateQueries({ queryKey: ['cash-counts'] });
-      qc.invalidateQueries({ queryKey: ['cash-movements'] });
-      if (onSuccess) onSuccess();
-    },
-    onError: async (err) => {
-      if (err.message !== 'Validierungsfehler') {
-        setApiError(await apiErrorMessage(err, 'Kassenbewegung konnte nicht gebucht werden.'));
-      }
-    },
-  });
-
-  return (
-    <Card>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>Kassenbewegung buchen</Typography>
-
-        {apiError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setApiError(null)}>{apiError}</Alert>}
-
-        {/* Typ-Auswahl */}
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Typ</Typography>
-        <ToggleButtonGroup
-          exclusive
-          value={form.type}
-          onChange={(e, v) => { if (v) setForm((f) => ({ ...f, type: v, bankAccount: '', note: '' })); }}
-          sx={{ flexWrap: 'wrap', gap: 0.5, mb: 2 }}
-        >
-          {MOVEMENT_TYPES.map((t) => (
-            <ToggleButton key={t.value} value={t.value} size="small" sx={{ gap: 0.5, fontSize: '0.8rem', lineHeight: 1.2, px: 1.5, py: 1 }}>
-              {t.icon}{t.subIcon}
-              <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{t.label}</Box>
-              <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>{t.short}</Box>
-            </ToggleButton>
-          ))}
-        </ToggleButtonGroup>
-
-        <Grid container spacing={2}>
-          {/* Betrag */}
-          <Grid size={{ xs: 12, md: 6, lg: 12 }}>
-            <TextField
-              label="Betrag"
-              value={form.amountStr}
-              onChange={(e) => setForm((f) => ({ ...f, amountStr: e.target.value }))}
-              inputProps={{ inputMode: 'decimal' }}
-              slotProps={{ input: { endAdornment: <Typography color="text.secondary">€</Typography> } }}
-              fullWidth
-              error={!!formError.amountStr}
-              helperText={formError.amountStr || ' '}
-            />
-          </Grid>
-
-          {/* Datum/Uhrzeit */}
-          <Grid size={{ xs: 12, md: 6, lg: 12 }}>
-            <DateTimePicker
-              label="Datum/Uhrzeit"
-              value={form.occurredAt}
-              onChange={(d) => setForm((f) => ({ ...f, occurredAt: d }))}
-              disableFuture
-              slotProps={{ textField: { fullWidth: true } }}
-            />
-          </Grid>
-
-          {/* Konto (nur Bank-Typen) */}
-          {typeMeta.bank && (
-            <Grid size={{ xs: 12, md: 6, lg: 12 }}>
-              <Autocomplete
-                freeSolo
-                options={bankAccountOptions}
-                value={form.bankAccount}
-                onInputChange={(e, v) => setForm((f) => ({ ...f, bankAccount: v }))}
-                renderInput={(params) => (
-                  <TextField {...params} label="Bankkonto (optional)" fullWidth />
-                )}
-              />
-            </Grid>
-          )}
-
-          {/* Notiz */}
-          <Grid size={{ xs: 12 }}>
-            <TextField
-              label={typeMeta.noteReq ? 'Notiz (Pflicht)' : 'Notiz (optional)'}
-              value={form.note}
-              onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-              fullWidth
-              required={typeMeta.noteReq}
-              error={!!formError.note}
-              helperText={formError.note || (typeMeta.noteReq ? 'Pflicht bei sonstigen Einnahmen/Ausgaben – wofür?' : ' ')}
-            />
-          </Grid>
-        </Grid>
-
-        <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>
-          <Button
-            variant="contained"
-            onClick={() => mutation.mutate()}
-            disabled={mutation.isPending}
-            startIcon={<Save />}
-          >
-            {mutation.isPending ? 'Bucht…' : 'Buchen'}
-          </Button>
-        </Stack>
-
-        <Snackbar
-          open={snack}
-          autoHideDuration={3500}
-          onClose={() => setSnack(false)}
-          message="Kassenbewegung gebucht"
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ------------------------------ Storno-Dialog ------------------------------ */
-
-function CancelMovementDialog({ movement, open, onClose, onConfirm, loading }) {
-  if (!movement) return null;
-  const meta = MOVEMENT_TYPES.find((t) => t.value === movement.type) || {};
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Kassenbewegung stornieren?</DialogTitle>
-      <DialogContent>
-        <Typography>
-          {meta.label || movement.type}: <strong>{money(movement.amount)}</strong>
-          {movement.note ? ` – ${movement.note}` : ''}
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Die Buchung wird als storniert markiert und fließt nicht mehr in die Soll-Herleitung ein.
-        </Typography>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={loading}>Abbrechen</Button>
-        <Button variant="contained" color="error" onClick={onConfirm} disabled={loading} startIcon={<Undo />}>
-          {loading ? 'Storniert…' : 'Stornieren'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
 
 /* --------------------------------- Seite --------------------------------- */
 
@@ -292,47 +151,76 @@ export default function CashCount() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { can } = useAuth();
+  const canCount = can('countCash');
   const canCancel = can('cancelCashMovements');
+  const canManage = can('manageBank');
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get('tab') === 'bank' ? 'bank' : 'kasse';
-  const setTab = (v) => setSearchParams(v === 'bank' ? { tab: 'bank' } : {}, { replace: true });
 
-  const [result, setResult] = useState(null);
+  const [counting, setCounting] = useState(false);
+  const [movement, setMovement] = useState(null); // { type, preset }
+  const [bankDialog, setBankDialog] = useState(null); // 'opening' | 'check'
+  const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
-  const [cancelTarget, setCancelTarget] = useState(null);
+  const [period, setPeriod] = useState('since');
+  const [range, setRange] = useState({ start: null, end: null });
+  const [bankOpen, setBankOpen] = useState(false);
+  const bookRef = useRef(null);
+  const bankRef = useRef(null);
 
-  const { data: preview, isLoading: previewLoading, error: previewError, refetch: refetchPreview, isFetching } = useQuery({
+  // alte Links ?tab=bank: Bank-Details aufklappen und hinscrollen
+  useEffect(() => {
+    if (searchParams.get('tab') !== 'bank') return;
+    setBankOpen(true);
+    setSearchParams({}, { replace: true });
+    setTimeout(() => bankRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400);
+  }, [searchParams, setSearchParams]);
+
+  const { data: preview } = useQuery({
     queryKey: [...CASH_COUNTS_QUERY_KEY, 'preview'],
     queryFn: async () => (await api.get('/cash-counts/preview')).data,
     staleTime: 0,
   });
+  const { data: settings } = useQuery({
+    queryKey: [...CASH_COUNTS_QUERY_KEY, 'settings'],
+    queryFn: async () => (await api.get('/cash-counts/settings')).data,
+  });
+  const bank = useBankData();
+
+  // Zeitraum des Kassenbuchs (Standard: seit letzter Zählung, ohne Zählung: alles)
+  const { start, end } = useMemo(() => {
+    const today0 = startOfDay(new Date());
+    const p = PERIODS.find((x) => x.key === period);
+    if (period === 'since') return { start: preview?.since ? new Date(preview.since) : null, end: null };
+    if (period === 'custom') return { start: range.start ? startOfDay(range.start) : null, end: range.end ? endOfDay(range.end) : null };
+    return { start: subDays(today0, p.days), end: null };
+  }, [period, range, preview]);
 
   const { data: listData, isLoading: listLoading } = useQuery({
     queryKey: [...CASH_COUNTS_QUERY_KEY, 'list'],
-    queryFn: async () => (await api.get('/cash-counts', { params: { limit: 50 } })).data,
+    queryFn: async () => (await api.get('/cash-counts', { params: { limit: 200 } })).data,
   });
-  const cashCounts = listData?.cashCounts || [];
-
-  const { data: movementsData, isLoading: movementsLoading } = useQuery({
-    queryKey: ['cash-movements', 'recent'],
-    queryFn: async () => (await api.get('/cash-movements', { params: { limit: 50 } })).data,
+  const fromParam = start ? format(start, 'yyyy-MM-dd') : undefined;
+  const toParam = end ? format(end, 'yyyy-MM-dd') : undefined;
+  const { data: movementsData, isLoading: movLoading } = useQuery({
+    queryKey: ['cash-movements', 'book', fromParam || '', toParam || ''],
+    queryFn: async () => (await api.get('/cash-movements', { params: { from: fromParam, to: toParam, limit: 500 } })).data,
     staleTime: 0,
   });
-  const movements = movementsData?.cashMovements || [];
+  const book = useMemo(() => bookDays(listData?.cashCounts || [], movementsData?.cashMovements || [], start, end), [listData, movementsData, start, end]);
 
   const cancelMovement = useMutation({
     mutationFn: async (id) => (await api.post(`/cash-movements/${id}/cancel`)).data,
     onSuccess: () => {
-      setCancelTarget(null);
+      setDetail(null);
       qc.invalidateQueries({ queryKey: ['cash-movements'] });
       qc.invalidateQueries({ queryKey: CASH_COUNTS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ['bank-reconciliation'] });
+      qc.invalidateQueries({ queryKey: ['bank-balances'] });
     },
     onError: async (err) => setError(await apiErrorMessage(err, 'Storno fehlgeschlagen.')),
   });
 
-  const resetForm = () => setResult(null);
-
-  const downloadPdf = async (cc) => {
+  const pdf = async (cc) => {
     try {
       await downloadFile(`/cash-counts/${cc.id}/pdf`, { filename: `Kassenzaehlung_${format(new Date(cc.countedAt), 'yyyy-MM-dd_HHmm')}.pdf` });
     } catch (err) {
@@ -340,174 +228,170 @@ export default function CashCount() {
     }
   };
 
-  return (
-    <Box>
-      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ mb: { xs: 2, md: 3 }, borderBottom: 1, borderColor: 'divider' }}>
-        <Tab value="kasse" label="Kasse" icon={<PointOfSale />} iconPosition="start" sx={{ minHeight: 48 }} />
-        <Tab value="bank" label="Bank" icon={<AccountBalance />} iconPosition="start" sx={{ minHeight: 48 }} />
-      </Tabs>
+  const noBaseline = preview && !preview.hasBaseline;
+  const noBankOpening = !bank.opening && !bank.lastClosed && !bank.balLoading;
+  const float = num(settings?.float);
+  const periodOptions = PERIODS.map((p) => ({
+    key: p.key,
+    label: p.key === 'since' && !preview?.hasBaseline ? 'Alles'
+      : p.key === 'custom' && period === 'custom' && (range.start || range.end)
+        ? `${range.start ? format(range.start, 'd.M.') : '…'} – ${range.end ? format(range.end, 'd.M.yy') : 'heute'}` : p.label,
+  }));
 
+  return (
+    <Box sx={{ pb: 6 }}>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
 
-      {tab === 'bank' ? <BankOverview /> : (
-      <Grid container spacing={{ xs: 2, md: 3 }}>
-        {/* Soll-Herleitung + Kassenbewegung buchen (linke Spalte) */}
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Stack spacing={{ xs: 2, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Typography variant="h6">Soll-Herleitung</Typography>
-                <Tooltip title="Soll neu berechnen">
-                  <span>
-                    <IconButton size="small" onClick={() => refetchPreview()} disabled={isFetching} aria-label="Soll neu berechnen"><Refresh /></IconButton>
-                  </span>
-                </Tooltip>
-              </Stack>
-              <ExpectedTable preview={preview} isLoading={previewLoading} error={previewError} />
-              {preview?.expenseDocs?.length > 0 && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>Bar bezahlte Eingangsrechnungen</Typography>
-                  <Table size="small">
-                    <TableBody>
-                      {preview.expenseDocs.map((d) => (
-                        <TableRow key={d.id}>
-                          <TableCell sx={{ border: 0, py: 0.5 }}>{fmtDate(d.paidAt || d.documentDate)} · {d.supplier || d.documentNumber || 'Beleg'}</TableCell>
-                          <TableCell align="right" sx={{ border: 0, py: 0.5, whiteSpace: 'nowrap' }}>{money(d.totalAmount)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-          <CashMovementForm />
-          </Stack>
-        </Grid>
-
-        {/* Stückelung */}
-        <Grid size={{ xs: 12, lg: 8 }}>
-          <CashCountForm onSaved={setResult} />
-        </Grid>
-
-        {/* Kassenbewegungen Liste */}
-        <Grid size={{ xs: 12 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>Kassenbewegungen (letzte 50)</Typography>
-              <CashMovementList
-                movements={movements}
-                loading={movementsLoading}
-                onCancel={canCancel ? (m) => setCancelTarget(m) : undefined}
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Bisherige Zählungen */}
-        <Grid size={{ xs: 12 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>Bisherige Zählungen</Typography>
-              {listLoading ? (
-                <Skeleton variant="rounded" height={120} />
-              ) : cashCounts.length === 0 ? (
-                <Typography color="text.secondary">Noch keine Zählung gespeichert.</Typography>
-              ) : isMobile ? (
-                <Stack spacing={1.5}>
-                  {cashCounts.map((cc) => (
-                    <Card key={cc.id} variant="outlined">
-                      <CardContent sx={{ '&:last-child': { pb: 1.5 } }}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                          <Typography fontWeight={700}>{fmtDateTime(cc.countedAt)}</Typography>
-                          <IconButton size="small" onClick={() => downloadPdf(cc)} aria-label="PDF herunterladen"><PictureAsPdf /></IconButton>
-                        </Stack>
-                        <Typography variant="body2" color="text.secondary">{cc.user?.name || '—'}</Typography>
-                        <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-                          <TotalBox small label="Soll" value={money(cc.expectedTotal)} />
-                          <TotalBox small label="Ist" value={money(cc.countedTotal)} />
-                          <TotalBox small label="Differenz" value={signed(cc.difference)} color={diffColor(cc.difference)} />
-                        </Stack>
-                        {cc.note && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{cc.note}</Typography>}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </Stack>
-              ) : (
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Datum</TableCell>
-                      <TableCell>Gezählt von</TableCell>
-                      <TableCell align="right">Soll</TableCell>
-                      <TableCell align="right">Ist</TableCell>
-                      <TableCell align="right">Differenz</TableCell>
-                      <TableCell>Notiz</TableCell>
-                      <TableCell align="right">PDF</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {cashCounts.map((cc) => (
-                      <TableRow key={cc.id} hover>
-                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDateTime(cc.countedAt)}</TableCell>
-                        <TableCell>{cc.user?.name || '—'}</TableCell>
-                        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{money(cc.expectedTotal)}</TableCell>
-                        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{money(cc.countedTotal)}</TableCell>
-                        <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: diffColor(cc.difference), fontWeight: 700 }}>{signed(cc.difference)}</TableCell>
-                        <TableCell sx={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cc.note || ''}</TableCell>
-                        <TableCell align="right">
-                          <IconButton size="small" onClick={() => downloadPdf(cc)} aria-label="PDF herunterladen"><PictureAsPdf /></IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-      )}
-
-      {/* Storno-Dialog */}
-      <CancelMovementDialog
-        movement={cancelTarget}
-        open={!!cancelTarget}
-        onClose={() => setCancelTarget(null)}
-        onConfirm={() => cancelMovement.mutate(cancelTarget.id)}
-        loading={cancelMovement.isPending}
-      />
-
-      {/* Ergebnisdialog */}
-      <Dialog open={!!result} onClose={resetForm} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><PointOfSale /> Zählung gespeichert</DialogTitle>
-        <DialogContent>
-          {result && (
-            <Stack spacing={1.5}>
-              <Typography variant="body2" color="text.secondary">{fmtDateTime(result.countedAt)} · {result.user?.name}</Typography>
-              <Stack direction="row" spacing={2}>
-                <TotalBox label="Soll" value={money(result.expectedTotal)} />
-                <TotalBox label="Ist" value={money(result.countedTotal)} />
-              </Stack>
-              <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'background.default', border: '1px solid', borderColor: 'divider', textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Differenz</Typography>
-                <Typography variant="h3" sx={{ fontWeight: 900, color: diffColor(result.difference) }}>{signed(result.difference)}</Typography>
-                <Chip
-                  size="small"
-                  sx={{ mt: 1 }}
-                  color={Math.abs(num(result.difference)) < 0.005 ? 'success' : 'error'}
-                  label={Math.abs(num(result.difference)) < 0.005 ? 'Kasse stimmt' : num(result.difference) > 0 ? 'Überschuss' : 'Fehlbetrag'}
-                />
-              </Box>
+      <Stack spacing={{ xs: 2, md: 3 }}>
+        {/* Kasse | Bank */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: { xs: 2, md: 3 } }}>
+          <Card sx={{ p: { xs: 2, sm: 2.5 }, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <PointOfSale color="primary" fontSize="small" />
+              <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 800 }}>Soll in der Kasse</Typography>
             </Stack>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button startIcon={<PictureAsPdf />} onClick={() => result && downloadPdf(result)}>PDF</Button>
-          <Button variant="contained" onClick={resetForm}>Neue Zählung</Button>
-        </DialogActions>
+            <Typography variant="h3" sx={{ fontWeight: 900, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1, fontSize: { xs: '2.4rem', md: '3rem' } }}>
+              {preview ? money(preview.expectedTotal) : '…'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {!preview ? ' ' : preview.hasBaseline
+                ? `seit ${preview.previousCount?.isOpening ? 'Anfangsbestand' : 'Zählung'} am ${format(new Date(preview.previousCount?.countedAt || preview.since), 'dd.MM.yyyy HH:mm')}`
+                : 'noch kein Anfangsbestand – startet bei 0,00 €'}
+              {float > 0 && <> · Sockel {money(float)}</>}
+            </Typography>
+            <Box sx={{ flex: 1, minHeight: 12 }} />
+            {canCount && (
+              <Button variant="contained" size="large" startIcon={<Savings />} onClick={() => setCounting(true)} sx={{ py: 1.25 }}>Kasse zählen</Button>
+            )}
+          </Card>
+          <BankStatusCard bank={bank} canManage={canManage} onCheck={() => setBankDialog('check')} />
+        </Box>
+
+        {/* Kassenbewegungen */}
+        {canCount && (
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1 }}>
+            {Object.entries(MOVEMENT_ACTIONS).map(([type, m]) => (
+              <Button key={type} variant="outlined" color={m.color} startIcon={<m.Icon />} onClick={() => setMovement({ type })}
+                sx={{ justifyContent: 'flex-start', py: 1, lineHeight: 1.2, textAlign: 'left', bgcolor: 'background.paper' }}>
+                {m.label}
+              </Button>
+            ))}
+          </Box>
+        )}
+
+        {(noBaseline || noBankOpening) && canManage && (
+          <Alert severity="info" action={<Button color="inherit" size="small" onClick={() => setBankDialog('opening')} sx={{ whiteSpace: 'nowrap' }}>Anfangsstände erfassen</Button>}>
+            {noBaseline && noBankOpening ? 'Noch keine Anfangsstände für Kasse und Bank.' : noBaseline ? 'Noch kein Anfangsbestand für die Kasse.' : 'Noch kein Anfangsstand für die Bank.'}
+            {' '}Ohne sie stimmen Kassen-Soll und Bank-Soll erst ab der ersten Zählung bzw. dem ersten Jahresabschluss.
+          </Alert>
+        )}
+
+        {/* Herleitung | Kassenbuch */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1.4fr', lg: '1fr 1.6fr' }, gap: { xs: 2, md: 3 }, alignItems: 'start' }}>
+          <Card sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ fontSize: '1.05rem', mb: 1 }}>So setzt sich das Kassen-Soll zusammen</Typography>
+            <ExpectedBreakdown preview={preview} onShowBook={() => { setPeriod('since'); bookRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} />
+          </Card>
+
+          <Card ref={bookRef}>
+            <Box sx={{ px: 2, pt: 1.5, pb: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <MenuBook color="action" />
+                <Typography variant="h6" sx={{ fontSize: '1.05rem', flex: 1 }}>Kassenbuch</Typography>
+                <Typography variant="body2" color="text.secondary">{book.count} {book.count === 1 ? 'Eintrag' : 'Einträge'}</Typography>
+              </Stack>
+              <FilterChips value={period} onChange={setPeriod} fallback="since" options={periodOptions} />
+              {period === 'custom' && (
+                <Stack direction="row" spacing={1.5} sx={{ mt: 1.5 }}>
+                  <DatePicker label="Von" value={range.start} onChange={(v) => setRange((r) => ({ ...r, start: v }))} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
+                  <DatePicker label="Bis" value={range.end} onChange={(v) => setRange((r) => ({ ...r, end: v }))} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
+                </Stack>
+              )}
+            </Box>
+            {listLoading || movLoading ? <Skeleton variant="rectangular" height={160} /> : book.days.length === 0 ? (
+              <Typography color="text.secondary" sx={{ p: 2 }}>Keine Zählungen oder Kassenbewegungen in diesem Zeitraum.</Typography>
+            ) : book.days.map((d) => (
+              <Box key={d.key}>
+                <Typography variant="body2" sx={{ px: 2, py: 0.75, fontWeight: 800, bgcolor: 'action.hover' }}>{dayLabel(d.date)}</Typography>
+                {d.items.map((e) => <BookRow key={`${e.kind}-${e.id}`} e={e} onOpen={setDetail} />)}
+              </Box>
+            ))}
+          </Card>
+        </Box>
+
+        {/* Bank-Details (aufklappbar) */}
+        <Card ref={bankRef}>
+          <Stack direction="row" alignItems="center" spacing={1.5} sx={{ px: 2, py: 1.5, cursor: 'pointer' }} onClick={() => setBankOpen((o) => !o)}>
+            <AccountBalance color="action" />
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="h6" sx={{ fontSize: '1.05rem' }}>Bank-Details</Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>Konten, Abgleiche mit dem Kontoauszug, Herleitung des Bank-Solls</Typography>
+            </Box>
+            {bankOpen ? <ExpandLess /> : <ExpandMore />}
+          </Stack>
+          <Collapse in={bankOpen} unmountOnExit>
+            <Box sx={{ px: 2, pb: 2 }}><BankDetails bank={bank} canManage={canManage} /></Box>
+          </Collapse>
+        </Card>
+      </Stack>
+
+      {/* Details aus dem Kassenbuch */}
+      <Dialog open={!!detail} onClose={() => setDetail(null)} maxWidth="xs" fullWidth fullScreen={isMobile}>
+        {detail && detail.kind === 'COUNT' && (() => {
+          const cc = detail.data;
+          return (
+            <>
+              <DialogTitle>{cc.isOpening ? 'Anfangsbestand' : 'Kassenzählung'}<Typography variant="body2" color="text.secondary">{format(new Date(cc.countedAt), "EEEE, d. MMMM yyyy 'um' HH:mm", { locale: de })}{cc.user?.name ? ` · ${cc.user.name}` : ''}</Typography></DialogTitle>
+              <DialogContent>
+                <Stack spacing={1}>
+                  <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Ist gezählt</Typography><Typography fontWeight={700}>{money(cc.countedTotal)}</Typography></Stack>
+                  {!cc.isOpening && <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Soll</Typography><Typography fontWeight={700}>{money(cc.expectedTotal)}</Typography></Stack>}
+                  {!cc.isOpening && <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Differenz</Typography><Typography fontWeight={800} color={Math.abs(num(cc.difference)) < 0.005 ? 'success.main' : 'error.main'}>{signed(cc.difference)}</Typography></Stack>}
+                  {cc.note && <Alert severity="info" icon={false}>{cc.note}</Alert>}
+                </Stack>
+              </DialogContent>
+              <DialogActions sx={{ px: 3, pb: 2 }}>
+                <Button startIcon={<PictureAsPdf />} onClick={() => pdf(cc)} sx={{ mr: 'auto' }}>PDF</Button>
+                <Button variant="contained" onClick={() => setDetail(null)}>Schließen</Button>
+              </DialogActions>
+            </>
+          );
+        })()}
+        {detail && detail.kind === 'MOVE' && (() => {
+          const m = detail.data;
+          const meta = MOVEMENT_ACTIONS[m.type] || MOVEMENT_ACTIONS.OTHER_INCOME;
+          return (
+            <>
+              <DialogTitle>{meta.title}<Typography variant="body2" color="text.secondary">{format(new Date(m.occurredAt), "EEEE, d. MMMM yyyy 'um' HH:mm", { locale: de })}{m.user?.name ? ` · ${m.user.name}` : ''}</Typography></DialogTitle>
+              <DialogContent>
+                <Stack spacing={1}>
+                  <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Betrag</Typography>
+                    <Typography fontWeight={800} sx={{ textDecoration: m.cancelled ? 'line-through' : 'none' }} color={meta.sign > 0 ? 'success.main' : 'error.main'}>{meta.sign > 0 ? '+' : '−'}{money(m.amount)}</Typography></Stack>
+                  {meta.bank && <Typography variant="body2" color="text.secondary">Wirkt auf Kasse und Bank.</Typography>}
+                  {m.bankAccount && <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Bankkonto</Typography><Typography fontWeight={600}>{m.bankAccount}</Typography></Stack>}
+                  {m.note && <Stack direction="row" justifyContent="space-between" spacing={2}><Typography color="text.secondary">Notiz</Typography><Typography fontWeight={600} sx={{ textAlign: 'right' }}>{m.note}</Typography></Stack>}
+                  {m.cancelled && <Alert severity="warning">Storniert{m.cancelledAt ? ` am ${format(new Date(m.cancelledAt), 'dd.MM.yyyy HH:mm')}` : ''} – zählt nicht mehr zum Soll.</Alert>}
+                </Stack>
+              </DialogContent>
+              <DialogActions sx={{ px: 3, pb: 2 }}>
+                {canCancel && !m.cancelled && (
+                  <Button color="error" startIcon={<DeleteOutline />} disabled={cancelMovement.isPending} onClick={() => cancelMovement.mutate(m.id)} sx={{ mr: 'auto' }}>
+                    {cancelMovement.isPending ? 'Storniert…' : 'Stornieren'}
+                  </Button>
+                )}
+                <Button variant="contained" onClick={() => setDetail(null)}>Schließen</Button>
+              </DialogActions>
+            </>
+          );
+        })()}
       </Dialog>
+
+      <CountDialog open={counting} preview={preview} float={float} canSetFloat={canManage}
+        onClose={() => setCounting(false)}
+        onBookDeposit={(preset) => { setCounting(false); setMovement({ type: 'DEPOSIT_TO_BANK', preset }); }} />
+      <MovementDialog open={!!movement} type={movement?.type} preset={movement?.preset} onClose={() => setMovement(null)} />
+      <BankBalanceDialog open={!!bankDialog} mode={bankDialog || 'check'} cashHasBaseline={!noBaseline}
+        knownAccounts={bank.knownAccounts} onClose={() => setBankDialog(null)} />
     </Box>
   );
 }

@@ -17,6 +17,10 @@ router.get('/preview', authorize(...READ_ROLES), cashCountController.preview);
 // Letzte Zählung
 router.get('/latest', authorize(...READ_ROLES), cashCountController.latest);
 
+// Wechselgeld-Sockel
+router.get('/settings', authorize(...READ_ROLES), cashCountController.getSettings);
+router.put('/settings', authorize('ADMIN', 'ACCOUNTANT'), cashCountController.updateSettings);
+
 // Zählung anlegen
 router.post('/',
   authorize('ADMIN', 'ACCOUNTANT', 'CASHIER'),

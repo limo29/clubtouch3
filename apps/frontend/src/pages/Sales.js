@@ -9,7 +9,7 @@ import { useTheme } from '@mui/material/styles';
 import {
   Search, AttachMoney,
   History, AccountBalanceWallet, LocalBar,
-  Close, TrendingUp, TrendingDown, RestoreFromTrash, ExpandLess, ShoppingCart
+  Close, TrendingUp, TrendingDown, RestoreFromTrash, ExpandLess, ShoppingCart, CreditCard
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
@@ -68,7 +68,7 @@ const Sales = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const queryClient = useQueryClient();
 
-  // Booking Target State: 'CASH', 'OWNER', 'CUSTOMER'
+  // Booking Target State: 'CASH', 'CARD' (SumUp-Terminal, nicht angebunden), 'OWNER', 'CUSTOMER'
   const [bookingTarget, setBookingTarget] = useState({ type: 'CASH' });
 
   // Mobile Tab State
@@ -76,6 +76,7 @@ const Sales = () => {
 
   const [overdraftDialog, setOverdraftDialog] = useState({ open: false, type: 'WARNING', balance: 0, newBalance: 0, amount: 0, limit: 10 });
   const [showOwnerConfirm, setShowOwnerConfirm] = useState(false);
+  const [showCardConfirm, setShowCardConfirm] = useState(false);
 
   const [customerSearch, setCustomerSearch] = useState('');
   // Warenkorb im gemeinsamen Zeilenmodell; der Verkauf setzt nie Kisten (crateQty bleibt 0)
@@ -172,7 +173,9 @@ const Sales = () => {
 
     // Offline Handling
     if (!isOnline) {
-      if (bookingTarget.type === 'CASH') {
+      if (bookingTarget.type === 'CARD') {
+        setShowCardConfirm(true); // auch offline erst nach erfolgreicher Zahlung am Terminal buchen
+      } else if (bookingTarget.type === 'CASH') {
         addTransaction({ paymentMethod: 'CASH', items });
         clearCart();
         showFeedback('Offline: Buchung wurde gespeichert', 'info');
@@ -204,6 +207,8 @@ const Sales = () => {
 
     if (bookingTarget.type === 'CASH') {
       quickSaleMutation.mutate({ paymentMethod: 'CASH', items });
+    } else if (bookingTarget.type === 'CARD') {
+      setShowCardConfirm(true); // erst am SumUp-Terminal kassieren, dann bestätigen
     } else if (bookingTarget.type === 'CUSTOMER' && bookingTarget.data) {
       const allowedOverdraft = 10.0;
       const currentBalance = bookingTarget.data.balance;
@@ -247,6 +252,7 @@ const Sales = () => {
   // Handy: nach der Wahl schließt sich das Blatt „Wer zahlt?“
   const setTargetCash = () => { setBookingTarget({ type: 'CASH' }); if (isMobile) setMobileTab(1); };
   const setTargetOwner = () => { setBookingTarget({ type: 'OWNER' }); if (isMobile) setMobileTab(1); };
+  const setTargetCard = () => { setBookingTarget({ type: 'CARD' }); if (isMobile) setMobileTab(1); };
   const setTargetCustomer = (c) => { setBookingTarget({ type: 'CUSTOMER', data: c }); if (isMobile) setMobileTab(1); };
 
   const isTargetSelected = (type, id) => {
@@ -365,9 +371,14 @@ const Sales = () => {
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
       <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
         <Stack spacing={1.5} sx={{ mb: 2 }}>
-          <Button variant={isTargetSelected('CASH') ? 'contained' : 'outlined'} color="success" fullWidth size="large" startIcon={<AttachMoney />} onClick={setTargetCash} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
-            Bar bezahlen
-          </Button>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+            <Button variant={isTargetSelected('CASH') ? 'contained' : 'outlined'} color="success" fullWidth size="large" startIcon={<AttachMoney />} onClick={setTargetCash} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
+              Bar
+            </Button>
+            <Button variant={isTargetSelected('CARD') ? 'contained' : 'outlined'} color="info" fullWidth size="large" startIcon={<CreditCard />} onClick={setTargetCard} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
+              Karte
+            </Button>
+          </Box>
           <Button variant={isTargetSelected('OWNER') ? 'contained' : 'outlined'} color="warning" fullWidth size="large" startIcon={<LocalBar />} onClick={setTargetOwner} sx={{ justifyContent: 'flex-start', fontWeight: 'bold' }}>
             Auf den Wirt
           </Button>
@@ -426,9 +437,10 @@ const Sales = () => {
   const newBalance = targetCustomer ? targetCustomer.balance - total : null;
   const bookColor = bookingTarget.type === 'CUSTOMER'
     ? (newBalance !== null && newBalance < 0 ? (newBalance < -10 ? 'error' : 'warning') : 'primary')
-    : bookingTarget.type === 'OWNER' ? 'warning' : 'success';
+    : bookingTarget.type === 'OWNER' ? 'warning' : bookingTarget.type === 'CARD' ? 'info' : 'success';
   const bookLabel = (() => {
     if (bookingTarget.type === 'CASH') return 'Bar bezahlen';
+    if (bookingTarget.type === 'CARD') return 'Mit Karte bezahlt';
     if (bookingTarget.type === 'OWNER') return 'Auf Wirt buchen';
     if (!targetCustomer) return 'Kunde?';
     const name = targetCustomer.nickname || targetCustomer.name.split(' ')[0];
@@ -484,11 +496,12 @@ const Sales = () => {
             </Avatar>
           ) : bookingTarget.type === 'OWNER'
             ? <LocalBar color="warning" />
+            : bookingTarget.type === 'CARD' ? <CreditCard color="info" />
             : <AttachMoney color="success" />}
           <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>Wer zahlt?</Typography>
             <Typography fontWeight={800} sx={{ lineHeight: 1.25, overflowWrap: 'anywhere' }}>
-              {targetCustomer ? (targetCustomer.nickname || targetCustomer.name) : bookingTarget.type === 'OWNER' ? 'Auf den Wirt' : 'Bar'}
+              {targetCustomer ? (targetCustomer.nickname || targetCustomer.name) : bookingTarget.type === 'OWNER' ? 'Auf den Wirt' : bookingTarget.type === 'CARD' ? 'Karte (SumUp)' : 'Bar'}
             </Typography>
           </Box>
           {targetCustomer && (
@@ -616,6 +629,15 @@ const Sales = () => {
               </Button>
               <Button
                 size="small"
+                variant={topUpMethod === 'CARD' ? 'contained' : 'text'}
+                color={topUpMethod === 'CARD' ? 'info' : 'inherit'}
+                onClick={() => setTopUpMethod('CARD')}
+                sx={{ py: 0.5, minWidth: 60, fontWeight: 700 }}
+              >
+                Karte
+              </Button>
+              <Button
+                size="small"
                 variant={topUpMethod === 'TRANSFER' ? 'contained' : 'text'}
                 color={topUpMethod === 'TRANSFER' ? 'info' : 'inherit'}
                 onClick={() => setTopUpMethod('TRANSFER')}
@@ -712,7 +734,7 @@ const Sales = () => {
 
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="body1" fontWeight={700} noWrap sx={{ textDecoration: t.cancelled ? 'line-through' : 'none' }}>
-                          {isAuslage ? (t.reference || 'Auslage') : isMigration && isPositive ? 'Übernahme Altsystem' : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}
+                          {isAuslage ? (t.reference || 'Auslage') : isMigration && isPositive ? 'Übernahme Altsystem' : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}{t.method === 'CARD' && '(Karte)'}
                         </Typography>
 
                         {/* Sold Items List */}
@@ -831,6 +853,33 @@ const Sales = () => {
           )}
         </DialogActions>
       </Dialog>
+      <Dialog open={showCardConfirm} onClose={() => setShowCardConfirm(false)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3, p: 1 } }}>
+        <DialogTitle sx={{ textAlign: 'center', fontWeight: 900, color: 'info.main', fontSize: '1.4rem' }}>
+          Kartenzahlung
+        </DialogTitle>
+        <DialogContent sx={{ textAlign: 'center', py: 2 }}>
+          <Typography variant="h3" fontWeight={900} color="info.main" sx={{ mb: 1.5 }}>{money(total)}</Typography>
+          <Typography variant="body1">Am SumUp-Terminal kassieren und hier bestätigen, sobald die Zahlung durch ist.</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Das Geld kommt nicht in die Kasse, SumUp zahlt es aufs Bankkonto aus.</Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2, px: 2, gap: 1 }}>
+          <Button variant="outlined" color="inherit" fullWidth onClick={() => setShowCardConfirm(false)}>Abbrechen</Button>
+          <Button variant="contained" color="info" fullWidth sx={{ fontWeight: 800 }}
+            onClick={() => {
+              const items = toSalePayload(lines);
+              if (isOnline) {
+                quickSaleMutation.mutate({ paymentMethod: 'CARD', items });
+              } else {
+                addTransaction({ paymentMethod: 'CARD', items });
+                clearCart();
+                showFeedback('Offline: Kartenzahlung wurde gespeichert', 'info');
+              }
+              setShowCardConfirm(false);
+            }}>
+            Zahlung erfolgreich
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Dialog open={showOwnerConfirm} onClose={() => setShowOwnerConfirm(false)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3, p: 1 } }}>
         <DialogTitle sx={{ textAlign: 'center', fontWeight: 900, color: 'warning.main', fontSize: '1.4rem' }}>
           Auf den Wirt?
@@ -865,7 +914,7 @@ const Sales = () => {
         onClose={(e, reason) => { if (reason !== 'clickaway') setLastSale(null); }}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
         sx={{ top: { xs: 72, sm: 80 } }}
-        message={lastSale ? `Verkauft: ${money(lastSale.total)} ${lastSale.target.type === 'CASH' ? 'bar' : lastSale.target.type === 'OWNER' ? 'auf den Wirt' : `auf ${lastSale.target.data?.nickname || lastSale.target.data?.name || 'Kunde'}`}` : ''}
+        message={lastSale ? `Verkauft: ${money(lastSale.total)} ${lastSale.target.type === 'CASH' ? 'bar' : lastSale.target.type === 'CARD' ? 'mit Karte' : lastSale.target.type === 'OWNER' ? 'auf den Wirt' : `auf ${lastSale.target.data?.nickname || lastSale.target.data?.name || 'Kunde'}`}` : ''}
         action={
           <Button color="inherit" size="small" disabled={undoSaleMutation.isPending} sx={{ fontWeight: 800 }}
             onClick={() => { undoSaleMutation.mutate(lastSale); setLastSale(null); }}>

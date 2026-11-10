@@ -275,7 +275,7 @@ const validateTopUp = [
     .isFloat({ min: 0.01, max: 500 })
     .withMessage('Betrag muss zwischen 0.01 und 500 Euro liegen'),
   body('method')
-    .isIn(['CASH', 'TRANSFER'])
+    .isIn(['CASH', 'TRANSFER', 'CARD'])
     .withMessage('Ungültige Zahlungsmethode'),
   body('reference')
     .optional()
@@ -334,7 +334,9 @@ const validateCustomerGroupUpdate = [
 const CASH_DENOMINATIONS = ['200', '100', '50', '20', '10', '5', '2', '1', '0.5', '0.2', '0.1', '0.05', '0.02', '0.01'];
 const validateCashCount = [
   body('denominations')
-    .custom((value) => {
+    .custom((value, { req }) => {
+      // Anfangsbestand darf auch nur als Betrag kommen
+      if ((value === undefined || value === null) && (req.body.isOpening === true || req.body.isOpening === 'true')) return true;
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('Stückelung (denominations) muss ein Objekt sein');
       }
@@ -425,7 +427,7 @@ const validateCashMovement = [
 
 const validateSale = [
   body('paymentMethod')
-    .isIn(['CASH', 'ACCOUNT'])
+    .isIn(['CASH', 'ACCOUNT', 'CARD'])
     .withMessage('Ungültige Zahlungsmethode'),
   body('customerId')
     .if(body('paymentMethod').equals('ACCOUNT'))
@@ -452,7 +454,7 @@ const validateQuickSale = [
     .withMessage('Menge muss mindestens 1 sein'),
   body('paymentMethod')
     .optional()
-    .isIn(['CASH', 'ACCOUNT'])
+    .isIn(['CASH', 'ACCOUNT', 'CARD'])
     .withMessage('Ungültige Zahlungsmethode')
 ];
 

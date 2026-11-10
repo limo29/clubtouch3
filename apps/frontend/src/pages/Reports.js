@@ -94,10 +94,10 @@ function DailyPreview({ data, isLoading, error }) {
         </Typography>
       )}
       <Grid container spacing={2} sx={{ mb: 2 }}>
-        <Grid size={{ xs: 6, lg: 3 }}><KPICard title="Umsatz" value={money(s.totalRevenue)} icon={EuroSymbol} color="primary" sx={kpiSx} /></Grid>
+        <Grid size={{ xs: 6, lg: 3 }}><KPICard title="Umsatz" value={money(s.totalRevenue)} icon={EuroSymbol} color="primary" sx={kpiSx} subTitle={num(s.cardRevenue) > 0 ? `davon Karte ${money(s.cardRevenue)}` : undefined} /></Grid>
         <Grid size={{ xs: 6, lg: 3 }}><KPICard title="Bar" value={money(s.cashRevenue)} icon={EuroSymbol} color="success" sx={kpiSx} subTitle={`${s.cashTransactions ?? 0} Verkäufe`} /></Grid>
         <Grid size={{ xs: 6, lg: 3 }}><KPICard title="Konto" value={money(s.accountRevenue)} icon={AccountBalance} color="info" sx={kpiSx} subTitle={`${s.accountTransactions ?? 0} Verkäufe`} /></Grid>
-        <Grid size={{ xs: 6, lg: 3 }}><KPICard title="Aufladungen" value={money(s.topUpsTotal)} icon={AddCard} color="warning" sx={kpiSx} subTitle={`bar ${money(s.topUpsCash)} · Überw. ${money(s.topUpsTransfer)}`} /></Grid>
+        <Grid size={{ xs: 6, lg: 3 }}><KPICard title="Aufladungen" value={money(s.topUpsTotal)} icon={AddCard} color="warning" sx={kpiSx} subTitle={`bar ${money(s.topUpsCash)} · Überw. ${money(s.topUpsTransfer)}${num(s.topUpsCard) ? ` · Karte ${money(s.topUpsCard)}` : ''}`} /></Grid>
       </Grid>
 
       <Grid container spacing={2}>
@@ -142,7 +142,7 @@ function DailyPreview({ data, isLoading, error }) {
                     <TableRow key={t.id}>
                       <TableCell>{fmtTime(t.createdAt)}</TableCell>
                       <TableCell>{t.customer || '—'}</TableCell>
-                      <TableCell>{t.method === 'CASH' ? 'Bar' : t.method === 'TRANSFER' ? 'Überweisung' : t.method || '—'}</TableCell>
+                      <TableCell>{t.method === 'CASH' ? 'Bar' : t.method === 'TRANSFER' ? 'Überweisung' : t.method === 'CARD' ? 'Karte' : t.method || '—'}</TableCell>
                       <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{money(t.amount)}</TableCell>
                     </TableRow>
                   ))}

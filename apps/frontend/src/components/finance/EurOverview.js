@@ -32,6 +32,7 @@ export default function EurOverview({ startDate, endDate }) {
   const profit = num(summary.profit);
   const details = data?.details || {};
   const incomeByType = details.incomeByType || {};
+  const cardFeesHint = details.cardFeesHint;
   const nonRevenue = data?.nonRevenue || {};
   const liquidity = data?.liquidity || {};
   const unpaidPurchase = data?.liabilities?.unpaidPurchaseDocuments || {};
@@ -55,6 +56,14 @@ export default function EurOverview({ startDate, endDate }) {
           Belege prüfen
         </Button>
       </Stack>
+
+      {cardFeesHint && (
+        <Alert severity="info" variant="outlined">
+          Kartenzahlungen ({money(cardFeesHint.gross)}) zählen voll als Einnahme. Die SumUp-Gebühren
+          {cardFeesHint.percent > 0 ? ` (geschätzt ca. ${money(cardFeesHint.estimated)})` : ''} sind hier noch nicht als Ausgabe enthalten.
+          Bitte die SumUp-Abrechnung als Beleg unter Einkauf erfassen.
+        </Alert>
+      )}
 
       <Dialog
         open={receiptsOpen}
@@ -101,6 +110,7 @@ export default function EurOverview({ startDate, endDate }) {
               rows={[
                 [`Barverkäufe (${details.transactionCounts?.cash ?? 0})`, money(incomeByType.cash)],
                 [`Kundenkonto (${details.transactionCounts?.account ?? 0})`, money(incomeByType.account)],
+                ...(num(incomeByType.card) > 0 ? [[`Karte SumUp (${details.transactionCounts?.card ?? 0})`, money(incomeByType.card)]] : []),
                 ['Bezahlte Kundenrechnungen', money(incomeByType.invoices)],
               ]}
               footer={['Gesamt', money(summary.totalIncome)]}

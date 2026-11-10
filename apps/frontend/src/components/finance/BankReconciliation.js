@@ -39,7 +39,7 @@ function Row({ label, value, strong, color, rule, indent, compact }) {
   return (
     <TableRow sx={rule ? { '& td': { borderTop: 2, borderTopColor: 'divider' } } : undefined}>
       <TableCell sx={{ border: 0, py: compact ? 0.5 : 0.75, pl: indent ? 3 : 2, fontWeight: strong ? 800 : 400 }}>{label}</TableCell>
-      <TableCell align="right" sx={{ border: 0, py: compact ? 0.5 : 0.75, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', fontWeight: strong ? 800 : 400, color }}>{value}</TableCell>
+      <TableCell align="right" sx={{ border: 0, py: compact ? 0.5 : 0.75, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', fontWeight: strong ? 800 : 400, color: value === money(0) ? undefined : color }}>{value}</TableCell>
     </TableRow>
   );
 }
@@ -60,7 +60,9 @@ export default function BankReconciliation({ data, actual, compact = false, load
 
   const openingLabel = data.openingSource === 'VORJAHRESABSCHLUSS'
     ? `Bankstand laut Abschluss „${data.openingFiscalYear?.name || 'Vorjahr'}“ (${fmtDate(data.openingFiscalYear?.endDate)})`
-    : 'Bankstand Vorjahr (kein abgeschlossenes Vorjahr, Start bei 0,00 €)';
+    : data.openingSource === 'ANFANGSSTAND'
+      ? `Anfangsstand vom ${fmtDate(data.openingBalance?.date)}`
+      : 'Kein Anfangsstand erfasst – Start bei 0,00 €';
 
   return (
     <Stack spacing={compact ? 1 : 1.5}>
@@ -70,6 +72,8 @@ export default function BankReconciliation({ data, actual, compact = false, load
           <Row compact={compact} indent label={`+ Einzahlungen aus der Kasse (${cnt(inf.bankDeposits)})`} value={money(tot(inf.bankDeposits))} color="success.main" />
           <Row compact={compact} indent label={`+ Aufladungen per Überweisung (${cnt(inf.topUpsTransfer)})`} value={money(tot(inf.topUpsTransfer))} color="success.main" />
           <Row compact={compact} indent label={`+ Bezahlte Kundenrechnungen per Überweisung (${cnt(inf.invoicesPaid)})`} value={money(tot(inf.invoicesPaid))} color="success.main" />
+          {cnt(inf.cardPayments) > 0 && <Row compact={compact} indent label={`+ Kartenzahlungen SumUp (${cnt(inf.cardPayments)})`} value={money(tot(inf.cardPayments))} color="success.main" />}
+          {tot(outf.cardFees) > 0 && <Row compact={compact} indent label={`− SumUp-Gebühren ${String(outf.cardFees.percent).replace('.', ',')} % (geschätzt)`} value={money(-tot(outf.cardFees))} color="error.main" />}
           <Row compact={compact} indent label={`− Einkäufe per Überweisung (${cnt(outf.purchasesTransfer)})`} value={money(-tot(outf.purchasesTransfer))} color="error.main" />
           <Row compact={compact} indent label={`− Abhebungen für die Kasse (${cnt(outf.bankWithdrawals)})`} value={money(-tot(outf.bankWithdrawals))} color="error.main" />
           <Row compact={compact} label="Bank-Soll laut App" value={money(data.expected)} strong rule />

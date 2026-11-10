@@ -35,6 +35,7 @@ model User {
   purchaseDocuments PurchaseDocument[]
   cashCounts        CashCount[]
   cashMovements     CashMovement[]
+  bankBalances      BankBalance[]
 }
 
 // Kundengruppen (z. B. KjG-Gruppen „Panther", „Füchse")
@@ -244,6 +245,7 @@ enum PaymentMethod {
   ACCOUNT
   INVOICE
   TRANSFER
+  CARD // Kartenzahlung am (nicht angebundenen) SumUp-Terminal: Umsatz, nicht Kasse, Auszahlung aufs Bankkonto
 }
 
 enum TopUpMethod {
@@ -251,6 +253,7 @@ enum TopUpMethod {
   TRANSFER
   REIMBURSEMENT // Auslage: Lieferantenrechnung vom Kunden bezahlt, dem Konto gutgeschrieben (kein Geldeingang)
   MIGRATION // Startguthaben aus der Übernahme von Clubtouch 2.0 (kein Geldeingang)
+  CARD // Aufladung per Karte am SumUp-Terminal (Geld geht aufs Bankkonto)
 }
 
 enum StockMovementType {
@@ -453,6 +456,7 @@ model CashCount {
   difference    Decimal  @db.Decimal(10, 2) // countedTotal - expectedTotal
   breakdownJson Json     @default("{}") // Soll-Herleitung zum Zeitpunkt der Zählung (eingefroren)
   note          String?
+  isOpening     Boolean  @default(false) // Anfangsbestand beim Start: Soll = Ist, keine Differenz
   createdAt     DateTime @default(now())
 
   userId String
@@ -475,6 +479,23 @@ enum CashMovementType {
   WITHDRAWAL_FROM_BANK // Bargeld von der Bank abgehoben:   Kasse +
   OTHER_INCOME // Sonstige Bareinnahme (Betriebseinnahme): Kasse +
   OTHER_EXPENSE // Sonstige Barausgabe  (Betriebsausgabe):  Kasse -
+}
+
+// Kontostand laut Kontoauszug: Anfangsstand beim Start mit ClubTouch3 (isOpening) oder Abgleich unterm Jahr.
+// Die Bank-Abstimmung rechnet ohne abgeschlossenes Vorjahr ab dem letzten Anfangsstand.
+model BankBalance {
+  id           String   @id @default(uuid())
+  date         DateTime // Stand zu diesem Zeitpunkt
+  isOpening    Boolean  @default(false)
+  accountsJson Json     @default("[]") // [{name, iban?, balance}]
+  total        Decimal  @db.Decimal(10, 2)
+  note         String?
+  createdAt    DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([date])
 }
 
 model CashMovement {

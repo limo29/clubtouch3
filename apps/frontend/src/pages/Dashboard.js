@@ -14,7 +14,7 @@ import {
   Paper,
   Tooltip,
 } from "@mui/material";
-import {
+import { CreditCard,
   AttachMoney,
   Inventory,
   Warning,
@@ -217,6 +217,7 @@ export default function Dashboard() {
   const pieData = [
     { name: "Bar", value: sum.cashRevenue, color: theme.palette.success.main },
     { name: "Kundenkonto", value: sum.accountRevenue, color: theme.palette.primary.main },
+    { name: "Karte", value: sum.cardRevenue || 0, color: theme.palette.info.main },
     { name: "Auf den Wirt", value: sum.ownerRevenue || 0, color: theme.palette.warning.main },
   ].filter(d => d.value > 0);
 
@@ -234,6 +235,7 @@ export default function Dashboard() {
     if (tx.type === "OWNER_USE") return { who: "Auf den Wirt", Icon: LocalBar };
     if (tx.type === "EXPIRED") return { who: "Abschreibung", Icon: Inventory };
     if (tx.type === "REFUND") return { who: `Storno${tx.customer ? ` · ${tx.customer.name}` : ""}`, Icon: ReceiptLong };
+    if (tx.paymentMethod === "CARD") return { who: "Kartenzahlung", Icon: CreditCard };
     return { who: tx.customer?.name || "Barverkauf", Icon: tx.paymentMethod === "ACCOUNT" ? AccountBalance : AttachMoney };
   };
   const feedItems = (tx) => (tx.items || []).map((i) => `${Number(i.quantity)}× ${i.article?.name || "Artikel"}`).slice(0, 2).join(", ");
@@ -310,8 +312,9 @@ export default function Dashboard() {
             icon={AccountBalance}
             color="info"
             loading={loadingBank}
-            onClick={() => navigate("/cash-count")}
-            subTitle={bank?.openingSource === "KEIN_VORJAHR" ? `Buchungen seit ${format(new Date(yearStart), "dd.MM.yyyy")}, ohne Anfangsstand` : "laut Buchungen in der App"}
+            onClick={() => navigate("/cash-count?tab=bank")}
+            subTitle={bank?.openingSource === "KEIN_VORJAHR" ? "ohne Anfangsstand – unter Kasse & Bank erfassen"
+              : bank?.openingSource === "ANFANGSSTAND" ? `seit Anfangsstand ${format(new Date(bank.openingBalance.date), "dd.MM.yyyy")}` : "laut Buchungen in der App"}
             sx={{ height: "100%" }}
           />
         </Grid>

@@ -18,7 +18,10 @@ export const num = (v) => {
 export const int = (v) => Math.max(0, Math.trunc(num(v)));
 
 /** "2,50 €" */
-export const money = (v) => moneyFormatter.format(num(v));
+export const money = (v) => {
+  const n = num(v);
+  return moneyFormatter.format(Math.abs(n) < 0.005 ? 0 : n); // nie „-0,00 €“
+};
 
 /** "1.234,5" */
 export const fmtNumber = (v) => numberFormatter.format(num(v));

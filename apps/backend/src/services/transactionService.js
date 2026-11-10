@@ -376,7 +376,8 @@ class TransactionService {
       accountSales,
       cancelledSales,
       topArticles,
-      hourlyDistribution
+      hourlyDistribution,
+      cardSales
     ] = await Promise.all([
       // Gesamtumsatz
       prisma.transaction.aggregate({
@@ -479,7 +480,13 @@ class TransactionService {
         GROUP BY 1
       ) h
       ORDER BY CASE WHEN hour < ${startHour} THEN hour + 24 ELSE hour END
-    `
+    `,
+      // Karten-Umsatz (SumUp)
+      prisma.transaction.aggregate({
+        where: { type: 'SALE', paymentMethod: 'CARD', cancelled: false, createdAt: { gte: startOfDay, lte: endOfDay } },
+        _sum: { totalAmount: true },
+        _count: true
+      })
     ]);
 
     function safeNumber(value) {
@@ -492,7 +499,7 @@ class TransactionService {
     const [topUps, refunds, dayTransactions] = await Promise.all([
       // Auslagen (REIMBURSEMENT) sind keine Aufladung mit Geldeingang und gehören nicht in den Tagesabschluss
       prisma.accountTopUp.findMany({
-        where: { method: { in: ['CASH', 'TRANSFER'] }, createdAt: { gte: startOfDay, lte: endOfDay } },
+        where: { method: { in: ['CASH', 'TRANSFER', 'CARD'] }, createdAt: { gte: startOfDay, lte: endOfDay } },
         include: { customer: { select: { name: true, nickname: true } } },
         orderBy: { createdAt: 'asc' }
       }),
@@ -518,6 +525,7 @@ class TransactionService {
 
     const topUpsCash = topUps.filter(t => t.method === 'CASH').reduce((a, t) => a + safeNumber(t.amount), 0);
     const topUpsTransfer = topUps.filter(t => t.method === 'TRANSFER').reduce((a, t) => a + safeNumber(t.amount), 0);
+    const topUpsCard = topUps.filter(t => t.method === 'CARD').reduce((a, t) => a + safeNumber(t.amount), 0);
 
     return {
       date: formatLocalDate(businessDate),
@@ -530,11 +538,14 @@ class TransactionService {
         cashTransactions: cashSales._count || 0,
         accountRevenue: safeNumber(accountSales._sum.totalAmount),
         accountTransactions: accountSales._count || 0,
+        cardRevenue: safeNumber(cardSales._sum.totalAmount),
+        cardTransactions: cardSales._count || 0,
         cancelledRevenue: safeNumber(cancelledSales._sum.totalAmount),
         cancelledTransactions: cancelledSales._count || 0,
         topUpsCash,
         topUpsTransfer,
-        topUpsTotal: topUpsCash + topUpsTransfer,
+        topUpsCard,
+        topUpsTotal: topUpsCash + topUpsTransfer + topUpsCard,
         topUpsCount: topUps.length
       },
       topArticles: topArticles.map(a => ({ ...a, quantity_sold: safeNumber(a.quantity_sold), revenue: safeNumber(a.revenue) })),

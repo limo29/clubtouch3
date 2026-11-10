@@ -49,19 +49,35 @@ class CashCountController {
   // POST /api/cash-counts
   async create(req, res) {
     try {
-      const { denominations, note } = req.body;
+      const { denominations, note, isOpening, amount } = req.body;
+      const opening = isOpening === true || isOpening === 'true';
+      if (opening && !['ADMIN', 'ACCOUNTANT'].includes(req.user.role)) {
+        return res.status(403).json({ error: 'Den Anfangsbestand dürfen nur Admin und Kassenwart erfassen.' });
+      }
       const cashCount = await cashCountService.createCount({
-        denominations, note, userId: req.user.id
+        denominations, note, userId: req.user.id, isOpening: opening, amount
       });
       res.status(201).json({ cashCount });
     } catch (error) {
       console.error('Create cash count error:', error);
-      const known = /Stückelung|Anzahl für|Benutzer fehlt/.test(error.message || '');
+      const known = /Stückelung|Anzahl für|Benutzer fehlt|Anfangsbestand/.test(error.message || '');
       res.status(known ? 400 : 500).json({
         error: known ? error.message : 'Fehler beim Speichern der Kassenzählung',
         ...(known ? {} : { details: error.message })
       });
     }
+  }
+
+  // GET/PUT /api/cash-counts/settings – Wechselgeld-Sockel
+  async getSettings(req, res) {
+    res.json(await cashCountService.getSettings());
+  }
+
+  async updateSettings(req, res) {
+    const settings = await cashCountService.setSettings(req.body || {});
+    const prisma = require('../utils/prisma');
+    await prisma.auditLog.create({ data: { userId: req.user.id, action: 'CASH_SETTINGS', entityType: 'SystemSetting', entityId: 'cash-settings', changes: settings } });
+    res.json(settings);
   }
 
   // GET /api/cash-counts/:id/pdf

@@ -14,6 +14,7 @@ import { useTheme } from '@mui/material/styles';
 import {
   AccountBalance, AccountBalanceWallet, AttachMoney, Cancel, ChevronRight, DeleteOutline, EventBusy, LocalAtm, LocalBar,
   ReceiptLong, SettingsBackupRestore, Undo,
+ CreditCard
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -48,6 +49,7 @@ const PERIODS = [
 const KINDS = [
   { key: 'CASH', label: 'Bar', test: (t) => t.type === 'SALE' && t.paymentMethod === 'CASH' },
   { key: 'ACCOUNT', label: 'Kundenkonto', test: (t) => t.type === 'SALE' && t.paymentMethod === 'ACCOUNT' },
+  { key: 'CARD', label: 'Karte', test: (t) => t.type === 'SALE' && t.paymentMethod === 'CARD', hideEmpty: true },
   { key: 'OWNER_USE', label: 'Auf den Wirt', test: (t) => t.type === 'OWNER_USE' },
   { key: 'EXPIRED', label: 'Bruch', test: (t) => t.type === 'EXPIRED' },
   { key: 'TOPUP', label: 'Aufladung', test: (t) => t.type === 'TOPUP' && t.method !== 'MIGRATION' },
@@ -58,6 +60,7 @@ const KINDS = [
 const TOPUP_KIND = {
   CASH: { Icon: LocalAtm, title: 'Aufladung bar' },
   TRANSFER: { Icon: AccountBalance, title: 'Aufladung Überweisung' },
+  CARD: { Icon: CreditCard, title: 'Aufladung Karte' },
   REIMBURSEMENT: { Icon: ReceiptLong, title: 'Auslage (Einkauf)' },
   MIGRATION: { Icon: SettingsBackupRestore, title: 'Übernahme Clubtouch 2.0' },
 };
@@ -78,6 +81,7 @@ const describe = (t) => {
   if (t.type === 'OWNER_USE') return { Icon: LocalBar, title: 'Auf den Wirt', who: 'Auf den Wirt' };
   if (t.type === 'EXPIRED') return { Icon: EventBusy, title: 'Abschreibung', who: 'Abgelaufen / Bruch' };
   if (t.paymentMethod === 'ACCOUNT') return { Icon: AccountBalanceWallet, title: 'Kundenkonto', who: t.customer?.name || 'Kundenkonto' };
+  if (t.paymentMethod === 'CARD') return { Icon: CreditCard, title: 'Karte', who: 'Karte (SumUp)' };
   return { Icon: AttachMoney, title: 'Bar', who: t.customer?.name || 'Bar' };
 };
 const itemsText = (t, max = 3) => {
@@ -220,7 +224,7 @@ export default function Transactions() {
   // Aufladung stornieren: nur echte Bar-/Überweisungs-Aufladungen, die noch nicht storniert sind
   // (Übernahme und Auslagen sind gesperrt, Gegenbuchungen werden nicht erneut storniert)
   const topUpReversed = topUp && all.some((e) => e.type === 'TOPUP' && e.reference === `STORNO:${topUp.id}`);
-  const topUpCancellable = topUp && canCancel && !topUp.storno && ['CASH', 'TRANSFER'].includes(topUp.method) && !topUpReversed;
+  const topUpCancellable = topUp && canCancel && !topUp.storno && ['CASH', 'TRANSFER', 'CARD'].includes(topUp.method) && !topUpReversed;
   const cancelTopUp = useMutation({
     mutationFn: async (u) => (await api.post(`${API_ENDPOINTS.CUSTOMERS}/${u.customerId}/topup/${u.id}/cancel`)).data,
     onSuccess: () => {
@@ -235,7 +239,7 @@ export default function Transactions() {
     <Box sx={{ pb: 6 }}>
       {s && (
         <Grid container spacing={2} sx={{ mb: 1 }}>
-          <Grid size={{ xs: 6, md: 3 }}><KPICard title="Umsatz heute" value={money(s.totalRevenue)} icon={AttachMoney} color="primary" subTitle={`${s.totalTransactions} Verkäufe`} /></Grid>
+          <Grid size={{ xs: 6, md: 3 }}><KPICard title="Umsatz heute" value={money(s.totalRevenue)} icon={AttachMoney} color="primary" subTitle={`${s.totalTransactions} Verkäufe${num(s.cardRevenue) > 0 ? ` · Karte ${money(s.cardRevenue)}` : ''}`} /></Grid>
           <Grid size={{ xs: 6, md: 3 }}><KPICard title="Bar" value={money(s.cashRevenue)} icon={AttachMoney} color="success" subTitle={`${s.cashTransactions} Verkäufe`} /></Grid>
           <Grid size={{ xs: 6, md: 3 }}><KPICard title="Kundenkonto" value={money(s.accountRevenue)} icon={AccountBalanceWallet} color="info" subTitle={`${s.accountTransactions} Verkäufe`} /></Grid>
           <Grid size={{ xs: 6, md: 3 }}><KPICard title="Storniert" value={s.cancelledTransactions} icon={Cancel} color="error" subTitle={money(s.cancelledRevenue)} /></Grid>

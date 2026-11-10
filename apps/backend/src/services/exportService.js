@@ -59,7 +59,7 @@ class ExportService {
   _csvNum = (n, digits = 2) => (n === null || n === undefined || n === '') ? '' : Number(n).toFixed(digits).replace('.', ',');
   _csvDateTime = (d) => d ? this._fmtDateTime(d) : '';
   _paymentLabel(pm) {
-    return ({ CASH: 'Bar', ACCOUNT: 'Kundenkonto', INVOICE: 'Rechnung', TRANSFER: 'Überweisung' })[pm] || (pm || '—');
+    return ({ CASH: 'Bar', ACCOUNT: 'Kundenkonto', INVOICE: 'Rechnung', TRANSFER: 'Überweisung', CARD: 'Karte' })[pm] || (pm || '—');
   }
   _invoiceStatusLabel(st) {
     return ({ DRAFT: 'Entwurf', SENT: 'Versendet', PAID: 'Bezahlt', CANCELLED: 'Storniert' })[st] || (st || '—');
@@ -482,12 +482,14 @@ class ExportService {
         this._kvList(doc, theme, [
           { label: `Bar-Umsatz (${sm.cashTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.cashRevenue) },
           { label: `Kundenkonto-Umsatz (${sm.accountTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.accountRevenue) },
+          ...(Number(sm.cardTransactions || 0) > 0 ? [{ label: `Karten-Umsatz SumUp (${sm.cardTransactions} Verkäufe)`, value: this._fmtEUR(sm.cardRevenue) }] : []),
           { label: `Gesamtumsatz (${sm.totalTransactions || 0} Verkäufe)`, value: this._fmtEUR(sm.totalRevenue), bold: true, color: theme.color.success, rule: true },
           { spacer: true },
           { label: `Stornierte Verkäufe (${sm.cancelledTransactions || 0})`, value: this._fmtEUR(sm.cancelledRevenue), color: theme.color.danger },
           { spacer: true },
           { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(sm.topUpsCash) },
           { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(sm.topUpsTransfer) },
+          ...(Number(sm.topUpsCard || 0) !== 0 ? [{ label: 'Aufladungen Kundenkonten per Karte (SumUp)', value: this._fmtEUR(sm.topUpsCard) }] : []),
           { label: `Aufladungen gesamt (${sm.topUpsCount || 0})`, value: this._fmtEUR(sm.topUpsTotal), bold: true },
           { spacer: true },
           { label: 'Bargeld-Zufluss des Tages (Bar-Umsatz + Bar-Aufladungen)', value: this._fmtEUR(Number(sm.cashRevenue || 0) + Number(sm.topUpsCash || 0)), bold: true, rule: true }
@@ -498,7 +500,7 @@ class ExportService {
           columns: [
             { header: 'Uhrzeit', width: 70, render: r => timeOf(r.createdAt) },
             { header: 'Kunde', width: 220, render: r => r.customer },
-            { header: 'Art', width: 100, render: r => r.method === 'CASH' ? 'Bar' : 'Überweisung' },
+            { header: 'Art', width: 100, render: r => r.method === 'CASH' ? 'Bar' : r.method === 'CARD' ? 'Karte' : 'Überweisung' },
             { header: 'Referenz', width: 110, render: r => r.reference || '' },
             { header: 'Betrag', width: 90, align: 'right', render: r => this._fmtEUR(r.amount), color: () => theme.color.success }
           ],
@@ -579,7 +581,7 @@ class ExportService {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59, 999);
     // Nur echte Verkäufe: REFUND (negativ), EXPIRED/OWNER_USE (0 €) gehören nicht in den Umsatz
-    const [transactions, cashAgg, accountAgg, categoryStats, topArticles, topUps, expenseAgg] = await Promise.all([
+    const [transactions, cashAgg, accountAgg, categoryStats, topArticles, topUps, expenseAgg, cardAgg] = await Promise.all([
       prisma.transaction.aggregate({
         where: { type: 'SALE', createdAt: { gte: startDate, lte: endDate }, cancelled: false },
         _sum: { totalAmount: true }, _count: true
@@ -621,11 +623,16 @@ class ExportService {
       prisma.purchaseDocument.aggregate({
         where: { type: 'RECHNUNG', paid: true, documentDate: { gte: startDate, lte: endDate } },
         _sum: { totalAmount: true }, _count: true
+      }),
+      prisma.transaction.aggregate({
+        where: { type: 'SALE', paymentMethod: 'CARD', createdAt: { gte: startDate, lte: endDate }, cancelled: false },
+        _sum: { totalAmount: true }, _count: true
       })
     ]);
 
     const topUpCash = Number(topUps.find(t => t.method === 'CASH')?._sum.amount || 0);
     const topUpTransfer = Number(topUps.find(t => t.method === 'TRANSFER')?._sum.amount || 0);
+    const topUpCard = Number(topUps.find(t => t.method === 'CARD')?._sum.amount || 0);
 
     return new Promise((resolve, reject) => {
       try {
@@ -644,6 +651,7 @@ class ExportService {
         this._kvList(doc, theme, [
           { label: `Bar-Umsatz (${cashAgg._count || 0} Verkäufe)`, value: this._fmtEUR(cashAgg._sum.totalAmount) },
           { label: `Kundenkonto-Umsatz (${accountAgg._count || 0} Verkäufe)`, value: this._fmtEUR(accountAgg._sum.totalAmount) },
+          ...((cardAgg._count || 0) > 0 ? [{ label: `Karten-Umsatz SumUp (${cardAgg._count} Verkäufe)`, value: this._fmtEUR(cardAgg._sum.totalAmount) }] : []),
           { label: `Gesamtumsatz (${count} Verkäufe)`, value: this._fmtEUR(total), bold: true, color: theme.color.success, rule: true },
           { label: 'Durchschnitt pro Verkauf', value: this._fmtEUR(count ? total / count : 0) },
           { spacer: true },
@@ -651,7 +659,8 @@ class ExportService {
           { spacer: true },
           { label: 'Aufladungen Kundenkonten bar', value: this._fmtEUR(topUpCash) },
           { label: 'Aufladungen Kundenkonten per Überweisung', value: this._fmtEUR(topUpTransfer) },
-          { label: 'Aufladungen gesamt (kein Umsatz, Verbindlichkeit)', value: this._fmtEUR(topUpCash + topUpTransfer), bold: true }
+          ...(topUpCard ? [{ label: 'Aufladungen Kundenkonten per Karte (SumUp)', value: this._fmtEUR(topUpCard) }] : []),
+          { label: 'Aufladungen gesamt (kein Umsatz, Verbindlichkeit)', value: this._fmtEUR(topUpCash + topUpTransfer + topUpCard), bold: true }
         ], { headerInfo });
 
         this._section(doc, theme, 'Umsatz nach Kategorien', headerInfo);
@@ -784,6 +793,7 @@ class ExportService {
         const eurKvRows = [
           { label: `Barverkäufe (${d.transactionCounts?.cash || 0} Verkäufe)`, value: this._fmtEUR(byType.cash) },
           { label: `Verkäufe über Kundenkonto (${d.transactionCounts?.account || 0} Verkäufe)`, value: this._fmtEUR(byType.account) },
+          ...(Number(byType.card || 0) > 0 ? [{ label: `Kartenzahlungen SumUp (${d.transactionCounts?.card || 0} Verkäufe)`, value: this._fmtEUR(byType.card) }] : []),
           { label: `Bezahlte Kundenrechnungen (${(d.paidInvoices || []).length})`, value: this._fmtEUR(byType.invoices) }
         ];
         if ((byType.otherCash || 0) > 0 || (d.otherIncome && d.otherIncome.count > 0)) {
@@ -1163,6 +1173,7 @@ class ExportService {
         if (s.incomeByType) {
           eurRows.push({ label: 'Barverkäufe', value: this._fmtEUR(byType.cash) });
           eurRows.push({ label: 'Verkäufe über Kundenkonto', value: this._fmtEUR(byType.account) });
+          if (Number(byType.card || 0) > 0) eurRows.push({ label: 'Kartenzahlungen SumUp', value: this._fmtEUR(byType.card) });
           eurRows.push({ label: 'Bezahlte Kundenrechnungen', value: this._fmtEUR(byType.invoices) });
           if (cm && cm.otherIncome && (Number(cm.otherIncome.total || 0) > 0 || Number(cm.otherIncome.count || 0) > 0)) {
             eurRows.push({ label: `Sonstige Bareinnahmen (${cm.otherIncome.count || 0})`, value: this._fmtEUR(cm.otherIncome.total || 0), color: theme.color.success });
@@ -1236,12 +1247,16 @@ class ExportService {
           const tot = (x) => Number((x && x.total) || 0);
           const openingLabel = br.openingSource === 'VORJAHRESABSCHLUSS'
             ? `Bankstand laut Abschluss "${br.openingFiscalYear?.name || 'Vorjahr'}" (${this._fmtDate(br.openingFiscalYear?.endDate)})`
-            : 'Bankstand Vorjahr (kein abgeschlossenes Vorjahr, Start bei 0,00 €)';
+            : br.openingSource === 'ANFANGSSTAND'
+              ? `Anfangsstand vom ${this._fmtDate(br.openingBalance?.date)}`
+              : 'Kein Anfangsstand erfasst (Start bei 0,00 €)';
           const brRows = [
             { label: openingLabel, value: this._fmtEUR(br.opening), bold: true },
             { label: `+ Einzahlungen aus der Kasse (${cnt(inf.bankDeposits)})`, value: this._fmtEUR(tot(inf.bankDeposits)), color: theme.color.success },
             { label: `+ Aufladungen Kundenkonten per Überweisung (${cnt(inf.topUpsTransfer)})`, value: this._fmtEUR(tot(inf.topUpsTransfer)), color: theme.color.success },
             { label: `+ Bezahlte Kundenrechnungen per Überweisung (${cnt(inf.invoicesPaid)})`, value: this._fmtEUR(tot(inf.invoicesPaid)), color: theme.color.success },
+            ...(cnt(inf.cardPayments) ? [{ label: `+ Kartenzahlungen SumUp (${cnt(inf.cardPayments)})`, value: this._fmtEUR(tot(inf.cardPayments)), color: theme.color.success }] : []),
+            ...(tot(outf.cardFees) ? [{ label: `- SumUp-Gebühren ${outf.cardFees.percent} % (geschätzt)`, value: this._fmtEUR(-tot(outf.cardFees)), color: theme.color.danger }] : []),
             { label: `- Per Überweisung bezahlte Lieferantenrechnungen (${cnt(outf.purchasesTransfer)})`, value: this._fmtEUR(-tot(outf.purchasesTransfer)), color: theme.color.danger },
             { label: `- Abhebungen für die Kasse (${cnt(outf.bankWithdrawals)})`, value: this._fmtEUR(-tot(outf.bankWithdrawals)), color: theme.color.danger },
             { label: 'Bank-Soll laut App', value: this._fmtEUR(br.expected), bold: true, rule: true }

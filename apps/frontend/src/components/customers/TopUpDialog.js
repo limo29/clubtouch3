@@ -64,6 +64,7 @@ export default function TopUpDialog({ customer, open, onClose }) {
             InputProps={{ endAdornment: <InputAdornment position="end">€</InputAdornment>, sx: { fontSize: '1.25rem', fontWeight: 700 } }} />
           <ToggleButtonGroup exclusive fullWidth value={method} onChange={(e, v) => v && setMethod(v)} color="primary">
             <ToggleButton value="CASH" sx={{ fontWeight: 700 }}>Bar</ToggleButton>
+            <ToggleButton value="CARD" sx={{ fontWeight: 700 }}>Karte</ToggleButton>
             <ToggleButton value="TRANSFER" sx={{ fontWeight: 700 }}>Überweisung</ToggleButton>
           </ToggleButtonGroup>
           <TextField label="Bemerkung (optional)" value={reference} onChange={(e) => setReference(e.target.value)} />

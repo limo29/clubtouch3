@@ -15,6 +15,8 @@ export const PERMISSIONS = {
   invoiceSettings: ['ADMIN'],
   manageFiscalYears: ['ADMIN', 'ACCOUNTANT'],      // Geschäftsjahr anlegen und abschließen
   cancelCashMovements: ['ADMIN', 'ACCOUNTANT'],
+  countCash: ['ADMIN', 'ACCOUNTANT', 'CASHIER'],   // Kasse zählen, Kassenbewegungen buchen
+  manageBank: ['ADMIN', 'ACCOUNTANT'],             // Anfangsstände, Kontostand-Abgleich, Wechselgeld-Sockel
   editClubscore: ['ADMIN', 'CASHIER'],             // Ziele, Anzeige-Einstellung
   resetClubscore: ['ADMIN'],
   ads: ['ADMIN', 'CASHIER'],                       // Werbung / Slides
