@@ -48,4 +48,5 @@ RUN mkdir -p uploads && chown -R nodejs:nodejs uploads
 EXPOSE 8080
 # Start the application
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["/bin/sh", "-c", "npm run prisma:migrate:deploy && node src/server.js"]
+# Migrationen, dann der Seed (legt nur Fehlendes an: ersten Admin, Artikelkatalog), dann der Server
+CMD ["/bin/sh", "-c", "npm run prisma:migrate:deploy && node prisma/seed.js && node src/server.js"]

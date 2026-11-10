@@ -121,7 +121,7 @@ Ads / digital signage: `AdSlide` rows are either an uploaded file (`imageUrl` un
 
 ### Deployment
 
-Railway (`railway.toml`) deploys two services from the per-app Dockerfiles. The backend container runs `prisma migrate deploy` then `node src/server.js`. The frontend container builds the CRA app and serves it with nginx; `nginx.conf` is an envsubst template that proxies `/api`, `/uploads` and `/socket.io` to `$BACKEND_URL`, so the SPA only talks to same-origin paths.
+Railway (`railway.toml`) deploys two services from the per-app Dockerfiles. The backend container runs `prisma migrate deploy`, then the idempotent seed, then `node src/server.js`; on a database without users the start fails on purpose until `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` are set (production has no default password). The frontend container builds the CRA app and serves it with nginx; `nginx.conf` is an envsubst template that proxies `/api`, `/uploads` and `/socket.io` to `$BACKEND_URL`, so the SPA only talks to same-origin paths.
 
 ## Repo notes
 
