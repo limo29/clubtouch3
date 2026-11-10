@@ -12,12 +12,10 @@ export default defineRailway(() => {
   const postgresVolume = volume("postgres-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "europe-west4-drams3a", sizeMB: 500 });
   const frontend = service("frontend", {
     source: github("limo29/clubtouch3", { branch: "main", checkSuites: false, rootDirectory: "/apps/frontend" }),
-    build: { builder: "DOCKERFILE" },
     replicas: { "europe-west4-drams3a": 1 },
   });
   const backend = service("backend", {
     source: github("limo29/clubtouch3", { branch: "main", checkSuites: false, rootDirectory: "/apps/backend" }),
-    build: { builder: "DOCKERFILE" },
     replicas: { "europe-west4-drams3a": 1 },
     volumeMounts: { "/app/uploads": backendVolume },
   });
