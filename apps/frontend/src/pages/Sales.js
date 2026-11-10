@@ -688,10 +688,11 @@ const Sales = () => {
               {historyData.map(t => {
                 const isTopUp = t.type === 'TOPUP';
                 const isAuslage = t.method === 'REIMBURSEMENT';
+                const isMigration = t.method === 'MIGRATION'; // Startguthaben aus Clubtouch 2.0: nicht stornierbar
                 // Gegenbuchungen (Storno einer Aufladung/Auslage) sind negative TopUps
                 const isPositive = isTopUp && Number(t.amount) >= 0;
                 // Auslagen werden nur über die Lieferantenrechnung zurückgebucht, Gegenbuchungen nicht erneut storniert
-                const canCancel = !t.cancelled && !isAuslage && !(isTopUp && Number(t.amount) < 0);
+                const canCancel = !t.cancelled && !isAuslage && !isMigration && !(isTopUp && Number(t.amount) < 0);
                 return (
                   <Card key={t.id} elevation={0} sx={{
                     border: '1px solid', borderColor: 'divider',
@@ -711,7 +712,7 @@ const Sales = () => {
 
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography variant="body1" fontWeight={700} noWrap sx={{ textDecoration: t.cancelled ? 'line-through' : 'none' }}>
-                          {isAuslage ? (t.reference || 'Auslage') : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}
+                          {isAuslage ? (t.reference || 'Auslage') : isMigration && isPositive ? 'Übernahme Altsystem' : isTopUp ? (isPositive ? 'Guthaben' : 'Storno Guthaben') : 'Einkauf'} {t.method === 'TRANSFER' && '(Überweisung)'}
                         </Typography>
 
                         {/* Sold Items List */}

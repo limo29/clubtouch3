@@ -898,7 +898,7 @@ const Customers = () => {
                     <ListItem key={topUp.id} dense>
                       <ListItemText
                         primary={formatCurrency(topUp.amount)}
-                        secondary={`${new Date(topUp.createdAt).toLocaleString('de-DE')} - ${topUp.method === 'CASH' ? 'Bar' : topUp.method === 'REIMBURSEMENT' ? 'Auslage (Einkauf)' : 'Überweisung'}`}
+                        secondary={`${new Date(topUp.createdAt).toLocaleString('de-DE')} - ${topUp.method === 'CASH' ? 'Bar' : topUp.method === 'REIMBURSEMENT' ? 'Auslage (Einkauf)' : topUp.method === 'MIGRATION' ? 'Übernahme Altsystem' : 'Überweisung'}`}
                       />
                       {topUp.reference && (
                         <Chip label={topUp.reference} size="small" />

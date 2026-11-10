@@ -250,6 +250,7 @@ enum TopUpMethod {
   CASH
   TRANSFER
   REIMBURSEMENT // Auslage: Lieferantenrechnung vom Kunden bezahlt, dem Konto gutgeschrieben (kein Geldeingang)
+  MIGRATION // Startguthaben aus der Übernahme von Clubtouch 2.0 (kein Geldeingang)
 }
 
 enum StockMovementType {

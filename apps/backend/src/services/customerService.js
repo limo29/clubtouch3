@@ -403,8 +403,12 @@ class CustomerService {
         date: topUp.createdAt,
         type: 'TOPUP',
         description:
-          topUp.method === 'REIMBURSEMENT'
+          String(topUp.reference || '').startsWith('STORNO:')
+            ? 'Storno einer Aufladung'
+            : topUp.method === 'REIMBURSEMENT'
             ? topUp.reference || 'Auslage'
+            : topUp.method === 'MIGRATION'
+            ? topUp.reference || 'Übernahme Clubtouch 2.0'
             : `Aufladung (${topUp.method === 'CASH' ? 'Bar' : 'Überweisung'})`,
         amount: topUp.amount,
         balance: 0, // Wird später berechnet
@@ -503,6 +507,12 @@ class CustomerService {
       if (!original) throw new Error('Aufladung nicht gefunden');
       if (original.method === 'REIMBURSEMENT') {
         throw new Error('Auslagen werden über die Lieferantenrechnung zurückgebucht (im Einkauf auf „offen" setzen).');
+      }
+      if (original.method === 'MIGRATION') {
+        throw new Error('Das übernommene Startguthaben aus Clubtouch 2.0 kann nicht storniert werden.');
+      }
+      if (Number(original.amount) < 0 || String(original.reference || '').startsWith('STORNO:')) {
+        throw new Error('Eine Gegenbuchung kann nicht erneut storniert werden.');
       }
 
       // Prüfen ob schon storniert (indem wir schauen ob es eine Gegenbuchung mit dieser Referenz gibt)
