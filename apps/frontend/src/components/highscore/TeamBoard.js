@@ -4,27 +4,37 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import GroupBadge from '../customers/GroupBadge';
 import { scoreText } from './format';
 import { num } from '../../utils/format';
+import { DisplayHeading } from '../display/StageChrome';
 
-/** Team-Wertung: Balken je Gruppe in Gruppenfarbe, sortiert nach Summe, rechts Ø pro Kopf. */
-function TeamBoard({ title, subtitle, board, mode, size = 'md', fill = true, emptyText }) {
+/**
+ * Team-Wertung: Balken je Gruppe in Gruppenfarbe, sortiert nach Summe, rechts Ø pro Kopf.
+ * minimal=true (öffentliche Anzeige): ohne Rahmen und Symbol, Überschrift wie in Board.
+ */
+function TeamBoard({ title, subtitle, board, mode, size = 'md', fill = true, emptyText, minimal = false }) {
   const lg = size === 'lg';
   const entries = [...(board?.entries || [])].sort((a, b) => num(b.total) - num(a.total));
   const max = Math.max(1, ...entries.map((e) => num(e.total)));
 
   return (
     <Card variant="outlined" component="section" aria-label={title}
-      sx={{ height: fill ? '100%' : 'auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: 'background.paper' }}>
+      sx={{ height: fill ? '100%' : 'auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: 'background.paper', ...(minimal && { border: 'none' }) }}>
       <Box sx={{ p: lg ? 3 : { xs: 1.5, md: 2 }, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Stack direction="row" alignItems="center" spacing={lg ? 2 : 1.5} sx={{ mb: lg ? 3 : 1.5, flexShrink: 0 }}>
-          <Box sx={{ p: lg ? 1.25 : 0.75, borderRadius: 2, bgcolor: (t) => alpha(t.palette.primary.main, 0.12), color: 'primary.main', display: 'flex' }}>
-            <GroupsIcon fontSize={lg ? 'large' : 'medium'} />
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography noWrap sx={{ fontWeight: 900, fontSize: lg ? '2.2rem' : '1.15rem', lineHeight: 1.15 }}>{title}</Typography>
-            <Typography noWrap color="text.secondary" sx={{ fontSize: lg ? '1.15rem' : '0.78rem' }}>
-              Teams · {mode === 'AMOUNT' ? 'nach Umsatz' : 'nach Anzahl'} · rechts Ø pro Kopf{subtitle ? ` · ${subtitle}` : ''}
-            </Typography>
-          </Box>
+          {!minimal && (
+            <Box sx={{ p: lg ? 1.25 : 0.75, borderRadius: 2, bgcolor: (t) => alpha(t.palette.primary.main, 0.12), color: 'primary.main', display: 'flex' }}>
+              <GroupsIcon fontSize={lg ? 'large' : 'medium'} />
+            </Box>
+          )}
+          {minimal ? (
+            <DisplayHeading title={title} subtitle={`${mode === 'AMOUNT' ? 'nach Umsatz' : 'nach Anzahl'} · rechts Ø pro Kopf${subtitle ? ` · ${subtitle}` : ''}`} lg={lg} />
+          ) : (
+            <Box sx={{ minWidth: 0 }}>
+              <Typography noWrap sx={{ fontWeight: 900, fontSize: lg ? '2.2rem' : '1.15rem', lineHeight: 1.15 }}>{title}</Typography>
+              <Typography noWrap color="text.secondary" sx={{ fontSize: lg ? '1.15rem' : '0.78rem' }}>
+                Teams · {mode === 'AMOUNT' ? 'nach Umsatz' : 'nach Anzahl'} · rechts Ø pro Kopf{subtitle ? ` · ${subtitle}` : ''}
+              </Typography>
+            </Box>
+          )}
         </Stack>
 
         {entries.length === 0 ? (

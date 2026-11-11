@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
-import { Box, Stack, Typography, alpha, keyframes } from '@mui/material';
+import { Box, Stack, Typography, alpha, darken, keyframes } from '@mui/material';
+import { DISPLAY_FONTS } from '../display/StageChrome';
 import GroupBadge from '../customers/GroupBadge';
 import { RankChange } from './RankRow';
 import { displayName, scoreText } from './format';
@@ -9,7 +10,7 @@ const slideUp = keyframes`
   to { opacity: 1; transform: translateY(0); }
 `;
 
-const COLORS = ['#FFD700', '#C0C0C0', '#CD7F32'];
+const COLORS = ['#FFC400', '#C0C0C0', '#CD7F32'];
 // Reihenfolge links → rechts: Platz 2, 1, 3 (Positionen, nicht Rangzahl – bei Gleichstand teilen sich zwei den Rang)
 const SLOTS = [{ idx: 1, h: 0.78 }, { idx: 0, h: 1 }, { idx: 2, h: 0.6 }];
 
@@ -27,7 +28,7 @@ function PodiumItem({ entry, idx, baseHeight, mode, change, gap, lg }) {
         <Typography sx={{
           fontWeight: 900, minWidth: 0, textAlign: 'center', lineHeight: 1.1,
           display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', overflowWrap: 'break-word',
-          textShadow: `0 0 10px ${alpha(color, 0.5)}`,
+          textShadow: (t) => (t.palette.mode === 'dark' ? `0 0 10px ${alpha(color, 0.35)}` : 'none'),
           fontSize: lg ? (idx === 0 ? '2rem' : '1.6rem') : { xs: '0.9rem', md: idx === 0 ? '1.2rem' : '1.05rem' },
         }}>
           {displayName(entry)}
@@ -42,15 +43,17 @@ function PodiumItem({ entry, idx, baseHeight, mode, change, gap, lg }) {
       <Typography noWrap sx={{ fontSize: lg ? '0.95rem' : '0.7rem', color: 'text.secondary', mb: 0.5, minHeight: lg ? 22 : 16, maxWidth: '100%' }}>
         {gap || ''}
       </Typography>
+      {/* Sockel bewusst dunkel: die Metallfarbe steckt in Oberkante und Rangzahl, nicht in einer großen hellen Fläche
+          (im dunklen Clubraum leuchtet jede helle Fläche auf dem Fernseher). */}
       <Box sx={{
         width: '100%', height: baseHeight, flexShrink: 0, position: 'relative',
-        background: `linear-gradient(180deg, ${alpha(color, 0.8)} 0%, ${alpha(color, 0.35)} 100%)`,
-        borderRadius: '14px 14px 0 0', border: `1px solid ${alpha(color, 0.5)}`, borderBottom: 'none',
-        boxShadow: `0 0 20px ${alpha(color, 0.25)}`,
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center', overflow: 'hidden',
+        background: `linear-gradient(180deg, ${alpha(color, 0.24)} 0%, ${alpha(color, 0.04)} 100%)`,
+        borderRadius: '10px 10px 0 0', borderTop: `${lg ? 6 : 4}px solid ${color}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
       }}>
-        <Typography sx={{ fontWeight: 900, color: '#fff', opacity: 0.45, lineHeight: 1,
-          fontSize: `${Math.max(14, Math.min(lg ? 56 : 35, Math.round(baseHeight * 0.9)))}px` }}>
+        <Typography sx={{ fontFamily: DISPLAY_FONTS.headline, fontWeight: 400, lineHeight: 1,
+          color: (t) => (t.palette.mode === 'dark' ? color : darken(color, 0.35)),
+          fontSize: `${Math.max(16, Math.min(lg ? 96 : 52, Math.round(baseHeight * 0.85)))}px` }}>
           {entry.rank}
         </Typography>
       </Box>

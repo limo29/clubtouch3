@@ -12,7 +12,7 @@ import useHighscoreLogic from '../hooks/useHighscoreLogic';
 import useClubscoreEvents from '../hooks/useClubscoreEvents';
 import useFullscreen from '../hooks/useFullscreen';
 import useWakeLock from '../hooks/useWakeLock';
-import { DISPLAY_ACCENT, FullscreenButton, ScreenProgress } from '../components/display/StageChrome';
+import { DISPLAY_ACCENT, DISPLAY_COLORS, DISPLAY_FONTS, FullscreenButton, ScreenProgress } from '../components/display/StageChrome';
 import { useNow, useRankChanges } from '../components/highscore/useRankChanges';
 import useRotatingView from '../components/highscore/useRotatingView';
 import Board from '../components/highscore/Board';
@@ -34,13 +34,20 @@ const URL_VIEWS = ['amount', 'count', 'teams', 'rotate'];
 const URL_BOARDS = ['both', 'day', 'year'];
 
 // Die öffentliche Anzeige ist immer dunkel, egal welcher Farbmodus im Browser gespeichert ist.
+// Schrift und Signalfarben wie auf dem Werbe-Bildschirm daneben (Inter, Grün/Rot/Gelb der Folien).
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
     primary: { main: DISPLAY_ACCENT },
+    success: { main: DISPLAY_COLORS.green },
+    error: { main: DISPLAY_COLORS.red },
+    warning: { main: DISPLAY_COLORS.amber },
+    info: { main: DISPLAY_COLORS.amber }, // „NEU“ in der Rangliste
+    text: { primary: DISPLAY_COLORS.white },
     background: { default: BG, paper: BG },
     divider: 'rgba(255,255,255,0.10)',
   },
+  typography: { fontFamily: DISPLAY_FONTS.text },
 });
 
 /** URL-Parameter (view, board, ticker=0|1) haben Vorrang; fehlende Werte kommen live vom Server. */
@@ -68,7 +75,7 @@ function StatusChip({ hs, lg }) {
   }
   const stand = hs.lastUpdated ? timeHM(hs.lastUpdated) : timeHM(hs.offlineSince || new Date());
   return (
-    <Chip role="status" aria-live="polite" color="warning" icon={<WifiOffIcon />}
+    <Chip role="status" aria-live="polite" color="warning" variant="outlined" icon={<WifiOffIcon />}
       label={`Verbindung weg – Stand ${stand}`}
       sx={lg ? { height: 48, fontSize: '1.3rem', fontWeight: 700, px: 1, '& .MuiChip-icon': { fontSize: 28 } } : { fontWeight: 700 }} />
   );
@@ -115,7 +122,7 @@ function Content() {
       : `seit ${period.yearStart ? dateDE(period.yearStart) : '01.01.'}`;
     if (view === 'teams') {
       const tb = isDay ? data.teams?.daily?.amount : data.teams?.yearly?.amount;
-      return <TeamBoard key={kind} title={`${title} · Teams`} subtitle={subtitle} board={tb} mode="AMOUNT" size={size} fill={lg} emptyText={TEAM_EMPTY} />;
+      return <TeamBoard key={kind} title={`${title} · Teams`} subtitle={subtitle} board={tb} mode="AMOUNT" size={size} fill={lg} emptyText={TEAM_EMPTY} minimal />;
     }
     const scope = isDay ? 'daily' : 'yearly';
     const m = view === 'count' ? 'count' : 'amount';
@@ -129,8 +136,8 @@ function Content() {
 
   const header = (
     <Stack direction="row" alignItems="center" spacing={lg ? 3 : 1.5} sx={{ flexShrink: 0 }}>
-      <TrophyIcon sx={{ fontSize: lg ? 64 : 32, color: '#ffd54f' }} />
-      <Typography component="h1" sx={{ fontWeight: 900, fontSize: lg ? '3.6rem' : '1.6rem', lineHeight: 1, letterSpacing: lg ? 1 : 0 }}>
+      <TrophyIcon sx={{ fontSize: lg ? 64 : 32, color: DISPLAY_COLORS.amber }} />
+      <Typography component="h1" sx={{ fontFamily: DISPLAY_FONTS.headline, fontWeight: 400, fontSize: lg ? '4.4rem' : '2rem', lineHeight: 1, letterSpacing: '0.02em', pt: lg ? 0.75 : 0.25 }}>
         Clubscore
       </Typography>
       <Chip label={VIEW_LABELS[view] || 'Umsatz'} variant="outlined"

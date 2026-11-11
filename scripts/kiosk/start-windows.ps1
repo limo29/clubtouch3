@@ -1,6 +1,8 @@
-# ClubTouch: öffnet auf jedem angeschlossenen Monitor ein Vollbild-Fenster (Bildschirm 1, 2, 3 … von links nach rechts).
+﻿# ClubTouch: öffnet auf jedem angeschlossenen Monitor ein Fenster (Bildschirm 1, 2, 3 … von links nach rechts),
+# Clubscore und Werbung im Vollbild, den Verkauf als normales maximiertes Fenster.
 # Was auf welcher Nummer läuft, wird in der Kasse eingestellt: Werbung -> "Bildschirme".
 # Start per Doppelklick auf "Bildschirme starten.bat". Beenden: Alt+F4 im jeweiligen Fenster.
+# Die Datei ist UTF-8 mit BOM gespeichert, sonst liest Windows PowerShell 5.1 die Umlaute falsch.
 param(
   [string]$Adresse = "https://frontend-production-da0d.up.railway.app"   # Adresse der Kasse, ohne Schrägstrich am Ende
 )

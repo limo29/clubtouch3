@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import StarIcon from '@mui/icons-material/Star';
 import FavoriteIcon from '@mui/icons-material/Favorite';
@@ -51,14 +51,22 @@ export function buildMenuRows(articles, { hidden = [], groups = [] } = {}) {
     return rows;
 }
 
+// Untergrenze beim Einpassen: kleiner als 40 % der eingestellten Größe (mindestens 16 px) wird es nicht,
+// darunter ist die Karte aus ein paar Metern nicht mehr lesbar; dann wird lieber unten abgeschnitten.
+const MENU_MIN_FACTOR = 0.4;
+const MENU_MIN_PX = 16;
+
 const MenuRenderer = ({ element, style, isEditor }) => {
     const [articles, setArticles] = useState([]);
     const [loaded, setLoaded] = useState(false);
     const categoryName = element.content;
     const color = element.color || '#ffffff';
     // Zeilengröße wie bisher aus der Elementgröße abgeleitet, damit bestehende Folien gleich aussehen
-    const rowSize = (element.fontSize || 40) * 0.4;
+    const baseSize = (element.fontSize || 40) * 0.4;
     const columns = Number(element.columns) === 2 ? 2 : 1;
+    const boxRef = useRef(null);
+    const listRef = useRef(null);
+    const [rowSize, setRowSize] = useState(baseSize);
 
     useEffect(() => {
         let cancelled = false;
@@ -71,30 +79,64 @@ const MenuRenderer = ({ element, style, isEditor }) => {
     }, [categoryName, isEditor]);
 
     const rows = buildMenuRows(articles, { hidden: element.hidden, groups: element.groups });
+    const rowsKey = rows.map((r) => `${r.key}:${r.name}:${r.price}:${r.sub || ''}`).join('|');
+
+    // Nie überlaufen: passt die Liste nicht in die Höhe des Elements, wird die Zeilengröße so weit verkleinert,
+    // bis alles passt. Gemessen wird ohne Skalierung (offsetHeight ignoriert transform), daher ergeben
+    // Editor und Bildschirm dieselbe Größe. Alle Maße hängen an --rs und lassen sich so direkt am DOM ausprobieren.
+    useLayoutEffect(() => {
+        const box = boxRef.current;
+        const list = listRef.current;
+        if (!box || !list) return undefined;
+        let cancelled = false;
+        const fit = () => {
+            if (cancelled) return;
+            const avail = box.clientHeight;
+            if (!(avail > 0)) return;
+            const min = Math.min(baseSize, Math.max(MENU_MIN_PX, baseSize * MENU_MIN_FACTOR));
+            let size = baseSize;
+            for (let i = 0; i < 8; i += 1) {
+                list.style.setProperty('--rs', `${size}px`);
+                const h = list.offsetHeight;
+                if (h <= avail || size <= min) break;
+                size = Math.max(min, size * (avail / h) * 0.99);
+            }
+            list.style.setProperty('--rs', `${size}px`);
+            setRowSize(size);
+        };
+        fit();
+        // Schriften laden asynchron nach; danach stimmt die Höhe erst wirklich
+        document.fonts?.ready?.then(fit);
+        let ro;
+        if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(fit); ro.observe(box); }
+        return () => { cancelled = true; ro?.disconnect(); };
+    }, [rowsKey, baseSize, columns, element.fontFamily]);
 
     if (!rows.length) {
         if (!isEditor) return null; // auf dem Bildschirm lieber nichts als ein Platzhalter
         return (
             <Box style={{ ...style, border: '1px dashed grey', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography style={{ fontSize: rowSize, color }}>{loaded ? `Keine Artikel in „${categoryName}“` : 'Lädt …'}</Typography>
+                <Typography style={{ fontSize: baseSize, color }}>{loaded ? `Keine Artikel in „${categoryName}“` : 'Lädt …'}</Typography>
             </Box>
         );
     }
 
     return (
-        <Box style={{ ...style, display: 'block', overflow: 'hidden', textAlign: 'left', whiteSpace: 'normal' }}
-            sx={{ columnCount: columns, columnGap: `${rowSize * 1.6}px` }}>
-            {rows.map((row) => (
-                <Box key={row.key} sx={{ breakInside: 'avoid', pb: `${rowSize * 0.28}px`, mb: `${rowSize * 0.28}px`, borderBottom: '1px solid rgba(255,255,255,0.14)' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: `${rowSize * 0.6}px` }}>
-                        <Box component="span" sx={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: `${rowSize}px`, lineHeight: 1.2, color }}>{row.name}</Box>
-                        <Box component="span" sx={{ fontWeight: 700, fontSize: `${rowSize}px`, lineHeight: 1.2, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: element.priceColor || color }}>{row.price}</Box>
+        <Box ref={boxRef} style={{ ...style, display: 'block', overflow: 'hidden', textAlign: 'left', whiteSpace: 'normal' }}>
+            <Box ref={listRef} style={{ '--rs': `${rowSize}px` }}
+                sx={{ columnCount: columns, columnGap: 'calc(var(--rs) * 1.6)' }}>
+                {rows.map((row) => (
+                    <Box key={row.key} sx={{ breakInside: 'avoid', pb: 'calc(var(--rs) * 0.28)', mb: 'calc(var(--rs) * 0.28)', borderBottom: '1px solid rgba(255,255,255,0.14)' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 'calc(var(--rs) * 0.6)' }}>
+                            <Box component="span" sx={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 'var(--rs)', lineHeight: 1.2, color }}>{row.name}</Box>
+                            <Box component="span" sx={{ fontWeight: 700, fontSize: 'var(--rs)', lineHeight: 1.2, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: element.priceColor || color }}>{row.price}</Box>
+                        </Box>
+                        {row.sub && (
+                            <Box sx={{ fontSize: 'calc(var(--rs) * 0.58)', lineHeight: 1.25, mt: 'calc(var(--rs) * 0.08)', color, opacity: 0.62 }}>{row.sub}</Box>
+                        )}
                     </Box>
-                    {row.sub && (
-                        <Box sx={{ fontSize: `${rowSize * 0.58}px`, lineHeight: 1.25, mt: `${rowSize * 0.08}px`, color, opacity: 0.62 }}>{row.sub}</Box>
-                    )}
-                </Box>
-            ))}
+                ))}
+            </Box>
         </Box>
     );
 };

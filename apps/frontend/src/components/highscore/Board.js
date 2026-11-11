@@ -5,6 +5,7 @@ import Podium from './Podium';
 import RankRow from './RankRow';
 import { gapText, scoreText } from './format';
 import { markFor } from './useRankChanges';
+import { DisplayHeading } from '../display/StageChrome';
 
 const MAX = 20;
 
@@ -46,14 +47,17 @@ function Board({
               <TrophyIcon fontSize={lg ? 'large' : 'medium'} />
             </Box>
           )}
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography noWrap sx={{ fontWeight: 900, fontSize: lg ? '2rem' : '1.15rem', lineHeight: 1.15 }}>{title}</Typography>
-            <Typography noWrap color="text.secondary" sx={{ fontSize: lg ? '1.15rem' : '0.78rem' }}>
-              {minimal
-                ? subtitle
-                : <>Die besten 20 · {mode === 'AMOUNT' ? 'nach Umsatz' : 'nach Anzahl'}{subtitle ? ` · ${subtitle}` : ''}</>}
-            </Typography>
-          </Box>
+          {minimal ? (
+            // Öffentliche Anzeige: Überschrift wie auf den Werbefolien daneben
+            <Box sx={{ minWidth: 0, flex: 1 }}><DisplayHeading title={title} subtitle={subtitle} lg={lg} /></Box>
+          ) : (
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography noWrap sx={{ fontWeight: 900, fontSize: lg ? '2rem' : '1.15rem', lineHeight: 1.15 }}>{title}</Typography>
+              <Typography noWrap color="text.secondary" sx={{ fontSize: lg ? '1.15rem' : '0.78rem' }}>
+                Die besten 20 · {mode === 'AMOUNT' ? 'nach Umsatz' : 'nach Anzahl'}{subtitle ? ` · ${subtitle}` : ''}
+              </Typography>
+            </Box>
+          )}
           {lg && leader && !minimal && (
             <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
               <Typography sx={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.6 }}>Bestwert</Typography>

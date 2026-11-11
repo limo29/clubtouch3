@@ -7,7 +7,7 @@ import { WS_URL } from '../config/api';
 import SlideRenderer from '../components/ads/SlideRenderer';
 import useFullscreen from '../hooks/useFullscreen';
 import useWakeLock from '../hooks/useWakeLock';
-import { DISPLAY_ACCENT, FullscreenButton, ScreenProgress } from '../components/display/StageChrome';
+import { DISPLAY_ACCENT, DISPLAY_FONTS, FullscreenButton, ScreenProgress } from '../components/display/StageChrome';
 
 /**
  * Öffentliches Werbe-Display (/public/ads), läuft ohne Login auf dem Bildschirm im Clubraum.
@@ -42,7 +42,7 @@ const isVideo = (url) => {
 
 const theme = createTheme({
     palette: { mode: 'dark', primary: { main: DISPLAY_ACCENT }, background: { default: '#000' } },
-    typography: { fontFamily: 'Inter, Roboto, sans-serif' }
+    typography: { fontFamily: DISPLAY_FONTS.text }
 });
 
 // Nur die Felder vergleichen, die das Display beeinflussen

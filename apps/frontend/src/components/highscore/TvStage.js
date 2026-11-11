@@ -4,21 +4,24 @@ import { Box } from '@mui/material';
 export const STAGE_W = 1920;
 export const STAGE_H = 1080;
 
-// fluid: Breite der Bühne folgt dem Seitenverhältnis des Bildschirms, in diesen Grenzen (4:3 bis 21:9)
-const FLUID_MIN_W = 1440;
+// fluid: Breite der Bühne folgt dem Seitenverhältnis des Bildschirms bis 21:9. Schmaler als 1600 (≈ 3:2) wird
+// sie nicht: auf 4:3- und 5:4-Monitoren wächst sie stattdessen in die Höhe, sonst würden die Namen abgeschnitten.
+const FLUID_MIN_W = 1600;
 const FLUID_MAX_W = 2520;
 
 /**
  * 1080 Pixel hohe Bühne, per transform: scale() in den verfügbaren Platz eingepasst (wie SlideRenderer).
- * Standard ist fest 1920×1080 (16:9, Rest bleibt Rand). Mit `fluid` wird die Bühne so breit wie der
- * Bildschirm es hergibt: ein 16:10-, 5:4- oder 21:9-Monitor ist dann ohne Ränder gefüllt, der Inhalt
- * (Flex-/Grid-Layout) verteilt sich auf die Breite. Achtung: position:fixed innerhalb der Bühne bezieht
+ * Standard ist fest 1920×1080 (16:9, Rest bleibt Rand). Mit `fluid` folgt die Bühne dem Seitenverhältnis:
+ * ein 16:10- oder 21:9-Monitor ist ohne Ränder gefüllt (Breite 1728 … 2520 bei 1080 Höhe), ein 4:3- oder
+ * 5:4-Monitor bekommt eine 1600 breite und entsprechend höhere Bühne. Der Inhalt (Flex-/Grid-Layout)
+ * verteilt sich auf die Fläche. Achtung: position:fixed innerhalb der Bühne bezieht
  * sich auf die Bühne – Overlays daher außerhalb rendern.
  */
 export default function TvStage({ children, background = '#0b0d12', fluid = false, sx }) {
   const wrapRef = useRef(null);
   const [scale, setScale] = useState(0);
   const [stageW, setStageW] = useState(STAGE_W);
+  const [stageH, setStageH] = useState(STAGE_H);
 
   useLayoutEffect(() => {
     const el = wrapRef.current;
@@ -26,9 +29,12 @@ export default function TvStage({ children, background = '#0b0d12', fluid = fals
     const measure = () => {
       const { width, height } = el.getBoundingClientRect();
       if (!(width > 0 && height > 0)) return;
-      const w = fluid ? Math.min(FLUID_MAX_W, Math.max(FLUID_MIN_W, Math.round((STAGE_H * width) / height))) : STAGE_W;
+      const natural = Math.round((STAGE_H * width) / height);
+      const w = fluid ? Math.min(FLUID_MAX_W, Math.max(FLUID_MIN_W, natural)) : STAGE_W;
+      const h = fluid && natural < FLUID_MIN_W ? Math.round((FLUID_MIN_W * height) / width) : STAGE_H;
       setStageW(w);
-      setScale(Math.min(width / w, height / STAGE_H));
+      setStageH(h);
+      setScale(Math.min(width / w, height / h));
     };
     measure();
     let ro;
@@ -51,7 +57,7 @@ export default function TvStage({ children, background = '#0b0d12', fluid = fals
           left: '50%',
           top: '50%',
           width: stageW,
-          height: STAGE_H,
+          height: stageH,
           transform: `translate(-50%, -50%) scale(${scale || 0.0001})`,
           transformOrigin: 'center center',
           visibility: scale ? 'visible' : 'hidden',

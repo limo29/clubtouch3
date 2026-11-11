@@ -3,11 +3,27 @@
 // Der Balken hängt am echten Bildschirmrand und misst sich an der Bildschirmhöhe, damit er auf zwei
 // Monitoren mit unterschiedlicher Auflösung gleich aussieht. Bewusst keine Uhr.
 import React from 'react';
-import { Box, Fade, IconButton, Tooltip, keyframes } from '@mui/material';
+import { Box, Fade, IconButton, Tooltip, Typography, keyframes } from '@mui/material';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 
-export const DISPLAY_ACCENT = '#00e676'; // Grün der Kasse, auch der „Live“-Punkt
+// Eine Palette für beide Bildschirme über der Theke (Clubscore und Werbefolien, auch die Vorlagen im Editor)
+export const DISPLAY_COLORS = {
+  black: '#000000',
+  white: '#f2f2f2',     // bewusst kein reines Weiß, das überstrahlt auf dem Fernseher
+  dim: '#8d949c',
+  green: '#00e676',     // Grün der Kasse
+  greenDeep: '#0b2818', // dunkler Grund für grüne Schrift (statt heller Flächen)
+  red: '#ff3b30',       // Rot aus dem Clubraum-Logo
+  amber: '#ffc400',
+};
+export const DISPLAY_ACCENT = DISPLAY_COLORS.green; // auch der „Live“-Punkt
+
+// Mitgelieferte Schriften (src/fonts.js): Plakatschrift für Überschriften, Inter für alles andere
+export const DISPLAY_FONTS = {
+  headline: '"Bebas Neue", "Oswald", Impact, "Arial Narrow", sans-serif',
+  text: '"Inter", "Roboto", "Helvetica Neue", Helvetica, Arial, sans-serif',
+};
 
 const grow = keyframes`
   from { transform: scaleX(0); }
@@ -45,5 +61,26 @@ export function FullscreenButton({ fs }) {
         </Tooltip>
       </Box>
     </Fade>
+  );
+}
+
+/**
+ * Überschrift auf den öffentlichen Bildschirmen, wie auf den Werbefolien: Plakatschrift, kurzer grüner Strich
+ * darunter. Der Untertitel steht klein in derselben Zeile, damit die Rangliste darunter keinen Platz verliert.
+ */
+export function DisplayHeading({ title, subtitle, lg = true }) {
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: lg ? 2 : 1, minWidth: 0 }}>
+        <Typography component="h2" noWrap sx={{
+          fontFamily: DISPLAY_FONTS.headline, fontWeight: 400, letterSpacing: '0.02em',
+          fontSize: lg ? '3rem' : '1.6rem', lineHeight: 1, flexShrink: 0,
+        }}>{title}</Typography>
+        {subtitle && (
+          <Typography noWrap color="text.secondary" sx={{ fontSize: lg ? '1.15rem' : '0.78rem', minWidth: 0 }}>{subtitle}</Typography>
+        )}
+      </Box>
+      <Box aria-hidden sx={{ width: lg ? 120 : 64, height: lg ? 5 : 3, borderRadius: 3, bgcolor: DISPLAY_ACCENT, mt: lg ? 0.75 : 0.5 }} />
+    </Box>
   );
 }

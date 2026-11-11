@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# ClubTouch: öffnet auf jedem angeschlossenen Monitor ein Vollbild-Fenster (Bildschirm 1, 2, 3 … von links nach rechts).
+# ClubTouch: öffnet auf jedem angeschlossenen Monitor ein Fenster (Bildschirm 1, 2, 3 … von links nach rechts),
+# Clubscore und Werbung im Vollbild, den Verkauf als normales maximiertes Fenster.
 # Was auf welcher Nummer läuft, wird in der Kasse eingestellt: Werbung -> "Bildschirme".
 # Aufruf: ./start-linux.sh [Adresse]     Beenden: Alt+F4 im jeweiligen Fenster.
 # Zum Testen: BROWSER=<Pfad>, CLUBTOUCH_FLAGS="<weitere Browser-Schalter>", CLUBTOUCH_DEBUG_PORT=<Basis-Port>.
