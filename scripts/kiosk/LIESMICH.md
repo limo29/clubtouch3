@@ -1,44 +1,33 @@
 # Bildschirme mit einem Klick starten
 
-Am Thekenrechner hängen mehrere Monitore (z. B. zwei über der Theke, einer für die Kasse).
-Das Startskript öffnet auf **jedem angeschlossenen Monitor** ein Fenster – Clubscore und Werbung im Vollbild,
-den Verkauf als normales, maximiertes Fenster (dort läuft oft noch etwas anderes, z. B. die Musik):
+Die Startskripte liegen nicht mehr hier, sondern unter `apps/frontend/public/kiosk/` und werden mit der Kasse
+ausgeliefert. Herunterladen geht direkt in der Oberfläche: **Clubscore oder Werbung → Bildschirme → Schritt 2
+„Am Thekenrechner starten“**. Beim Herunterladen setzt die Kasse ihre eigene Adresse ein, am PC muss nichts
+mehr eingetragen werden.
 
-| Monitor (von links nach rechts) | Adresse |
-|---|---|
-| 1 | `…/screen/1` |
-| 2 | `…/screen/2` |
-| 3 | `…/screen/3` |
+| Datei im Repo | Download heißt | Start |
+|---|---|---|
+| `apps/frontend/public/kiosk/bildschirme-starten.cmd` | `Bildschirme starten.cmd` | Doppelklick (Windows, Chrome oder Edge) |
+| `apps/frontend/public/kiosk/bildschirme-starten.sh` | `bildschirme-starten.sh` | `bash bildschirme-starten.sh` (Linux, Chrome/Chromium + `xrandr`, X11) |
 
-**Was auf welcher Nummer läuft**, stellt man in der Kasse ein: *Werbung → Bildschirme*
-(Clubscore, Werbung, Verkauf oder nichts). Die Bildschirme schalten sofort um.
-Wird ein Monitor oder Kabel getauscht, muss also nur dort die Zuordnung geändert werden.
-„Nummern auf den Bildschirmen einblenden“ zeigt für 8 Sekunden, welcher Monitor welche Nummer hat.
+Was die Skripte tun: Sie öffnen auf **jedem angeschlossenen Monitor** ein Fenster auf `/screen/1`, `/screen/2`, …
+(von links nach rechts), jedes mit eigenem Browser-Profil. Clubscore und Werbung laufen im Kiosk-Vollbild, der
+Verkauf als normales, maximiertes Fenster. Was auf welcher Nummer läuft, stellt man in der Kasse unter
+**Bildschirme** ein; die Monitore schalten sofort um. Ob ein Fenster im Vollbild läuft, entscheidet die Belegung
+beim Start des Skripts.
 
-## Windows
+Autostart unter Windows: `Win+R` → `shell:startup` → Verknüpfung zu `Bildschirme starten.cmd` dort ablegen.
 
-1. Ordner `scripts/kiosk` auf den Rechner kopieren.
-2. Falls die Kasse unter einer anderen Adresse läuft: in `start-windows.ps1` oben `$Adresse` anpassen.
-3. Doppelklick auf **`Bildschirme starten.bat`**. Für den Start beim Hochfahren eine Verknüpfung
-   in den Autostart-Ordner legen (`Win+R` → `shell:startup`).
+## Für Entwickler
 
-Gebraucht wird Chrome oder Edge. Beenden: `Alt+F4` im jeweiligen Fenster.
-
-## Linux
-
-```bash
-./start-linux.sh                      # oder: ./start-linux.sh https://meine-kasse.example
-```
-
-Gebraucht werden Chrome oder Chromium und `xrandr` (X11).
-
-## Gut zu wissen
-
-- Ob ein Fenster im Vollbild startet, entscheidet die Belegung beim Start. Wird sie später umgestellt,
-  wechselt der Inhalt sofort, die Fensterart erst beim nächsten Start des Skripts.
-- Jeder Bildschirm hat ein eigenes Browser-Profil. Der Verkaufs-Bildschirm fragt beim ersten Start
-  einmal nach der Anmeldung und bleibt danach angemeldet.
-- Die Nummern richten sich nach der Anordnung der Monitore in den Anzeige-Einstellungen des
-  Betriebssystems (links = 1).
-- Clubscore und Werbung füllen jeden Monitor, auch wenn er nicht 16:9 ist. Folien sind für 16:9
-  gebaut; auf anderen Formaten bleibt der Hintergrund der Folie bis zum Rand, der Inhalt mittig.
+- In den Dateien steht der Platzhalter `__CLUBTOUCH_ADRESSE__`; `components/display/kioskScripts.js` setzt beim
+  Download `window.location.origin` ein und stellt die Zeilenenden um (CRLF für `.cmd`, LF für `.sh`).
+  Ohne eingesetzte Adresse kann man sie als Parameter mitgeben: `bash bildschirme-starten.sh https://…` bzw.
+  `"Bildschirme starten.cmd" https://…`.
+- `bildschirme-starten.cmd` ist Batch und PowerShell in einer Datei: Die erste Zeile `<# : …` ist für cmd eine
+  Sprungmarke (wird übersprungen), für PowerShell der Anfang eines Block-Kommentars. cmd führt nur den kurzen Batch-Teil aus,
+  der die Datei als UTF-8 liest und an `powershell -ExecutionPolicy Bypass` übergibt. Den Batch-Teil nur in ASCII
+  schreiben (cmd liest in der OEM-Codepage) und die Datei **ohne BOM** speichern (sonst stolpert cmd über die erste
+  Zeile).
+- Das Linux-Skript wurde an drei echten Monitoren getestet. Das Windows-Skript ist ungetestet (kein Windows-Rechner
+  bei der Entwicklung).

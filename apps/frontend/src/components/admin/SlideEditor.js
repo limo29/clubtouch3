@@ -294,7 +294,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
         >
             <DialogTitle sx={{ borderBottom: 1, borderColor: 'rgba(255,255,255,0.1)', px: 3, py: 2 }}>
                 <Stack direction="row" alignItems="center" justifyContent="space-between">
-                    <Typography variant="h6" fontWeight="bold">Slide gestalten</Typography>
+                    <Typography variant="h6" fontWeight="bold">{initialData ? "Folie bearbeiten" : "Folie gestalten"}</Typography>
                     <Stack direction="row" spacing={2} alignItems="center">
                         <ZoomSilder scale={scale} setScale={(v) => { setAutoFit(false); setScale(v); }} />
                         <Button color="inherit" size="small" disabled={autoFit} onClick={() => setAutoFit(true)}>Einpassen</Button>

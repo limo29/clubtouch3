@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-    Alert, Box, Button, Card, CardContent, CardMedia, CircularProgress, Container,
+    Alert, Box, Button, Card, CardContent, CardMedia, CircularProgress,
     Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, IconButton,
     Stack, TextField, Typography, MenuItem, Select, FormControl, InputLabel,
     Grid, Switch, FormControlLabel, Divider, Tooltip, Snackbar, Chip, useMediaQuery
@@ -27,7 +27,6 @@ import { CSS } from '@dnd-kit/utilities';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -41,8 +40,7 @@ import EditNoteIcon from '@mui/icons-material/EditNote';
 
 import api from '../services/api';
 import SlideEditor from '../components/admin/SlideEditor';
-import ScreensDialog from '../components/display/ScreensDialog';
-import TvIcon from '@mui/icons-material/Tv';
+import DisplayPageBar, { BarButton } from '../components/display/DisplayPageBar';
 import SlideRenderer from '../components/ads/SlideRenderer';
 
 const MAX_UPLOAD_MB = 500;
@@ -70,10 +68,18 @@ const safeParse = (data) => {
     }
 };
 
+/** 75 → „1 min 15 s“, 40 → „40 s“ */
+const formatSeconds = (sec) => {
+    const n = Math.round(sec);
+    if (n < 60) return `${n} s`;
+    const m = Math.floor(n / 60), r = n % 60;
+    return r ? `${m} min ${r} s` : `${m} min`;
+};
+
 const apiError = (err, fallback) => err?.response?.data?.error || err?.message || fallback;
 
 const kindOf = (ad) => (ad.slideData ? 'slide' : isVideo(ad.imageUrl) ? 'video' : 'image');
-const KIND_LABEL = { slide: 'Slide', video: 'Video', image: 'Bild' };
+const KIND_LABEL = { slide: 'Gestaltet', video: 'Video', image: 'Bild' };
 const KIND_ICON = { slide: <DashboardCustomizeIcon fontSize="inherit" />, video: <MovieIcon fontSize="inherit" />, image: <ImageIcon fontSize="inherit" /> };
 
 /** Dauer-Feld: lokal tippen, erst bei Verlassen/Enter speichern (vorher ging pro Tastendruck ein Request raus) */
@@ -119,62 +125,88 @@ const SortableAdItem = ({ ad, index, count, onUpdate, onDelete, onOpenSlideEdito
         position: 'relative'
     };
     const kind = kindOf(ad);
+    const overlayChip = { bgcolor: 'rgba(0,0,0,0.6)', color: 'white', '& .MuiChip-icon': { color: 'white' } };
 
     return (
-        <Grid size={{ xs: 12, sm: 6, md: 4 }} ref={setNodeRef} style={style}>
-            <Card variant="elevation" elevation={2} sx={{ position: 'relative', borderRadius: 3, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column', opacity: ad.active ? 1 : 0.6 }}>
+        <Grid size={{ xs: 12, sm: 6, lg: 4, xl: 3 }} ref={setNodeRef} style={style}>
+            <Card variant="elevation" elevation={2} sx={{ position: 'relative', borderRadius: 3, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column', outline: ad.active ? 'none' : '2px dashed', outlineColor: 'warning.main', outlineOffset: -2 }}>
                 <Box sx={{ position: 'relative', aspectRatio: '16 / 9', bgcolor: '#000' }}>
-                    {kind === 'video' ? (
-                        <Box
-                            component="video"
-                            src={ad.imageUrl}
-                            muted
-                            preload="metadata"
-                            sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                        />
-                    ) : kind === 'slide' ? (
-                        <Box sx={{ width: '100%', height: '100%', pointerEvents: 'none' }}>
-                            <SlideRenderer slideData={safeParse(ad.slideData)} />
-                        </Box>
-                    ) : (
-                        <CardMedia
-                            component="img"
-                            image={ad.imageUrl}
-                            alt=""
-                            sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                        />
-                    )}
+                    <Box sx={{ width: '100%', height: '100%', opacity: ad.active ? 1 : 0.4 }}>
+                        {kind === 'video' ? (
+                            <Box
+                                component="video"
+                                src={ad.imageUrl}
+                                muted
+                                preload="metadata"
+                                sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            />
+                        ) : kind === 'slide' ? (
+                            <Box sx={{ width: '100%', height: '100%', pointerEvents: 'none' }}>
+                                <SlideRenderer slideData={safeParse(ad.slideData)} />
+                            </Box>
+                        ) : (
+                            <CardMedia
+                                component="img"
+                                image={ad.imageUrl}
+                                alt=""
+                                sx={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            />
+                        )}
+                    </Box>
 
                     {/* Griff zum Ziehen (Maus/Touch), Reihenfolge = Abspielreihenfolge */}
-                    <Tooltip title="Ziehen zum Sortieren">
+                    <Tooltip title="Ziehen, um die Reihenfolge zu ändern">
                         <Box
                             {...attributes} {...listeners}
-                            aria-label="Slide verschieben"
+                            aria-label={`Folie ${index + 1} verschieben`}
                             sx={{
-                                position: 'absolute', top: 8, left: 8,
-                                bgcolor: 'rgba(0,0,0,0.55)', color: 'white', borderRadius: 1, p: 0.5,
-                                cursor: 'grab', touchAction: 'none', display: 'flex',
+                                position: 'absolute', top: 8, left: 8, width: 40, height: 40,
+                                bgcolor: 'rgba(0,0,0,0.6)', color: 'white', borderRadius: 1.5,
+                                cursor: 'grab', touchAction: 'none', display: 'grid', placeItems: 'center',
                                 '&:active': { cursor: 'grabbing' }
                             }}
                         >
                             <DragIndicatorIcon />
                         </Box>
                     </Tooltip>
-                    <Chip
-                        size="small"
-                        icon={KIND_ICON[kind]}
-                        label={`${index + 1}. ${KIND_LABEL[kind]}`}
-                        sx={{ position: 'absolute', top: 8, right: 8, bgcolor: 'rgba(0,0,0,0.55)', color: 'white', '& .MuiChip-icon': { color: 'white' } }}
-                    />
+                    {/* Auf einen Blick: Platz in der Reihenfolge, Art, Dauer */}
+                    <Stack direction="row" spacing={0.75} sx={{ position: 'absolute', top: 12, right: 8 }}>
+                        <Chip size="small" label={`Nr. ${index + 1}`} sx={{ ...overlayChip, fontWeight: 800 }} />
+                        <Chip size="small" icon={KIND_ICON[kind]} label={KIND_LABEL[kind]} sx={overlayChip} />
+                        <Chip size="small" label={`${ad.duration} s`} sx={overlayChip} />
+                    </Stack>
                     {!ad.active && (
-                        <Chip size="small" label="Inaktiv" color="warning" sx={{ position: 'absolute', bottom: 8, left: 8 }} />
+                        <Chip size="small" label="Ausgeblendet – läuft nicht" color="warning" sx={{ position: 'absolute', bottom: 8, left: 8, fontWeight: 700 }} />
                     )}
                 </Box>
-                <CardContent sx={{ pt: 1.5 }}>
-                    <Stack spacing={1.5}>
+
+                <CardContent sx={{ pt: 1.5, flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <Stack spacing={1.5} sx={{ flex: 1 }}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
+                            <FormControlLabel
+                                sx={{ mr: 0 }}
+                                control={
+                                    <Switch
+                                        checked={!!ad.active}
+                                        disabled={busy}
+                                        onChange={(e) => onUpdate(ad.id, { active: e.target.checked })}
+                                    />
+                                }
+                                label={ad.active ? 'Wird gezeigt' : <Typography component="span" color="warning.main" fontWeight={700}>Ausgeblendet</Typography>}
+                            />
+                            <Stack direction="row" alignItems="center">
+                                <Tooltip title="Früher zeigen (in der Reihenfolge nach vorne)">
+                                    <span><IconButton disabled={busy || index === 0} onClick={() => onMove(index, index - 1)} aria-label="Früher zeigen"><ArrowBackIcon /></IconButton></span>
+                                </Tooltip>
+                                <Tooltip title="Später zeigen (in der Reihenfolge nach hinten)">
+                                    <span><IconButton disabled={busy || index >= count - 1} onClick={() => onMove(index, index + 1)} aria-label="Später zeigen"><ArrowForwardIcon /></IconButton></span>
+                                </Tooltip>
+                            </Stack>
+                        </Stack>
+
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                             <DurationField value={ad.duration} disabled={busy} onCommit={(duration) => onUpdate(ad.id, { duration })} />
-                            <FormControl size="small" sx={{ minWidth: 140, flex: 1 }}>
+                            <FormControl size="small" sx={{ minWidth: 130, flex: 1 }}>
                                 <InputLabel>Übergang</InputLabel>
                                 <Select
                                     value={ad.transition}
@@ -187,41 +219,14 @@ const SortableAdItem = ({ ad, index, count, onUpdate, onDelete, onOpenSlideEdito
                             </FormControl>
                         </Stack>
 
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
-                            <FormControlLabel
-                                control={
-                                    <Switch
-                                        checked={!!ad.active}
-                                        disabled={busy}
-                                        onChange={(e) => onUpdate(ad.id, { active: e.target.checked })}
-                                        size="small"
-                                    />
-                                }
-                                label={ad.active ? "Aktiv" : "Inaktiv"}
-                            />
-                            <Stack direction="row" spacing={0}>
-                                <Tooltip title="Nach vorne">
-                                    <span><IconButton size="small" disabled={busy || index === 0} onClick={() => onMove(index, index - 1)} aria-label="nach vorne"><ArrowBackIcon fontSize="small" /></IconButton></span>
-                                </Tooltip>
-                                <Tooltip title="Nach hinten">
-                                    <span><IconButton size="small" disabled={busy || index >= count - 1} onClick={() => onMove(index, index + 1)} aria-label="nach hinten"><ArrowForwardIcon fontSize="small" /></IconButton></span>
-                                </Tooltip>
-                                <Tooltip title="Vorschau">
-                                    <IconButton size="small" onClick={() => onPreview(ad)} aria-label="Vorschau">
-                                        <VisibilityIcon />
-                                    </IconButton>
-                                </Tooltip>
-                                {kind === 'slide' && (
-                                    <Tooltip title="Slide bearbeiten">
-                                        <IconButton size="small" onClick={() => onOpenSlideEditor(ad)} color="primary" aria-label="Slide bearbeiten">
-                                            <EditNoteIcon />
-                                        </IconButton>
-                                    </Tooltip>
-                                )}
-                                <Tooltip title="Löschen">
-                                    <IconButton size="small" color="error" disabled={busy} onClick={() => onDelete(ad)} aria-label="Löschen"><DeleteIcon /></IconButton>
-                                </Tooltip>
-                            </Stack>
+                        <Box sx={{ flex: 1 }} />
+                        <Divider />
+                        <Stack direction="row" spacing={0.5} justifyContent="space-between" flexWrap="wrap" useFlexGap sx={{ '& .MuiButton-root': { minHeight: 40, px: 0.75 }, '& .MuiButton-startIcon': { mr: 0.5 } }}>
+                            <Button size="small" color="inherit" startIcon={<VisibilityIcon />} onClick={() => onPreview(ad)}>Vorschau</Button>
+                            {kind === 'slide' && (
+                                <Button size="small" startIcon={<EditNoteIcon />} onClick={() => onOpenSlideEditor(ad)}>Bearbeiten</Button>
+                            )}
+                            <Button size="small" color="error" startIcon={<DeleteIcon />} disabled={busy} onClick={() => onDelete(ad)}>Löschen</Button>
                         </Stack>
                     </Stack>
                 </CardContent>
@@ -233,7 +238,6 @@ const SortableAdItem = ({ ad, index, count, onUpdate, onDelete, onOpenSlideEdito
 export default function AdminAds() {
     const theme = useTheme();
     const isXs = useMediaQuery(theme.breakpoints.down('sm'));
-    const isSmallEditor = useMediaQuery(theme.breakpoints.down('md'));
 
     const [ads, setAds] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -242,7 +246,6 @@ export default function AdminAds() {
     const [snack, setSnack] = useState(null); // { severity, message }
 
     const [uploadOpen, setUploadOpen] = useState(false);
-    const [screensOpen, setScreensOpen] = useState(false);
     const [slideCreatorOpen, setSlideCreatorOpen] = useState(false);
     const [editSlideData, setEditSlideData] = useState(null);
     const [editAdId, setEditAdId] = useState(null);
@@ -342,7 +345,7 @@ export default function AdminAds() {
             await api.post('/ads', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
             setUploadOpen(false);
             resetUpload();
-            notify('Werbung hinzugefügt');
+            notify('Folie hinzugefügt');
             fetchAds();
         } catch (err) {
             console.error(err);
@@ -358,7 +361,7 @@ export default function AdminAds() {
         try {
             await api.delete(`/ads/${deleteTarget.id}`);
             setDeleteTarget(null);
-            notify('Werbung gelöscht');
+            notify('Folie gelöscht');
             fetchAds();
         } catch (err) {
             console.error(err);
@@ -423,11 +426,11 @@ export default function AdminAds() {
             setSlideCreatorOpen(false);
             setEditAdId(null);
             setEditSlideData(null);
-            notify(editAdId ? 'Slide gespeichert' : 'Slide erstellt');
+            notify(editAdId ? 'Folie gespeichert' : 'Folie erstellt');
             fetchAds();
         } catch (err) {
             console.error("Failed to upload slide", err);
-            notify(apiError(err, 'Fehler beim Speichern der Slide'), 'error');
+            notify(apiError(err, 'Folie konnte nicht gespeichert werden'), 'error');
         }
     };
 
@@ -446,48 +449,36 @@ export default function AdminAds() {
     const totalSeconds = ads.filter((a) => a.active).reduce((s, a) => s + (Number(a.duration) || 0), 0);
 
     return (
-        <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 } }}>
-            <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} sx={{ mb: 3 }}>
-                <Box>
-                    <Typography variant="body2" color="text.secondary">
-                        Bilder, Videos und Slides für den Bildschirm im Clubraum.
-                        {ads.length > 0 && ` ${activeCount} von ${ads.length} aktiv · Durchlauf ca. ${Math.round(totalSeconds)} s.`}
-                    </Typography>
-                </Box>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    <Button
-                        variant="outlined"
-                        size={isXs ? 'small' : 'medium'}
-                        startIcon={<OpenInNewIcon />}
-                        onClick={() => window.open('/public/ads', '_blank')}
-                    >
-                        Display öffnen
-                    </Button>
-                    <Button variant="outlined" color="inherit" size={isXs ? 'small' : 'medium'} startIcon={<TvIcon />} onClick={() => setScreensOpen(true)}>
-                        Bildschirme
-                    </Button>
-                    <Tooltip title={isSmallEditor ? 'Der Slide-Editor ist für PC oder Tablet im Querformat gedacht' : ''}>
-                        <span>
-                            <Button
-                                variant="outlined"
-                                size={isXs ? 'small' : 'medium'}
-                                startIcon={<EditNoteIcon />}
-                                onClick={() => openSlideEditor(null)}
-                            >
-                                Slide gestalten
-                            </Button>
-                        </span>
-                    </Tooltip>
-                    <Button
-                        variant="contained"
-                        size={isXs ? 'small' : 'medium'}
-                        startIcon={<AddPhotoAlternateIcon />}
-                        onClick={() => { resetUpload(); setUploadOpen(true); }}
-                    >
-                        Bild/Video hochladen
-                    </Button>
-                </Stack>
-            </Stack>
+        <Box sx={{ pb: 4, minWidth: 0 }}>
+            {/* Kopfzeile: gleicher Aufbau wie auf der Seite Clubscore (DisplayPageBar) */}
+            <DisplayPageBar
+                content="ads"
+                onScreensSaved={() => notify('Bildschirm-Belegung gespeichert')}
+                status={(
+                    <Box sx={{ minWidth: 0 }}>
+                        <Typography noWrap sx={{ fontWeight: 700, fontSize: '0.85rem', lineHeight: 1.2 }}>
+                            {ads.length ? `${activeCount} von ${ads.length} Folien werden gezeigt` : 'Noch keine Folien'}
+                        </Typography>
+                        <Typography noWrap color="text.secondary" sx={{ fontSize: '0.72rem', lineHeight: 1.2 }}>
+                            {activeCount ? `Ein Durchlauf dauert ca. ${formatSeconds(totalSeconds)}` : 'Der Werbe-Bildschirm zeigt „Keine aktive Werbung“'}
+                        </Typography>
+                    </Box>
+                )}
+            >
+                <BarButton variant="contained" startIcon={<EditNoteIcon />} onClick={() => openSlideEditor(null)}>
+                    Folie gestalten
+                </BarButton>
+                <BarButton startIcon={<AddPhotoAlternateIcon />} onClick={() => { resetUpload(); setUploadOpen(true); }}>
+                    Bild/Video hochladen
+                </BarButton>
+            </DisplayPageBar>
+            {ads.length > 1 && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, mb: 2 }}>
+                    Die Folien laufen nacheinander in dieser Reihenfolge, jede so lange wie ihre Dauer. Reihenfolge ändern:
+                    am Griff oben links ziehen oder die Pfeile benutzen.
+                </Typography>
+            )}
+            <Box sx={{ mb: ads.length > 1 ? 0 : 2.5 }} />
 
             {loadError && <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={fetchAds}>Erneut laden</Button>}>{loadError}</Alert>}
 
@@ -496,12 +487,15 @@ export default function AdminAds() {
             ) : ads.length === 0 && !loadError ? (
                 <Card variant="outlined" sx={{ borderStyle: 'dashed', borderRadius: 3 }}>
                     <CardContent sx={{ textAlign: 'center', py: 6 }}>
-                        <UploadFileIcon sx={{ fontSize: 48, color: 'text.secondary' }} />
-                        <Typography variant="h6" sx={{ mt: 1 }}>Noch keine Werbung</Typography>
-                        <Typography color="text.secondary" sx={{ mb: 2 }}>Lade ein Bild oder Video hoch oder gestalte eine Slide mit Logo, Text und Speisekarte.</Typography>
-                        <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
-                            <Button variant="contained" startIcon={<AddPhotoAlternateIcon />} onClick={() => { resetUpload(); setUploadOpen(true); }}>Bild/Video hochladen</Button>
-                            <Button variant="outlined" startIcon={<EditNoteIcon />} onClick={() => openSlideEditor(null)}>Slide gestalten</Button>
+                        <DashboardCustomizeIcon sx={{ fontSize: 48, color: 'text.secondary' }} />
+                        <Typography variant="h6" sx={{ mt: 1 }}>Noch keine Folien</Typography>
+                        <Typography color="text.secondary" sx={{ mb: 2, maxWidth: 560, mx: 'auto' }}>
+                            Am schnellsten geht es mit einer Vorlage: Getränkekarte, Ankündigung, Angebot des Abends,
+                            Öffnungszeiten … Texte und Farben lassen sich danach frei ändern. Oder ein fertiges Bild oder Video hochladen.
+                        </Typography>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="center" alignItems="center">
+                            <Button variant="contained" startIcon={<EditNoteIcon />} onClick={() => openSlideEditor(null)} sx={{ minHeight: 40 }}>Folie aus Vorlage gestalten</Button>
+                            <Button variant="outlined" startIcon={<AddPhotoAlternateIcon />} onClick={() => { resetUpload(); setUploadOpen(true); }} sx={{ minHeight: 40 }}>Bild/Video hochladen</Button>
                         </Stack>
                     </CardContent>
                 </Card>
@@ -607,10 +601,10 @@ export default function AdminAds() {
 
             {/* Löschen bestätigen */}
             <Dialog open={!!deleteTarget} onClose={() => !busy && setDeleteTarget(null)} maxWidth="xs" fullWidth>
-                <DialogTitle>Werbung löschen?</DialogTitle>
+                <DialogTitle>Folie löschen?</DialogTitle>
                 <DialogContent>
                     <DialogContentText>
-                        {deleteTarget ? `${KIND_LABEL[kindOf(deleteTarget)]} Nr. ${ads.findIndex((a) => a.id === deleteTarget.id) + 1} wird vom Display entfernt. Die hochgeladene Datei wird mitgelöscht.` : ''}
+                        {deleteTarget ? `Folie Nr. ${ads.findIndex((a) => a.id === deleteTarget.id) + 1} (${KIND_LABEL[kindOf(deleteTarget)]}) verschwindet von der Werbung und lässt sich nicht wiederherstellen. Nur kurz pausieren geht mit dem Schalter „Wird gezeigt“.` : ''}
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>
@@ -619,7 +613,6 @@ export default function AdminAds() {
                 </DialogActions>
             </Dialog>
 
-            <ScreensDialog open={screensOpen} onClose={() => setScreensOpen(false)} onSaved={() => notify('Bildschirm-Belegung gespeichert')} />
 
             {/* Slide Editor Dialog */}
             <SlideEditor
@@ -662,6 +655,6 @@ export default function AdminAds() {
             >
                 {snack ? <Alert onClose={() => setSnack(null)} severity={snack.severity} variant="filled" sx={{ width: '100%' }}>{snack.message}</Alert> : null}
             </Snackbar>
-        </Container>
+        </Box>
     );
 }

@@ -5,6 +5,7 @@ import {
   Typography, useMediaQuery, useTheme,
 } from '@mui/material';
 import FlagIcon from '@mui/icons-material/Flag';
+import TuneIcon from '@mui/icons-material/Tune';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import { useAuth } from '../context/AuthContext';
@@ -26,6 +27,7 @@ import DisplaySettingsDialog from '../components/highscore/DisplaySettingsDialog
 import GoalsDialog, { goalsApiError } from '../components/highscore/GoalsDialog';
 import ArchiveDialog from '../components/highscore/ArchiveDialog';
 import ResetYearDialog from '../components/highscore/ResetYearDialog';
+import DisplayPageBar, { BarButton } from '../components/display/DisplayPageBar';
 import { buildTickerItems } from '../components/highscore/tickerItems';
 import { VIEW_LABELS, dateDE, timeHM } from '../components/highscore/format';
 
@@ -38,7 +40,6 @@ const FULLSCREEN_Z = 1210;
 /** Interner Clubscore (/highscore): Live-Wertungen, Ziele, Anzeige-Steuerung für alle Bildschirme. */
 export default function Highscore() {
   const theme = useTheme();
-  const isXs = useMediaQuery(theme.breakpoints.down('sm'));
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const queryClient = useQueryClient();
   const { isAdmin, can } = useAuth();
@@ -56,8 +57,9 @@ export default function Highscore() {
 
   const [dialog, setDialog] = useState(null); // 'goals' | 'display' | 'archive' | 'reset'
   const [menuOpen, setMenuOpen] = useState(false);
+  const [screensOpen, setScreensOpen] = useState(false);
   const [snack, setSnack] = useState(null);
-  const fs = useFullscreen({ hold: menuOpen || !!dialog });
+  const fs = useFullscreen({ hold: menuOpen || screensOpen || !!dialog });
 
   const { data: archive = [] } = useQuery({
     queryKey: ['clubscore-archive'],
@@ -90,7 +92,9 @@ export default function Highscore() {
 
   const onViewChange = (_, v) => {
     if (!v || !canEdit || v === display.view) return;
-    saveDisplay.mutate({ ...display, view: v });
+    saveDisplay.mutate({ ...display, view: v }, {
+      onSuccess: () => setSnack({ severity: 'success', msg: `Alle Clubscore-Bildschirme zeigen jetzt „${VIEW_LABELS[v]}“.` }),
+    });
   };
 
   const period = data.period || {};
@@ -126,7 +130,7 @@ export default function Highscore() {
   const viewToggle = (
     <ToggleButtonGroup exclusive size="small" value={display.view} onChange={onViewChange}
       disabled={!canEdit || saveDisplay.isPending} aria-label="Ansicht für alle Bildschirme"
-      sx={{ flexShrink: 0, '& .MuiToggleButton-root': { px: { xs: 1.1, sm: 1.5 }, py: 0.5, textTransform: 'none', fontWeight: 700 } }}>
+      sx={{ flexShrink: 0, width: { xs: '100%', sm: 'auto' }, '& .MuiToggleButton-root': { flex: { xs: 1, sm: 'none' }, minHeight: 40, px: { xs: 1, sm: 1.75 }, py: 0.5, textTransform: 'none', fontWeight: 700 } }}>
       {['amount', 'count', 'teams', 'rotate'].map((v) => (
         <ToggleButton key={v} value={v} aria-label={VIEW_LABELS[v]}>{VIEW_LABELS[v]}</ToggleButton>
       ))}
@@ -138,37 +142,44 @@ export default function Highscore() {
       ? { position: 'fixed', inset: 0, zIndex: FULLSCREEN_Z, bgcolor: 'background.default', p: 2, display: 'flex', flexDirection: 'column', gap: 1.5, overflow: 'auto' }
       : { display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, height: isMdUp ? 'calc(100dvh - 80px)' : 'auto' }}>
 
-      {/* Leiste */}
+      {/* Leiste: gleicher Aufbau wie auf der Seite Werbung (DisplayPageBar) */}
       <Box sx={{ flexShrink: 0, opacity: toolbarHidden ? 0 : 1, transition: 'opacity 0.4s', pointerEvents: toolbarHidden ? 'none' : 'auto' }}>
-        <Stack direction="row" alignItems="center" sx={{ flexWrap: 'wrap', columnGap: 1.5, rowGap: 1 }}>
-          <Box sx={{ flex: '1 1 160px', minWidth: 0 }}>
-            <StatusBar status={hs.status} offlineSince={hs.offlineSince} lastUpdated={hs.lastUpdated} period={period} />
-          </Box>
-          <Box sx={{ order: { xs: 3, md: 0 }, width: { xs: '100%', md: 'auto' }, display: 'flex', justifyContent: { xs: 'center', md: 'flex-start' } }}>
+        <DisplayPageBar content="highscore" onDialogChange={setScreensOpen}
+          onScreensSaved={() => setSnack({ severity: 'success', msg: 'Bildschirm-Belegung gespeichert.' })}
+          status={<StatusBar status={hs.status} offlineSince={hs.offlineSince} lastUpdated={hs.lastUpdated} period={period} />}
+          extra={(
+            <Stack direction="row" alignItems="center">
+              <DisplayMenu isAdmin={isAdmin} onOpenChange={setMenuOpen}
+                onArchive={() => setDialog('archive')} onReset={() => setDialog('reset')} />
+              {fs.supported && (
+                <Tooltip title={fs.isFull ? 'Vollbild beenden' : 'Vollbild'}>
+                  <IconButton onClick={fs.toggle} aria-label={fs.isFull ? 'Vollbild beenden' : 'Vollbild'} sx={{ width: 40, height: 40 }}>
+                    {fs.isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Stack>
+          )}>
+          {canEdit && <BarButton startIcon={<FlagIcon />} onClick={() => setDialog('goals')}>Tagesziele</BarButton>}
+          <BarButton startIcon={<TuneIcon />} onClick={() => setDialog('display')}>Einstellungen</BarButton>
+        </DisplayPageBar>
+        {/* Ansicht: wirkt auf alle Bildschirme, deshalb mit Beschriftung statt nur als Umschalter */}
+        <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'stretch', sm: 'center' }} spacing={{ xs: 0.5, sm: 1.5 }} sx={{ mt: 1.25 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+            Ansicht auf allen Bildschirmen:
+          </Typography>
+          <Box sx={{ display: 'flex', minWidth: 0 }}>
             {canEdit ? viewToggle : (
               <Tooltip title="Nur Admin und Kasse können die Ansicht ändern">
                 <span>{viewToggle}</span>
               </Tooltip>
             )}
           </Box>
-          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexShrink: 0 }}>
-            {canEdit && (isXs ? (
-              <Tooltip title="Ziele">
-                <IconButton onClick={() => setDialog('goals')} aria-label="Ziele"><FlagIcon /></IconButton>
-              </Tooltip>
-            ) : (
-              <Button variant="outlined" size="small" startIcon={<FlagIcon />} onClick={() => setDialog('goals')}>Ziele</Button>
-            ))}
-            {fs.supported && (
-              <Tooltip title={fs.isFull ? 'Vollbild beenden' : 'Vollbild'}>
-                <IconButton onClick={fs.toggle} aria-label={fs.isFull ? 'Vollbild beenden' : 'Vollbild'}>
-                  {fs.isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
-                </IconButton>
-              </Tooltip>
-            )}
-            <DisplayMenu canEditDisplay={canEdit} isAdmin={isAdmin} onOpenChange={setMenuOpen}
-              onDisplay={() => setDialog('display')} onArchive={() => setDialog('archive')} onReset={() => setDialog('reset')} />
-          </Stack>
+          {rotating && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', md: 'block' } }}>
+              wechselt alle {seconds} s ({display.rotateViews.map((v) => VIEW_LABELS[v]).join(', ')})
+            </Typography>
+          )}
         </Stack>
         <Box sx={{ mt: 1 }}>
           <RotateProgress active={rotating} cycle={cycle} seconds={seconds} />
@@ -211,7 +222,7 @@ export default function Highscore() {
         saving={saveDisplay.isPending}
         error={saveDisplay.isError ? goalsApiError(saveDisplay.error, 'Anzeige konnte nicht gespeichert werden.') : ''}
         onSave={(next) => saveDisplay.mutate(next, {
-          onSuccess: () => { closeDialog(); setSnack({ severity: 'success', msg: 'Anzeige für alle Bildschirme gespeichert.' }); },
+          onSuccess: () => { closeDialog(); setSnack({ severity: 'success', msg: 'Einstellungen für alle Clubscore-Bildschirme gespeichert.' }); },
         })} />
       <ArchiveDialog open={dialog === 'archive'} onClose={closeDialog} />
       {isAdmin && (

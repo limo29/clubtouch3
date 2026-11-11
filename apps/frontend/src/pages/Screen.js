@@ -52,7 +52,7 @@ export default function Screen() {
       <Typography sx={{ fontSize: '3vh' }}>
         {content === null ? 'Bildschirm wird eingerichtet …'
           : content === 'sales' ? 'Verkauf wird geöffnet …'
-            : `Bildschirm ${Number.isFinite(n) ? n : '?'} – noch nichts zugeordnet (in der Kasse: Werbung → Bildschirme)`}
+            : `Bildschirm ${Number.isFinite(n) ? n : '?'} – noch nichts zugeordnet (in der Kasse: Clubscore oder Werbung → Bildschirme)`}
       </Typography>
     </Box>
   );

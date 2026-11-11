@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControlLabel, FormGroup, FormLabel, Slider, Stack, Switch, ToggleButton, ToggleButtonGroup, Typography,
+  FormControlLabel, FormGroup, FormLabel, Slider, Stack, Switch, ToggleButton, ToggleButtonGroup,
   useMediaQuery, useTheme,
 } from '@mui/material';
 import { VIEWS } from '../../hooks/useHighscoreLogic';
@@ -19,17 +19,17 @@ function Body({ display, canEdit, saving, error, onSave, onClose }) {
 
   return (
     <>
-      <DialogTitle>Anzeige</DialogTitle>
+      <DialogTitle>Clubscore-Einstellungen</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={3}>
-          {!canEdit && <Alert severity="info">Nur Admin und Kasse können die Anzeige ändern.</Alert>}
-          <Typography variant="body2" color="text.secondary">
-            Gilt für alle Bildschirme (auch die öffentliche Anzeige), sofort nach dem Speichern.
-          </Typography>
+          <Alert severity="info" icon={false}>
+            Gilt für <b>alle Bildschirme</b> mit dem Clubscore (über der Theke und „Anzeige öffnen“), sofort nach dem Speichern.
+            {!canEdit && ' Nur Admin und Kasse können das ändern.'}
+          </Alert>
           <Box>
             <FormLabel component="legend">Ansicht</FormLabel>
             <ToggleButtonGroup exclusive size="small" value={draft.view} disabled={!canEdit}
-              onChange={(_, v) => v && set({ view: v })} sx={{ mt: 1, flexWrap: 'wrap' }}>
+              onChange={(_, v) => v && set({ view: v })} sx={{ mt: 1, flexWrap: 'wrap', '& .MuiToggleButton-root': { textTransform: 'none', fontWeight: 700 } }}>
               {['amount', 'count', 'teams', 'rotate'].map((v) => <ToggleButton key={v} value={v}>{VIEW_LABELS[v]}</ToggleButton>)}
             </ToggleButtonGroup>
           </Box>
@@ -52,7 +52,7 @@ function Body({ display, canEdit, saving, error, onSave, onClose }) {
           <Box>
             <FormLabel component="legend">Wertungen</FormLabel>
             <ToggleButtonGroup exclusive size="small" value={draft.board} disabled={!canEdit}
-              onChange={(_, v) => v && set({ board: v })} sx={{ mt: 1 }}>
+              onChange={(_, v) => v && set({ board: v })} sx={{ mt: 1, '& .MuiToggleButton-root': { textTransform: 'none', fontWeight: 700 } }}>
               <ToggleButton value="both">Tag und Jahr</ToggleButton>
               <ToggleButton value="day">Nur Tag</ToggleButton>
               <ToggleButton value="year">Nur Jahr</ToggleButton>

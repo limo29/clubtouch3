@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # ClubTouch: öffnet auf jedem angeschlossenen Monitor ein Fenster (Bildschirm 1, 2, 3 … von links nach rechts),
 # Clubscore und Werbung im Vollbild, den Verkauf als normales maximiertes Fenster.
-# Was auf welcher Nummer läuft, wird in der Kasse eingestellt: Werbung -> "Bildschirme".
-# Aufruf: ./start-linux.sh [Adresse]     Beenden: Alt+F4 im jeweiligen Fenster.
+# Was auf welcher Nummer läuft, wird in der Kasse eingestellt: Clubscore oder Werbung -> „Bildschirme“.
+# Dort lädt man diese Datei auch herunter, die Adresse der Kasse ist dann schon eingetragen.
+# Aufruf: bash bildschirme-starten.sh [Adresse]     Beenden: Alt+F4 im jeweiligen Fenster.
 # Zum Testen: BROWSER=<Pfad>, CLUBTOUCH_FLAGS="<weitere Browser-Schalter>", CLUBTOUCH_DEBUG_PORT=<Basis-Port>.
 set -euo pipefail
-ADRESSE="${1:-https://frontend-production-da0d.up.railway.app}"   # Adresse der Kasse, ohne Schrägstrich am Ende
+ADRESSE="${1:-__CLUBTOUCH_ADRESSE__}"   # beim Herunterladen eingesetzt, ohne Schrägstrich am Ende
+ADRESSE="${ADRESSE%/}"
+case "$ADRESSE" in
+  http://*|https://*) ;;
+  *) echo "Keine Adresse der Kasse eingetragen. Bitte das Startskript in der Kasse unter Bildschirme herunterladen" >&2
+     echo "oder die Adresse mitgeben: bash $0 https://meine-kasse.example" >&2; exit 1 ;;
+esac
 
 # Browser: Umgebungsvariable BROWSER (Pfad) hat Vorrang, sonst der erste gefundene
 BROWSER="${BROWSER:-}"

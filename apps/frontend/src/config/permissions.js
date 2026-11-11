@@ -19,7 +19,8 @@ export const PERMISSIONS = {
   manageBank: ['ADMIN', 'ACCOUNTANT'],             // Anfangsstände, Kontostand-Abgleich, Wechselgeld-Sockel
   editClubscore: ['ADMIN', 'CASHIER'],             // Ziele, Anzeige-Einstellung
   resetClubscore: ['ADMIN'],
-  ads: ['ADMIN', 'CASHIER'],                       // Werbung / Slides
+  ads: ['ADMIN', 'CASHIER'],                       // Werbung / Folien
+  screens: ['ADMIN', 'CASHIER'],                   // Bildschirm-Belegung ändern, Nummern einblenden
   financeReports: ['ADMIN', 'ACCOUNTANT'],         // Kundenliste, Monatsbericht, EÜR-Export
   users: ['ADMIN'],
 };
