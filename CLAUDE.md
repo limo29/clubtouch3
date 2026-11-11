@@ -133,4 +133,37 @@ Railway deploys backend and frontend from the per-app Dockerfiles on every push 
 - `README.md` (UTF-8, German) is the overview for operators: features, role table, setup, Railway notes. Keep it in sync with feature and role changes.
 - User manual: `docs/anleitung/ClubTouch-Benutzerhandbuch.pdf` and `ClubTouch-Schnellstart.pdf`. Their source is `docs/anleitung/quelle/` (`handbuch.html`, `schnellstart.html` = page content only, starting at `<title>`, as published as claude.ai artifacts; images in `img/`, JPEG ≤ 1300 px, never real member names, Clubscore shots use mocked API data). Regenerate the PDFs with `NODE_PATH=<dir with playwright-core> node docs/anleitung/quelle/pdf-erzeugen.js` (adds a minimal HTML skeleton, A4, print CSS, light scheme). Keep UI terms in the manual in sync with the interface.
 - Migrations live in `apps/backend/prisma/migrations`; add a migration with `npm run prisma:migrate` rather than editing the schema alone.
-- Work happens on branches `dev` / `public-dev` and is merged to `main` via PRs.
+- Work currently happens directly on `main` (the old `dev` / `public-dev` branches and `feat/topup-migration` on GitHub are behind and unused). Every push to `main` redeploys Railway, so commit and push only when the owner asks.
+
+## Working notes for agents
+
+### This machine and the local test instance
+
+- The development laptop has 6 GB RAM and has already crashed from memory pressure (docker build + three kiosk browser windows + CRA dev server at once). Never run two heavy things in parallel: no docker build, `npm run build`, jest run or Playwright browsers next to each other; start browsers one at a time and close them. Do not start visible fullscreen browsers or the kiosk start script casually, the owner works on the same desktop (GNOME Wayland, laptop panel plus two external monitors as a three-screen test setup).
+- The local instance is a pure test instance and may be changed freely. Postgres is an embedded cluster on port 5434 (data in `~/.local/share/clubtouch3-pg`, started by hand after a reboot with the `pg_ctl` of the `@embedded-postgres/linux-x64` package under `~/.local/lib/embedded-postgres`, `-o "-p 5434"`), backend on 3001, CRA dev server on 3000, uploads in `~/.local/share/clubtouch3-uploads`, login `admin@clubtouch3.local` / `Admin123!`.
+- The local DB is a rehearsal of the Clubtouch 2.0 takeover and holds real member names and balances (166 customers, 27 articles). Do not create sales, top-ups or customers in it for tests unless you clean up, never put real names into screenshots, the manual, commits or external services (mock the API for Clubscore shots).
+- Docker is installed; the shell is not in the `docker` group yet, use `sg docker -c "docker …"`.
+- There is no system Chrome. For UI checks use `playwright-core` with the Chromium from `~/.cache/ms-playwright` (`--no-sandbox`); check at 1366×768, 1024×768 and 390×844 (desktop, tablet, phone).
+- Verification before a commit: backend `node --check` over changed files and `npx prisma validate`; frontend `CI=true npm run build` (warnings are errors) and `npm test -- --watchAll=false`.
+
+### Production (Railway) and the data takeover
+
+- Railway holds the real takeover data (member accounts and balances from Clubtouch 2.0, snapshot of the evening of 10 Nov 2026) but is not in daily use yet. The takeover has to be repeated on a freshly reset database right before go-live. Treat it as production anyway: no test bookings, no schema experiments, confirm with the owner before anything hard to reverse.
+- The takeover tool is the separate directory `~/dev/crtouch-migration` (read-only scraper of the old system plus import). It contains personal data and credentials (also the Railway admin password and DB backups) and must never be copied into this repo or pushed anywhere. The local default password does not work on Railway.
+- Railway CLI is linked to the project; DB access goes through `railway ssh` / an SSH tunnel to the Postgres service. Check `railway config plan` for drift before any `railway config apply`.
+- `PUBLIC_BALANCE_PIN` stays `666` (owner's decision).
+- The start-script download in the "Bildschirme" dialog writes `window.location.origin` into the script: download it from the instance the bar PC should show, not from localhost.
+
+### Not verified yet
+
+- Windows start script `apps/frontend/public/kiosk/bildschirme-starten.cmd`: never executed (no Windows here), only proofread. To check on the bar PC: double click (SmartScreen prompt on first run), one window per monitor in left-to-right order, Clubscore/ads in kiosk fullscreen, the sales screen as a normal maximised window (it must not be fullscreen, Spotify runs on that monitor too), autostart via a shortcut in `shell:startup`.
+- Linux start script: tested on three monitors in X11 mode; the sales-not-fullscreen variant has not run on real monitors.
+- Also untested on real devices: video ads, Clubscore with real events during an evening, the SEPA/EPC QR code on the invoice with a banking app, the "Neue Version verfügbar" update flow, iOS/Safari, the screen wake lock.
+
+### Known open points
+
+- `ScreensDialog` offers screens 1–4, the backend accepts 1–6.
+- Slide template "Karte mit zwei Kategorien": the two menu columns shrink independently and can end up with different font sizes; short menus do not grow to fill the space.
+- "NEU" marks may appear on all Clubscore entries after a reload (`useRankChanges`), not checked on a real screen.
+- "Angebot des Abends" slides saved before the z-index fix keep the old layering until they are recreated from the template.
+- Frontend `npm audit` has not been worked through; the containers still run as root.
