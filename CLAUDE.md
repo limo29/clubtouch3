@@ -137,13 +137,12 @@ Railway deploys backend and frontend from the per-app Dockerfiles on every push 
 
 ## Working notes for agents
 
-### This machine and the local test instance
+### Local test instances
 
-- The development laptop has 6 GB RAM and has already crashed from memory pressure (docker build + three kiosk browser windows + CRA dev server at once). Never run two heavy things in parallel: no docker build, `npm run build`, jest run or Playwright browsers next to each other; start browsers one at a time and close them. Do not start visible fullscreen browsers or the kiosk start script casually, the owner works on the same desktop (GNOME Wayland, laptop panel plus two external monitors as a three-screen test setup).
-- The local instance is a pure test instance and may be changed freely. Postgres is an embedded cluster on port 5434 (data in `~/.local/share/clubtouch3-pg`, started by hand after a reboot with the `pg_ctl` of the `@embedded-postgres/linux-x64` package under `~/.local/lib/embedded-postgres`, `-o "-p 5434"`), backend on 3001, CRA dev server on 3000, uploads in `~/.local/share/clubtouch3-uploads`, login `admin@clubtouch3.local` / `Admin123!`.
-- The local DB is a rehearsal of the Clubtouch 2.0 takeover and holds real member names and balances (166 customers, 27 articles). Do not create sales, top-ups or customers in it for tests unless you clean up, never put real names into screenshots, the manual, commits or external services (mock the API for Clubscore shots).
-- Docker is installed; the shell is not in the `docker` group yet, use `sg docker -c "docker …"`.
-- There is no system Chrome. For UI checks use `playwright-core` with the Chromium from `~/.cache/ms-playwright` (`--no-sandbox`); check at 1366×768, 1024×768 and 390×844 (desktop, tablet, phone).
+- A local instance is a pure test instance and may be changed freely: backend on 3001, CRA dev server on 3000, default login `admin@clubtouch3.local` / `Admin123!`. How Postgres is started differs per machine (Docker compose from `docker/`, or whatever the machine's own notes say).
+- A local DB may be a rehearsal of the Clubtouch 2.0 takeover and then holds real member names and balances. Do not create sales, top-ups or customers in it for tests unless you clean up, and never put real names into screenshots, the manual, commits or external services (mock the API for Clubscore shots).
+- Do not start visible fullscreen browsers or the kiosk start script casually: the owner works on the same desktop.
+- UI checks: `playwright-core` with its own Chromium, at 1366×768, 1024×768 and 390×844 (desktop, tablet, phone).
 - Verification before a commit: backend `node --check` over changed files and `npx prisma validate`; frontend `CI=true npm run build` (warnings are errors) and `npm test -- --watchAll=false`.
 
 ### Production (Railway) and the data takeover
