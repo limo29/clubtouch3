@@ -38,13 +38,23 @@ Stand der Beschreibung: Oktober 2026. Technische Details für Entwickler stehen 
 - Interne Seite mit Einstellungen und Archiv; öffentliche Anzeige für den Fernseher (`/public/highscore`), live per WebSocket.
 
 ### Werbung
-- Bilder, Videos oder im integrierten Editor gestaltete Slides (auch mit Getränkekarte); Anzeige im Vollbild unter `/public/ads`, Änderungen erscheinen sofort.
+- Bilder, Videos oder im integrierten Editor gestaltete Slides; Anzeige im Vollbild unter `/public/ads`, Änderungen erscheinen sofort.
+- Vorlagen (Getränkekarte, zwei Kategorien, Ankündigung, Angebot, Öffnungszeiten, Leuchtschrift, Leer) und mitgelieferte Schriften (Inter, Bebas Neue, Oswald, Permanent Marker, Monoton), die auf jedem Bildschirm gleich aussehen.
+- Getränkekarte: Preise kommen live aus den Artikeln; Sorten lassen sich zu einer Zeile zusammenfassen (z. B. alle Frucade), einzelne Getränke ausblenden. Passen nicht alle Zeilen in das Feld, wird die Schrift automatisch kleiner.
+
+### Bildschirme über der Theke
+- Jeder Monitor am Thekenrechner öffnet fest eine Nummer: `/screen/1`, `/screen/2`, `/screen/3` (von links nach rechts).
+- Was auf welcher Nummer läuft (Clubscore, Werbung, Verkauf oder nichts), stellt man unter **Werbung → Bildschirme** ein; die Monitore schalten sofort um. „Nummern auf den Bildschirmen einblenden“ zeigt, welcher Monitor welche Nummer hat.
+- Startskripte in `scripts/kiosk/` (Windows: Doppelklick auf `Bildschirme starten.bat`, Linux: `start-linux.sh`) öffnen alle Monitore auf einmal, Anleitung in `scripts/kiosk/LIESMICH.md`.
+- Clubscore und Werbung laufen im Vollbild, der **Verkauf bewusst nicht**: er startet als normales, maximiertes Fenster, damit daneben z. B. die Musik bedient werden kann.
+- Beide Anzeigen haben schwarzen Grund und füllen auch Monitore, die nicht 16:9 sind.
 
 ### Öffentliche Seiten (ohne Anmeldung)
 | Seite | Zweck |
 |---|---|
 | `/public/highscore` | Clubscore für den Fernseher |
 | `/public/ads` | Werbung/Slides für den Bildschirm |
+| `/screen/1`, `/screen/2`, … | Fester Platz je Monitor; zeigt, was unter Werbung → Bildschirme zugeordnet ist |
 | `/check-balance` | Mitglieder sehen ihr Guthaben und die letzten Buchungen – mit Name **und dem gemeinsamen PIN** (aushängen an der Theke) |
 
 ## Rollen
@@ -74,6 +84,7 @@ Es gibt drei Rollen. Die Oberfläche blendet aus, was eine Rolle nicht darf; ver
 | Clubscore: Ziele und Anzeige einstellen | ✅ | ✅ | – |
 | Clubscore: Jahr zurücksetzen | ✅ | – | – |
 | Werbung | ✅ | ✅ | – |
+| Bildschirm-Belegung (was auf welchem Monitor läuft) | ✅ | ✅ | – |
 | Benutzer verwalten, fremde Passwörter setzen | ✅ | – | – |
 | Eigenes Passwort ändern | ✅ | ✅ | ✅ |
 
