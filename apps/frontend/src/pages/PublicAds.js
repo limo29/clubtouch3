@@ -5,6 +5,9 @@ import { io } from 'socket.io-client';
 import api from '../services/api';
 import { WS_URL } from '../config/api';
 import SlideRenderer from '../components/ads/SlideRenderer';
+import useFullscreen from '../hooks/useFullscreen';
+import useWakeLock from '../hooks/useWakeLock';
+import { DISPLAY_ACCENT, FullscreenButton, StageClock, StageOverlay, StageProgress } from '../components/display/StageChrome';
 
 /**
  * Öffentliches Werbe-Display (/public/ads), läuft ohne Login auf dem Bildschirm im Clubraum.
@@ -37,24 +40,8 @@ const isVideo = (url) => {
     return ['mp4', 'webm', 'ogg', 'mov', 'm4v'].includes(ext);
 };
 
-const Clock = () => {
-    const [time, setTime] = useState(new Date());
-    useEffect(() => {
-        const timer = setInterval(() => setTime(new Date()), 1000);
-        return () => clearInterval(timer);
-    }, []);
-
-    return (
-        <Box sx={{ position: 'absolute', top: 20, right: 30, zIndex: 9999, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-            <Typography variant="h3" fontWeight="800" color="white" sx={{ fontFamily: 'monospace' }}>
-                {time.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
-            </Typography>
-        </Box>
-    );
-};
-
 const theme = createTheme({
-    palette: { mode: 'dark', background: { default: '#000' } },
+    palette: { mode: 'dark', primary: { main: DISPLAY_ACCENT }, background: { default: '#000' } },
     typography: { fontFamily: 'Inter, Roboto, sans-serif' }
 });
 
@@ -69,6 +56,8 @@ export default function PublicAds() {
     const [show, setShow] = useState(true);
     const [cycle, setCycle] = useState(0); // erzwingt einen Neustart der Timer (z.B. Video zu Ende, Medium fehlt)
     const fingerprintRef = useRef('');
+    const fs = useFullscreen({ alwaysAutoHide: true });
+    useWakeLock();
 
     const fetchAds = useCallback(async () => {
         try {
@@ -155,7 +144,8 @@ export default function PublicAds() {
             <ThemeProvider theme={theme}>
                 <CssBaseline />
                 <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                    <Clock />
+                    <StageOverlay><StageClock overlay /></StageOverlay>
+                    <FullscreenButton fs={fs} />
                     <Box component="img" src="/assets/images/Logo.png" alt="" sx={{ width: 'min(40vw, 320px)', opacity: 0.9 }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                     <Typography variant="h5" color="text.secondary">
                         {failed ? 'Keine Verbindung zum Server – neuer Versuch in Kürze' : 'Keine aktive Werbung'}
@@ -176,7 +166,12 @@ export default function PublicAds() {
                 height: '100vh', width: '100vw', overflow: 'hidden', bgcolor: '#000', position: 'relative',
                 display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
-                <Clock />
+                {/* Uhr und Balken wie auf dem Clubscore-Bildschirm daneben (gleiche Bühne, gleiche Stelle) */}
+                <StageOverlay>
+                    <StageClock overlay />
+                    <StageProgress active={ads.length > 1} cycleKey={`${currentAd.id}-${currentIndex}-${cycle}`} seconds={durationS} />
+                </StageOverlay>
+                <FullscreenButton fs={fs} />
 
                 <Transition type={currentAd.transition} in={show} timeout={TRANSITION_MS}>
                     <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -208,18 +203,6 @@ export default function PublicAds() {
                         )}
                     </Box>
                 </Transition>
-
-                {/* Fortschrittsbalken */}
-                {show && (
-                    <Box
-                        key={`${currentAd.id}-${cycle}`}
-                        sx={{
-                            position: 'absolute', bottom: 0, left: 0, height: 6, bgcolor: 'primary.main', width: '0%',
-                            animation: `progress ${durationS}s linear forwards`
-                        }}
-                    />
-                )}
-                <style>{`@keyframes progress { from { width: 0%; } to { width: 100%; } }`}</style>
 
                 {/* Vorladen des nächsten Mediums */}
                 {nextAd && nextAd.id !== currentAd.id && (

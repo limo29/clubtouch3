@@ -33,7 +33,7 @@ import FlipToFrontIcon from '@mui/icons-material/FlipToFront';
 import FlipToBackIcon from '@mui/icons-material/FlipToBack';
 
 
-import SlideElement, { ICONS } from '../ads/SlideElement';
+import SlideElement, { ICONS, fontStack } from '../ads/SlideElement';
 import api from '../../services/api';
 
 const ASSETS_LOGO = '/assets/images/Logo.png';
@@ -46,6 +46,8 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
     const [bgColor, setBgColor] = useState('#000000');
     const [bgImage, setBgImage] = useState(null);
     const [scale, setScale] = useState(0.6); // Viewport scale
+    // Solange niemand am Zoom-Regler dreht, wird die Arbeitsfläche in den verfügbaren Platz eingepasst
+    const [autoFit, setAutoFit] = useState(true);
     const [anchorElEmoji, setAnchorElEmoji] = useState(null);
 
     // Menu Selection
@@ -54,6 +56,30 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
+
+    // Arbeitsfläche einpassen: beim Öffnen und bei jeder Größenänderung des Fensters
+    useEffect(() => {
+        if (!open) return undefined;
+        setAutoFit(true);
+        return undefined;
+    }, [open]);
+    useEffect(() => {
+        if (!open || !autoFit) return undefined;
+        let ro;
+        let raf;
+        const fit = () => {
+            const el = containerRef.current;
+            if (!el) { raf = requestAnimationFrame(fit); return; } // Dialog ist noch nicht im DOM
+            const apply = () => {
+                const { clientWidth: w, clientHeight: h } = el;
+                if (w > 0 && h > 0) setScale(Math.max(0.1, Math.min((w - 48) / 1920, (h - 48) / 1080)));
+            };
+            apply();
+            if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(apply); ro.observe(el); }
+        };
+        fit();
+        return () => { cancelAnimationFrame(raf); ro?.disconnect(); };
+    }, [open, autoFit]);
 
     // Reset on open or load initial data
     useEffect(() => {
@@ -245,9 +271,10 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
         >
             <DialogTitle sx={{ borderBottom: 1, borderColor: 'rgba(255,255,255,0.1)', px: 3, py: 2 }}>
                 <Stack direction="row" alignItems="center" justifyContent="space-between">
-                    <Typography variant="h6" fontWeight="bold">Slide Creator</Typography>
+                    <Typography variant="h6" fontWeight="bold">Slide gestalten</Typography>
                     <Stack direction="row" spacing={2} alignItems="center">
-                        <ZoomSilder scale={scale} setScale={setScale} />
+                        <ZoomSilder scale={scale} setScale={(v) => { setAutoFit(false); setScale(v); }} />
+                        <Button color="inherit" size="small" disabled={autoFit} onClick={() => setAutoFit(true)}>Einpassen</Button>
                         <Button color="inherit" onClick={onClose} startIcon={<CloseIcon />}>Abbrechen</Button>
                         <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSave}>Speichern</Button>
                     </Stack>
@@ -286,7 +313,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
 
                     <label>
                         <input type="file" hidden accept="image/*" onChange={handleBgUpload} />
-                        <ToolbarButton icon={<WallpaperIcon />} label="Bg" onClick={() => { }} component="span" />
+                        <ToolbarButton icon={<WallpaperIcon />} label="Hintergrund" onClick={() => { }} component="span" />
                     </label>
                 </Paper>
 
@@ -297,8 +324,6 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                         flex: 1,
                         bgcolor: '#000',
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
                         overflow: 'auto',
                         position: 'relative',
                         backgroundImage: 'radial-gradient(#333 1px, transparent 1px)',
@@ -306,6 +331,8 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                     }}
                     onMouseDown={() => setSelectedId(null)}
                 >
+                    {/* Platzhalter in der skalierten Größe: so stimmen Zentrierung und Scrollbereich bei jedem Zoom */}
+                    <Box sx={{ width: 1920 * scale, height: 1080 * scale, m: 'auto', flexShrink: 0, boxShadow: '0 0 50px rgba(0,0,0,0.5)' }}>
                     <Box
                         ref={canvasRef}
                         sx={{
@@ -316,7 +343,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                             position: 'relative',
                             boxShadow: '0 0 50px rgba(0,0,0,0.5)',
                             transform: `scale(${scale})`,
-                            transformOrigin: 'center',
+                            transformOrigin: 'top left',
                             flexShrink: 0,
                             overflow: 'hidden'
                         }}
@@ -353,6 +380,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                                 </div>
                             </Rnd>
                         ))}
+                    </Box>
                     </Box>
                 </Box>
 
@@ -513,7 +541,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                                                             fullWidth
                                                             sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.05)', '.MuiSvgIcon-root': { color: 'white' } }}
                                                         >
-                                                            {FONTS.map(f => <MenuItem key={f} value={f} style={{ fontFamily: f }}>{f}</MenuItem>)}
+                                                            {FONTS.map(f => <MenuItem key={f} value={f} style={{ fontFamily: fontStack(f) }}>{f}</MenuItem>)}
                                                         </Select>
                                                     </Box>
                                                     <Box sx={{ width: 80 }}>
@@ -699,7 +727,7 @@ const ZoomSilder = ({ scale, setScale }) => (
         <Typography variant="caption">-</Typography>
         <Slider
             size="small"
-            min={0.2} max={1.5} step={0.1}
+            min={0.2} max={1.5} step={0.05}
             value={scale}
             onChange={(_, v) => setScale(v)}
             sx={{ color: 'white' }}

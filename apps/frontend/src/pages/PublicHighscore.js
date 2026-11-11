@@ -2,17 +2,17 @@ import React, { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Box, Chip, CircularProgress, CssBaseline, Fade, IconButton, Stack, ThemeProvider, Tooltip, Typography,
+  Box, Chip, CircularProgress, CssBaseline, Stack, ThemeProvider, Typography,
   createTheme, useMediaQuery,
 } from '@mui/material';
 import TrophyIcon from '@mui/icons-material/EmojiEvents';
-import FullscreenIcon from '@mui/icons-material/Fullscreen';
-import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
 import api from '../services/api';
 import useHighscoreLogic from '../hooks/useHighscoreLogic';
 import useClubscoreEvents from '../hooks/useClubscoreEvents';
 import useFullscreen from '../hooks/useFullscreen';
+import useWakeLock from '../hooks/useWakeLock';
+import { DISPLAY_ACCENT, FullscreenButton, StageClock, StageProgress } from '../components/display/StageChrome';
 import { useNow, useRankChanges } from '../components/highscore/useRankChanges';
 import useRotatingView from '../components/highscore/useRotatingView';
 import Board from '../components/highscore/Board';
@@ -37,7 +37,7 @@ const URL_BOARDS = ['both', 'day', 'year'];
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
-    primary: { main: '#90caf9' },
+    primary: { main: DISPLAY_ACCENT },
     background: { default: BG, paper: BG },
     divider: 'rgba(255,255,255,0.10)',
   },
@@ -56,14 +56,6 @@ const useEffectiveDisplay = (serverDisplay) => {
     ...(ticker === '0' || ticker === '1' ? { ticker: ticker === '1' } : {}),
   }), [serverDisplay, view, board, ticker]);
 };
-
-function Clock({ now, lg }) {
-  return (
-    <Typography sx={{ fontWeight: 800, fontSize: lg ? '2.4rem' : '1.1rem', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
-      {timeHM(now)}
-    </Typography>
-  );
-}
 
 function StatusChip({ hs, lg }) {
   if (hs.status === 'live') {
@@ -95,6 +87,7 @@ function Content() {
     enabled: !hs.loading && !!hs.lastUpdated,
   });
   const fs = useFullscreen({ alwaysAutoHide: true });
+  useWakeLock();
 
   const { data: archive = [] } = useQuery({
     queryKey: ['clubscore-public-archive'],
@@ -144,7 +137,7 @@ function Content() {
         sx={lg ? { height: 44, fontSize: '1.4rem', fontWeight: 700, px: 1 } : { fontWeight: 700 }} />
       <Box sx={{ flex: 1 }} />
       <StatusChip hs={hs} lg={lg} />
-      {lg && <Clock now={now} lg />}
+      {lg && <StageClock />}
     </Stack>
   );
 
@@ -175,9 +168,10 @@ function Content() {
           <TvStage background={BG}>
             <Box sx={{ width: '100%', height: '100%', p: 3, display: 'flex', flexDirection: 'column', gap: 2, color: 'text.primary' }}>
               {header}
-              <RotateProgress active={rotating} cycle={cycle} seconds={seconds} height={6} />
               {body}
             </Box>
+            {/* wie auf dem Werbe-Bildschirm: Balken an der Unterkante der Bühne */}
+            <StageProgress active={rotating} cycleKey={cycle} seconds={seconds} />
           </TvStage>
         </Box>
       ) : (
@@ -191,18 +185,7 @@ function Content() {
       {/* außerhalb der skalierten Bühne, sonst bezieht sich position:fixed auf die Bühne */}
       <GoalOverlay event={overlay} onDone={dismissOverlay} />
 
-      {fs.supported && lg && (
-        <Fade in={fs.controlsVisible}>
-          <Box sx={{ position: 'fixed', top: 12, right: 12, zIndex: 1300 }}>
-            <Tooltip title={fs.isFull ? 'Vollbild verlassen (Esc)' : 'Vollbild'}>
-              <IconButton onClick={fs.toggle} aria-label={fs.isFull ? 'Vollbild verlassen' : 'Vollbild'}
-                sx={{ color: 'rgba(255,255,255,0.75)', bgcolor: 'rgba(255,255,255,0.08)', '&:hover': { bgcolor: 'rgba(255,255,255,0.16)' } }}>
-                {fs.isFull ? <FullscreenExitIcon /> : <FullscreenIcon />}
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Fade>
-      )}
+      {lg && <FullscreenButton fs={fs} />}
     </>
   );
 }

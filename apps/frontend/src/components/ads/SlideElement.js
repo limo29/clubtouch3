@@ -53,6 +53,18 @@ const MenuRenderer = ({ categoryName, style, isEditor, fontSize, color }) => {
     );
 };
 
+// Die gewählte Schrift ist nicht auf jedem Bildschirm installiert (Roboto fehlt z. B. auf vielen Linux-Geräten).
+// Ohne Rückfallkette würde der Browser dann eine Serifenschrift nehmen und die Folie sähe überall anders aus.
+const SERIF = ['Times New Roman', 'Georgia'];
+const MONO = ['Courier New'];
+export const fontStack = (name) => {
+    if (!name) return '"Inter", "Roboto", "Helvetica Neue", Helvetica, Arial, sans-serif';
+    if (SERIF.includes(name)) return `"${name}", Georgia, "Times New Roman", serif`;
+    if (MONO.includes(name)) return `"${name}", "Courier New", monospace`;
+    if (name === 'Impact') return 'Impact, "Arial Narrow Bold", "Helvetica Neue", Arial, sans-serif';
+    return `"${name}", "Inter", "Roboto", "Helvetica Neue", Helvetica, Arial, sans-serif`;
+};
+
 export default function SlideElement({ element, isEditor = false }) {
     const style = {
         width: '100%',
@@ -60,11 +72,12 @@ export default function SlideElement({ element, isEditor = false }) {
         transform: `rotate(${element.rotation}deg)`,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
+        // Ausrichtung aus dem Editor (links/zentriert/rechts) auch für einzeilige Texte wirksam machen
+        justifyContent: element.type === 'text' ? ({ left: 'flex-start', right: 'flex-end' }[element.textAlign] || 'center') : 'center',
         textAlign: element.textAlign || 'center',
         color: element.color,
         fontSize: element.type === 'text' ? `${element.fontSize}px` : undefined,
-        fontFamily: element.fontFamily,
+        fontFamily: fontStack(element.fontFamily),
         fontWeight: element.fontWeight,
         fontStyle: element.fontStyle,
         backgroundColor: element.type === 'rect' || element.type === 'circle' ? element.color : 'transparent',
