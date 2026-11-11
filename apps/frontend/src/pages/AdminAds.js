@@ -41,6 +41,8 @@ import EditNoteIcon from '@mui/icons-material/EditNote';
 
 import api from '../services/api';
 import SlideEditor from '../components/admin/SlideEditor';
+import ScreensDialog from '../components/display/ScreensDialog';
+import TvIcon from '@mui/icons-material/Tv';
 import SlideRenderer from '../components/ads/SlideRenderer';
 
 const MAX_UPLOAD_MB = 500;
@@ -240,6 +242,7 @@ export default function AdminAds() {
     const [snack, setSnack] = useState(null); // { severity, message }
 
     const [uploadOpen, setUploadOpen] = useState(false);
+    const [screensOpen, setScreensOpen] = useState(false);
     const [slideCreatorOpen, setSlideCreatorOpen] = useState(false);
     const [editSlideData, setEditSlideData] = useState(null);
     const [editAdId, setEditAdId] = useState(null);
@@ -460,6 +463,9 @@ export default function AdminAds() {
                     >
                         Display öffnen
                     </Button>
+                    <Button variant="outlined" color="inherit" size={isXs ? 'small' : 'medium'} startIcon={<TvIcon />} onClick={() => setScreensOpen(true)}>
+                        Bildschirme
+                    </Button>
                     <Tooltip title={isSmallEditor ? 'Der Slide-Editor ist für PC oder Tablet im Querformat gedacht' : ''}>
                         <span>
                             <Button
@@ -612,6 +618,8 @@ export default function AdminAds() {
                     <Button color="error" variant="contained" onClick={confirmDelete} disabled={busy}>Löschen</Button>
                 </DialogActions>
             </Dialog>
+
+            <ScreensDialog open={screensOpen} onClose={() => setScreensOpen(false)} onSaved={() => notify('Bildschirm-Belegung gespeichert')} />
 
             {/* Slide Editor Dialog */}
             <SlideEditor

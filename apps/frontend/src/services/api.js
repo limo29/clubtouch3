@@ -77,7 +77,7 @@ const forceLogout = () => {
   // Öffentliche Bildschirme (Clubscore-TV, Werbung, Guthaben-Abfrage) brauchen keine Anmeldung:
   // ein abgelaufener Rest-Login auf dem Gerät darf sie nicht auf die Login-Seite werfen.
   const p = window.location.pathname;
-  if (p.startsWith('/login') || p.startsWith('/public/') || p.startsWith('/check-balance')) return;
+  if (p.startsWith('/login') || p.startsWith('/public/') || p.startsWith('/screen/') || p.startsWith('/check-balance')) return;
   window.location.href = '/login';
 };
 

@@ -31,13 +31,19 @@ import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FlipToFrontIcon from '@mui/icons-material/FlipToFront';
 import FlipToBackIcon from '@mui/icons-material/FlipToBack';
+import DashboardCustomizeIcon from '@mui/icons-material/DashboardCustomize';
 
 
 import SlideElement, { ICONS, fontStack } from '../ads/SlideElement';
+import SlideRenderer from '../ads/SlideRenderer';
+import { SLIDE_TEMPLATES, SLIDE_COLORS } from './slideTemplates';
+import MenuOptions from './MenuOptions';
 import api from '../../services/api';
 
 const ASSETS_LOGO = '/assets/images/Logo.png';
-const FONTS = ['Roboto', 'Arial', 'Verdana', 'Times New Roman', 'Courier New', 'Georgia', 'Impact'];
+// Die ersten fünf werden mit der App ausgeliefert (src/fonts.js) und sehen auf jedem Bildschirm gleich aus;
+// der Rest sind Systemschriften und bleibt für ältere Folien wählbar.
+const FONTS = ['Inter', 'Bebas Neue', 'Oswald', 'Permanent Marker', 'Monoton', 'Roboto', 'Arial', 'Georgia', 'Courier New', 'Impact'];
 const EMOJIS = ['😊', '🎉', '🍺', '🍹', '🍕', '🔥', '❤️', '✅', '⚠️', '📍', '🕒', '💶'];
 
 export default function SlideEditor({ open, onClose, onSave, initialData }) {
@@ -53,6 +59,8 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
     // Menu Selection
     const [menuDialogOpen, setMenuDialogOpen] = useState(false);
     const [categories, setCategories] = useState([]);
+    const [allArticles, setAllArticles] = useState([]);
+    const [templateOpen, setTemplateOpen] = useState(false);
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -106,6 +114,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                 setElements([defaultLogo]);
                 setBgColor('#000000');
                 setBgImage(null);
+                setTemplateOpen(true); // neue Folie: zuerst eine Vorlage anbieten
             }
             setSelectedId(null);
         }
@@ -116,6 +125,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
         if (open) {
             api.get('/articles?includeInactive=false').then(res => {
                 if (res.data && res.data.articles) {
+                    setAllArticles(res.data.articles);
                     const cats = [...new Set(res.data.articles.map(a => a.category).filter(Boolean))];
                     setCategories(cats.sort());
                 }
@@ -144,15 +154,15 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                 width: 400, height: 100,
                 content: 'Neuer Text',
                 fontSize: 60,
-                fontFamily: 'Roboto',
+                fontFamily: 'Inter',
                 fontWeight: 'normal',
                 fontStyle: 'normal',
                 textAlign: 'center'
             };
         } else if (type === 'rect') {
-            newEl = { ...defaultProps, width: 200, height: 200, content: '', color: '#2196f3' };
+            newEl = { ...defaultProps, width: 200, height: 200, content: '', color: SLIDE_COLORS.green };
         } else if (type === 'circle') {
-            newEl = { ...defaultProps, width: 200, height: 200, content: '', borderRadius: '50%', color: '#f44336' };
+            newEl = { ...defaultProps, width: 200, height: 200, content: '', borderRadius: '50%', color: SLIDE_COLORS.red };
         } else if (type === 'line') {
             newEl = { ...defaultProps, width: 300, height: 40, content: '', color: '#ffffff' };
         } else if (type === 'logo') {
@@ -171,14 +181,27 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                 ...defaultProps,
                 width: 600, height: 800,
                 content: extraProps.category,
-                fontSize: 40,
+                fontSize: 100,
+                fontFamily: 'Inter',
                 color: '#ffffff',
-                x: 1200, y: 100
+                priceColor: SLIDE_COLORS.green,
+                columns: 1, hidden: [], groups: [],
+                x: 1100, y: 140
             };
         }
 
         setElements([...elements, newEl]);
         setSelectedId(newId);
+    };
+
+    // Vorlage übernehmen: ersetzt die ganze Folie. Kategorien der Getränkekarte kommen aus dem echten Sortiment.
+    const applyTemplate = (tpl) => {
+        const data = tpl.build({ category: categories[0] || 'Bier', category2: categories[1] || categories[0] || 'Alkoholfrei' });
+        setElements(data.elements);
+        setBgColor(data.bgColor || '#000000');
+        setBgImage(null);
+        setSelectedId(null);
+        setTemplateOpen(false);
     };
 
     const updateElement = (id, props) => {
@@ -291,6 +314,8 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                     display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2, gap: 2,
                     overflowY: 'auto'
                 }}>
+                    <ToolbarButton icon={<DashboardCustomizeIcon />} label="Vorlagen" onClick={() => setTemplateOpen(true)} />
+                    <Divider flexItem sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
                     <ToolbarButton icon={<TextFieldsIcon />} label="Text" onClick={() => addElement('text')} />
 
                     <label>
@@ -306,7 +331,7 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
 
                     <ToolbarButton
                         icon={<RestaurantMenuIcon />}
-                        label="Menü"
+                        label="Karte"
                         onClick={() => setMenuDialogOpen(true)}
                         color="secondary"
                     />
@@ -526,6 +551,13 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                                                 </Select>
                                             </FormControlWrapper>
                                         )}
+                                        {selectedElement.type === 'menu' && (
+                                            <MenuOptions
+                                                element={selectedElement}
+                                                articles={allArticles.filter(a => (a.category || '').toLowerCase() === String(selectedElement.content || '').toLowerCase())}
+                                                onChange={(props) => updateElement(selectedElement.id, props)}
+                                            />
+                                        )}
 
                                         {/* FONT Controls */}
                                         {(selectedElement.type === 'text' || selectedElement.type === 'menu') && (
@@ -657,6 +689,34 @@ export default function SlideEditor({ open, onClose, onSave, initialData }) {
                     )}
                 </Paper>
             </Stack>
+
+            {/* Vorlagen */}
+            <Dialog open={templateOpen} onClose={() => setTemplateOpen(false)} maxWidth="lg" fullWidth>
+                <DialogTitle>Vorlage wählen</DialogTitle>
+                <DialogContent dividers>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Eine Vorlage ersetzt den aktuellen Inhalt der Folie. Alle Texte, Farben und Positionen lassen sich danach frei ändern.
+                    </Typography>
+                    <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+                        {SLIDE_TEMPLATES.map((tpl) => (
+                            <Paper key={tpl.id} variant="outlined" component="button" type="button" aria-label={`Vorlage ${tpl.name}`} onClick={() => applyTemplate(tpl)}
+                                sx={{ p: 0, textAlign: 'left', cursor: 'pointer', overflow: 'hidden', bgcolor: 'background.paper', color: 'inherit', font: 'inherit',
+                                    '&:hover, &:focus-visible': { borderColor: 'primary.main', outline: 'none' } }}>
+                                <Box sx={{ aspectRatio: '16 / 9', width: '100%', pointerEvents: 'none', borderBottom: 1, borderColor: 'divider' }}>
+                                    <SlideRenderer slideData={tpl.build({ category: categories[0] || 'Bier', category2: categories[1] || categories[0] || 'Alkoholfrei' })} />
+                                </Box>
+                                <Box sx={{ p: 1.5 }}>
+                                    <Typography fontWeight={700}>{tpl.name}</Typography>
+                                    <Typography variant="body2" color="text.secondary">{tpl.hint}</Typography>
+                                </Box>
+                            </Paper>
+                        ))}
+                    </Box>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setTemplateOpen(false)}>Ohne Vorlage weiter</Button>
+                </DialogActions>
+            </Dialog>
 
             {/* Menu Selection Dialog */}
             <Dialog open={menuDialogOpen} onClose={() => setMenuDialogOpen(false)}>

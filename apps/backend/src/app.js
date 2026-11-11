@@ -63,6 +63,7 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/purchase-documents', purchaseDocumentRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/ads', adRoutes);
+app.use('/api/screens', require('./routes/screens'));
 app.use('/api/public', publicRoutes);
 app.use('/api/cash-counts', cashCountRoutes);
 app.use('/api/cash-movements', cashMovementRoutes);

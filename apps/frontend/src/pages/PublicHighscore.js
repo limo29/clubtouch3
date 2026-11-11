@@ -12,7 +12,7 @@ import useHighscoreLogic from '../hooks/useHighscoreLogic';
 import useClubscoreEvents from '../hooks/useClubscoreEvents';
 import useFullscreen from '../hooks/useFullscreen';
 import useWakeLock from '../hooks/useWakeLock';
-import { DISPLAY_ACCENT, FullscreenButton, StageClock, StageProgress } from '../components/display/StageChrome';
+import { DISPLAY_ACCENT, FullscreenButton, ScreenProgress } from '../components/display/StageChrome';
 import { useNow, useRankChanges } from '../components/highscore/useRankChanges';
 import useRotatingView from '../components/highscore/useRotatingView';
 import Board from '../components/highscore/Board';
@@ -137,7 +137,6 @@ function Content() {
         sx={lg ? { height: 44, fontSize: '1.4rem', fontWeight: 700, px: 1 } : { fontWeight: 700 }} />
       <Box sx={{ flex: 1 }} />
       <StatusChip hs={hs} lg={lg} />
-      {lg && <StageClock />}
     </Stack>
   );
 
@@ -165,13 +164,12 @@ function Content() {
     <>
       {lg ? (
         <Box sx={{ position: 'fixed', inset: 0, bgcolor: BG }}>
-          <TvStage background={BG}>
+          <TvStage background={BG} fluid>
             <Box sx={{ width: '100%', height: '100%', p: 3, display: 'flex', flexDirection: 'column', gap: 2, color: 'text.primary' }}>
               {header}
               {body}
             </Box>
-            {/* wie auf dem Werbe-Bildschirm: Balken an der Unterkante der Bühne */}
-            <StageProgress active={rotating} cycleKey={cycle} seconds={seconds} />
+
           </TvStage>
         </Box>
       ) : (
@@ -185,6 +183,8 @@ function Content() {
       {/* außerhalb der skalierten Bühne, sonst bezieht sich position:fixed auf die Bühne */}
       <GoalOverlay event={overlay} onDone={dismissOverlay} />
 
+      {/* wie auf dem Werbe-Bildschirm: Balken an der Unterkante des Bildschirms */}
+      {lg && <ScreenProgress active={rotating} cycleKey={cycle} seconds={seconds} />}
       {lg && <FullscreenButton fs={fs} />}
     </>
   );

@@ -99,6 +99,14 @@ function emitAdsUpdate() {
 
 // Neuer Verkauf Event. Der Raum ist auch für anonyme Verbindungen offen (Kiosk),
 // deshalb ohne Kundenname und Betrag.
+// Bildschirm-Belegung geändert bzw. „Nummern einblenden“ (öffentliche Bildschirme unter /screen/<Nummer>)
+function emitScreensUpdate(screens) {
+  if (io) io.emit('screens:update', { screens });
+}
+function emitScreensIdentify() {
+  if (io) io.emit('screens:identify', { at: new Date().toISOString() });
+}
+
 function emitNewSale(transaction) {
   if (io) {
     io.to('highscore').emit('sale:new', {
@@ -112,6 +120,8 @@ module.exports = {
   initializeWebSocket,
   getIO,
   emitHighscoreUpdate,
+  emitScreensUpdate,
+  emitScreensIdentify,
   emitHighscoreDisplay,
   emitAdsUpdate,
   emitNewSale

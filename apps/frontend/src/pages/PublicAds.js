@@ -7,7 +7,7 @@ import { WS_URL } from '../config/api';
 import SlideRenderer from '../components/ads/SlideRenderer';
 import useFullscreen from '../hooks/useFullscreen';
 import useWakeLock from '../hooks/useWakeLock';
-import { DISPLAY_ACCENT, FullscreenButton, StageClock, StageOverlay, StageProgress } from '../components/display/StageChrome';
+import { DISPLAY_ACCENT, FullscreenButton, ScreenProgress } from '../components/display/StageChrome';
 
 /**
  * Öffentliches Werbe-Display (/public/ads), läuft ohne Login auf dem Bildschirm im Clubraum.
@@ -144,7 +144,6 @@ export default function PublicAds() {
             <ThemeProvider theme={theme}>
                 <CssBaseline />
                 <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                    <StageOverlay><StageClock overlay /></StageOverlay>
                     <FullscreenButton fs={fs} />
                     <Box component="img" src="/assets/images/Logo.png" alt="" sx={{ width: 'min(40vw, 320px)', opacity: 0.9 }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                     <Typography variant="h5" color="text.secondary">
@@ -166,11 +165,8 @@ export default function PublicAds() {
                 height: '100vh', width: '100vw', overflow: 'hidden', bgcolor: '#000', position: 'relative',
                 display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
-                {/* Uhr und Balken wie auf dem Clubscore-Bildschirm daneben (gleiche Bühne, gleiche Stelle) */}
-                <StageOverlay>
-                    <StageClock overlay />
-                    <StageProgress active={ads.length > 1} cycleKey={`${currentAd.id}-${currentIndex}-${cycle}`} seconds={durationS} />
-                </StageOverlay>
+                {/* Balken wie auf dem Clubscore-Bildschirm daneben */}
+                <ScreenProgress active={ads.length > 1} cycleKey={`${currentAd.id}-${currentIndex}-${cycle}`} seconds={durationS} />
                 <FullscreenButton fs={fs} />
 
                 <Transition type={currentAd.transition} in={show} timeout={TRANSITION_MS}>

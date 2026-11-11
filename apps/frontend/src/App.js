@@ -30,6 +30,8 @@ import Invoices from './pages/Invoices';
 import PurchaseDocumentEdit from './pages/PurchaseDocumentEdit';
 import PublicHighscore from './pages/PublicHighscore';
 import PublicAds from './pages/PublicAds';
+import Screen from './pages/Screen';
+import ScreenWatcher from './components/display/ScreenWatcher';
 import AdminAds from './pages/AdminAds';
 import CheckBalance from './pages/CheckBalance';
 import { PERMISSIONS } from './config/permissions';
@@ -44,6 +46,7 @@ function App() {
         localeText={deDE.components.MuiLocalizationProvider.defaultProps.localeText}>
         {/* Rückfrage bei Änderungen in abgeschlossenen Geschäftsjahren (services/api.js) */}
         <ClosedPeriodDialog />
+        <ScreenWatcher />
         <AuthProvider>
           {/* KEIN <Router> HIER! Router ist bereits in index.js */}
           <Routes>
@@ -85,6 +88,7 @@ function App() {
             {/* Public Routes */}
             <Route path="/public/highscore" element={<PublicHighscore />} />
             <Route path="/public/ads" element={<PublicAds />} />
+            <Route path="/screen/:no" element={<Screen />} />
             <Route path="/check-balance" element={<CheckBalance />} />
 
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
