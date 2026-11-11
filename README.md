@@ -35,17 +35,17 @@ Stand der Beschreibung: Oktober 2026. Technische Details für Entwickler stehen 
 
 ### Clubscore
 - Tages- und Jahreswertung (Umsatz oder Anzahl), Teamwertung, Ziele mit Fortschrittsbalken, Meldungen wie „Neuer Spitzenreiter“.
-- Interne Seite mit Einstellungen und Archiv; öffentliche Anzeige für den Fernseher (`/public/highscore`), live per WebSocket.
+- Interne Seite mit sichtbarer Leiste (Ansicht auf allen Bildschirmen, Tagesziele, Einstellungen, Anzeige öffnen, Bildschirme; Archiv und Jahr zurücksetzen im ⋮-Menü); öffentliche Anzeige für den Fernseher (`/public/highscore`), live per WebSocket.
 
 ### Werbung
-- Bilder, Videos oder im integrierten Editor gestaltete Slides; Anzeige im Vollbild unter `/public/ads`, Änderungen erscheinen sofort.
+- Bilder, Videos oder im integrierten Editor gestaltete Folien; Anzeige im Vollbild unter `/public/ads`, Änderungen erscheinen sofort. Die Seite hat dieselbe Leiste wie der Clubscore; jede Folie zeigt Nummer, Art und Dauer, „Wird gezeigt“ pausiert sie.
 - Vorlagen (Getränkekarte, zwei Kategorien, Ankündigung, Angebot, Öffnungszeiten, Leuchtschrift, Leer) und mitgelieferte Schriften (Inter, Bebas Neue, Oswald, Permanent Marker, Monoton), die auf jedem Bildschirm gleich aussehen.
 - Getränkekarte: Preise kommen live aus den Artikeln; Sorten lassen sich zu einer Zeile zusammenfassen (z. B. alle Frucade), einzelne Getränke ausblenden. Passen nicht alle Zeilen in das Feld, wird die Schrift automatisch kleiner.
 
 ### Bildschirme über der Theke
 - Jeder Monitor am Thekenrechner öffnet fest eine Nummer: `/screen/1`, `/screen/2`, `/screen/3` (von links nach rechts).
-- Was auf welcher Nummer läuft (Clubscore, Werbung, Verkauf oder nichts), stellt man unter **Werbung → Bildschirme** ein; die Monitore schalten sofort um. „Nummern auf den Bildschirmen einblenden“ zeigt, welcher Monitor welche Nummer hat.
-- Startskripte in `scripts/kiosk/` (Windows: Doppelklick auf `Bildschirme starten.bat`, Linux: `start-linux.sh`) öffnen alle Monitore auf einmal, Anleitung in `scripts/kiosk/LIESMICH.md`.
+- Was auf welcher Nummer läuft (Clubscore, Werbung, Verkauf oder nichts), stellt man unter **Clubscore oder Werbung → Bildschirme** ein; die Monitore schalten sofort um. „Nummern auf den Bildschirmen einblenden“ zeigt, welcher Monitor welche Nummer hat.
+- Im selben Dialog lädt man das Startskript für den Thekenrechner herunter (Windows: eine Datei `Bildschirme starten.cmd` zum Doppelklicken, Linux: `bildschirme-starten.sh`), die Adresse der Kasse ist schon eingetragen. Es öffnet alle Monitore auf einmal. Quelle der Skripte: `apps/frontend/public/kiosk/`, Hinweise in `scripts/kiosk/LIESMICH.md`.
 - Clubscore und Werbung laufen im Vollbild, der **Verkauf bewusst nicht**: er startet als normales, maximiertes Fenster, damit daneben z. B. die Musik bedient werden kann.
 - Beide Anzeigen haben schwarzen Grund und füllen auch Monitore, die nicht 16:9 sind.
 
@@ -53,8 +53,8 @@ Stand der Beschreibung: Oktober 2026. Technische Details für Entwickler stehen 
 | Seite | Zweck |
 |---|---|
 | `/public/highscore` | Clubscore für den Fernseher |
-| `/public/ads` | Werbung/Slides für den Bildschirm |
-| `/screen/1`, `/screen/2`, … | Fester Platz je Monitor; zeigt, was unter Werbung → Bildschirme zugeordnet ist |
+| `/public/ads` | Werbung/Folien für den Bildschirm |
+| `/screen/1`, `/screen/2`, … | Fester Platz je Monitor; zeigt, was unter Bildschirme zugeordnet ist |
 | `/check-balance` | Mitglieder sehen ihr Guthaben und die letzten Buchungen – mit Name **und dem gemeinsamen PIN** (aushängen an der Theke) |
 
 ## Rollen
@@ -84,7 +84,7 @@ Es gibt drei Rollen. Die Oberfläche blendet aus, was eine Rolle nicht darf; ver
 | Clubscore: Ziele und Anzeige einstellen | ✅ | ✅ | – |
 | Clubscore: Jahr zurücksetzen | ✅ | – | – |
 | Werbung | ✅ | ✅ | – |
-| Bildschirm-Belegung (was auf welchem Monitor läuft) | ✅ | ✅ | – |
+| Bildschirm-Belegung (was auf welchem Monitor läuft) | ✅ | ✅ | nur ansehen |
 | Benutzer verwalten, fremde Passwörter setzen | ✅ | – | – |
 | Eigenes Passwort ändern | ✅ | ✅ | ✅ |
 
@@ -170,10 +170,12 @@ clubtouch3/
 │   └── frontend/           React-App
 │       └── src/
 │           ├── pages/      eine Datei je Seite
-│           ├── components/ gemeinsame Bausteine (Artikel-Auswahl, Clubscore, Finanzen …)
+│           ├── components/ gemeinsame Bausteine (Artikel-Auswahl, Clubscore, Bildschirme, Finanzen …)
 │           └── config/     API-Pfade und Rollenrechte
+│       └── public/kiosk/   Startskripte für die Bildschirme (Download über „Bildschirme“)
 ├── docker/                 Docker-Compose und Verwaltungsskripte
 ├── docs/                   Audit und Recherche (historisch)
+│   └── anleitung/          Benutzerhandbuch und Schnellstart als PDF, HTML-Quelle in anleitung/quelle/
 ├── CLAUDE.md               technische Doku für Entwickler
 └── .railway/railway.ts     Deployment (Railway, Infrastruktur als Code)
 ```

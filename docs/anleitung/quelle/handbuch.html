@@ -132,7 +132,9 @@ dl.faq dd { margin: 2px 0 0; max-width: 68ch; }
         <li><a href="#kasse">Kasse und Bank</a></li>
         <li><a href="#berichte">Berichte</a></li>
         <li><a href="#pruefung">Kassenprüfung</a></li>
-        <li><a href="#clubscore">Clubscore und Bildschirme</a></li>
+        <li><a href="#clubscore">Clubscore</a></li>
+        <li><a href="#werbung">Werbung</a></li>
+        <li><a href="#bildschirme">Bildschirme über der Theke</a></li>
         <li><a href="#benutzer">Benutzer und Passwörter</a></li>
         <li><a href="#hilfe">Wenn etwas nicht klappt</a></li>
       </ol>
@@ -161,7 +163,11 @@ dl.faq dd { margin: 2px 0 0; max-width: 68ch; }
               <tr><td>Anfangsstände, Kontostand abgleichen, Kassenbewegung stornieren</td><td class="c yes">ja</td><td class="c no">–</td><td class="c yes">ja</td></tr>
               <tr><td>Geschäftsjahr anlegen und abschließen</td><td class="c yes">ja</td><td class="c no">–</td><td class="c yes">ja</td></tr>
               <tr><td>Berichte: Monatsbericht, Kundenliste, Einnahmen &amp; Ausgaben</td><td class="c yes">ja</td><td class="c no">–</td><td class="c yes">ja</td></tr>
-              <tr><td>Clubscore-Ziele, Werbung</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">–</td></tr>
+              <tr><td>Clubscore ansehen</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c yes">ja</td></tr>
+              <tr><td>Clubscore: Ansicht, Tagesziele, Einstellungen</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">nur lesen</td></tr>
+              <tr><td>Clubscore: Jahr zurücksetzen</td><td class="c yes">ja</td><td class="c no">–</td><td class="c no">–</td></tr>
+              <tr><td>Werbung (Folien)</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">–</td></tr>
+              <tr><td>Bildschirm-Belegung (was auf welchem Monitor läuft)</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">nur lesen</td></tr>
               <tr><td>Benutzer verwalten</td><td class="c yes">ja</td><td class="c no">–</td><td class="c no">–</td></tr>
             </tbody>
           </table>
@@ -390,25 +396,92 @@ dl.faq dd { margin: 2px 0 0; max-width: 68ch; }
       </section>
 
       <section class="ch" id="clubscore">
-        <h2>Clubscore und Bildschirme</h2>
-        <p class="lead"><span class="path">Menü → Clubscore</span> – die Rangliste, live.</p>
-        <figure><div class="fr"><img src="img/tv.jpg" alt="Clubscore auf dem Fernseher mit Tageswertung und Jahreswertung"></div><figcaption>Die Fernseh-Ansicht: links der Tag (ab 06:00 Uhr), rechts das Jahr.</figcaption></figure>
+        <h2>Clubscore</h2>
+        <p class="lead"><span class="path">Menü → Clubscore</span> – die Rangliste, live, und alles, was die Clubscore-Bildschirme zeigen.</p>
+        <figure><div class="fr"><img src="img/clubscore.jpg" alt="Clubscore-Seite: oben die Leiste mit Live-Status, Bildschirm 1, Tagesziele, Einstellungen, Anzeige öffnen und Bildschirme, darunter die Ansicht auf allen Bildschirmen, Tagesziele und die Ranglisten"></div><figcaption>Oben die Leiste, darunter die Ansicht, die gerade auf allen Clubscore-Bildschirmen läuft.</figcaption></figure>
         <ul>
           <li>Gezählt werden nur Artikel mit „Zählt für den Clubscore“ und nur Verkäufe, die nicht storniert sind.</li>
-          <li>Ansichten: <b>Umsatz</b>, <b>Anzahl</b>, <b>Teams</b> oder <b>Wechselnd</b>.</li>
-          <li><b>Ziele</b> (höchstens sechs) setzen Marken, z. B. „200 Radler im Monat“ – auch für ein Team. Wird ein Ziel erreicht, feiert der Bildschirm den Käufer.</li>
-          <li>Am Jahresanfang startet die Jahreswertung neu, das alte Jahr landet im Archiv.</li>
+          <li>Die <b>Tageswertung</b> beginnt um 06:00 Uhr, die <b>Jahreswertung</b> am 1. Januar. Am Jahresanfang startet sie neu, das alte Jahr landet im Archiv.</li>
+          <li>Wird ein Tagesziel erreicht, feiert der Bildschirm den Käufer.</li>
         </ul>
+        <h3>Die Leiste</h3>
+        <p>Clubscore und Werbung haben dieselbe Leiste: links der Stand und auf welchem Bildschirm die Anzeige gerade läuft (z. B. <span class="btn o">Bildschirm 1</span>), rechts die Knöpfe.</p>
+        <div class="tw"><table>
+          <thead><tr><th>Knopf</th><th>Was er tut</th></tr></thead>
+          <tbody>
+            <tr><td><b>Ansicht auf allen Bildschirmen</b><br>Umsatz · Anzahl · Teams · Wechselnd</td><td>Schaltet <b>sofort alle</b> Clubscore-Bildschirme um. „Wechselnd“ zeigt die Ansichten nacheinander.</td></tr>
+            <tr><td><b>Tagesziele</b></td><td>Höchstens sechs Ziele für den laufenden Tag, z. B. „2 Kisten Bier“ oder „300 € Umsatz“ – auch für ein Team. Vorlagen sparen Tipparbeit.</td></tr>
+            <tr><td><b>Einstellungen</b></td><td>Welche Ansichten beim Wechseln kommen und wie lange, ob Tag und Jahr oder nur eins von beiden, Laufband an oder aus. Gilt für alle Bildschirme.</td></tr>
+            <tr><td><b>Anzeige öffnen</b></td><td>Zeigt den Clubscore in einem neuen Tab genau so, wie er auf dem Fernseher läuft.</td></tr>
+            <tr><td><b>Bildschirme</b></td><td>Was auf welchem Monitor über der Theke läuft, und das Startskript für den Thekenrechner (Kapitel <a href="#bildschirme">Bildschirme über der Theke</a>).</td></tr>
+            <tr><td><b>⋮</b></td><td>Selten gebraucht: <b>Archiv</b> der früheren Jahre und (nur Admin) <b>Jahr zurücksetzen</b> mit Rückfrage.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note"><b>Nur ansehen</b>Die Buchhaltung sieht den Clubscore, kann aber Ansicht, Ziele und Einstellungen nicht ändern.</div>
+        <figure><div class="fr"><img src="img/tv.jpg" alt="Clubscore auf dem Fernseher mit Tageswertung und Jahreswertung"></div><figcaption>So sieht es auf dem Fernseher aus: links der Tag (ab 06:00 Uhr), rechts das Jahr.</figcaption></figure>
+      </section>
+
+      <section class="ch" id="werbung">
+        <h2>Werbung</h2>
+        <p class="lead"><span class="path">Menü → Werbung</span> – die Folien, die auf dem Werbe-Bildschirm nacheinander laufen.</p>
+        <figure><div class="fr"><img src="img/werbung.jpg" alt="Werbung-Seite mit drei Folien als Karten: Nummer, Art und Dauer oben auf dem Bild, darunter Schalter Wird gezeigt, Pfeile, Dauer, Übergang und die Knöpfe Vorschau, Bearbeiten, Löschen"></div><figcaption>Jede Karte ist eine Folie. Oben auf dem Bild: Platz in der Reihenfolge, Art und Dauer.</figcaption></figure>
+        <ul>
+          <li><b>Reihenfolge:</b> Die Folien laufen von Nr. 1 an der Reihe nach. Ändern: am Griff ⠿ oben links ziehen (auf dem Tablet kurz halten, dann ziehen) oder mit den Pfeilen ← →.</li>
+          <li><b>Dauer</b> in Sekunden und <b>Übergang</b> (Überblenden, Schieben, Zoom, Hart) gelten je Folie und werden sofort gespeichert.</li>
+          <li><b>Wird gezeigt</b> ausschalten pausiert eine Folie: Sie bleibt gespeichert, läuft aber nicht („Ausgeblendet“).</li>
+          <li><b>Vorschau</b> zeigt die Folie groß, <b>Bearbeiten</b> öffnet gestaltete Folien im Editor, <b>Löschen</b> fragt vorher nach.</li>
+          <li><b>Anzeige öffnen</b> zeigt die ganze Werbung in einem neuen Tab, wie sie auf dem Bildschirm läuft.</li>
+        </ul>
+        <h3>Bild oder Video hochladen</h3>
+        <p><span class="btn o">Bild/Video hochladen</span> – am besten im Querformat 16:9, höchstens 500 MB. Bei Videos übernimmt die Kasse die Länge als Dauer.</p>
+        <h3>Folie aus einer Vorlage gestalten</h3>
+        <p><span class="btn g">Folie gestalten</span> öffnet den Editor (für PC oder Tablet im Querformat) und gleich die Vorlagen: Getränkekarte, Karte mit zwei Kategorien, Ankündigung, Angebot des Abends, Öffnungszeiten, Leuchtschrift oder Leer.</p>
+        <figure><div class="fr"><img src="img/vorlagen.jpg" alt="Dialog Vorlage wählen mit sieben Vorlagen"></div><figcaption>Eine Vorlage antippen. Texte, Farben und Positionen lassen sich danach frei ändern.</figcaption></figure>
+        <p>Im Editor ein Element antippen, rechts erscheinen seine Einstellungen. Links fügt man Text, Bilder, Logo, Formen oder eine Karte hinzu. <b>Speichern</b> legt die Folie als neue Karte ans Ende der Liste.</p>
+        <h3>Die Getränkekarte</h3>
+        <p>Die Karte holt Namen und Preise live aus den Artikeln einer Kategorie. Wird ein Preis geändert, stimmt die Folie sofort. Karte antippen, rechts stehen ihre Einstellungen:</p>
+        <figure><div class="fr"><img src="img/editor-karte.jpg" alt="Editor mit Getränkekarte: Frucade-Sorten zu einer Zeile zusammengefasst, Powerade ausgeblendet"></div><figcaption>Alle Frucade-Sorten in einer Zeile, Powerade ausgeblendet.</figcaption></figure>
+        <ul>
+          <li><b>Spalten:</b> eine oder zwei.</li>
+          <li><b>Preisfarbe:</b> wie der Text, Grün, Gelb oder Rot.</li>
+          <li><b>Zusammenfassen:</b> Mehrere Sorten zu einer Zeile machen, z. B. „Frucade“ mit den Sorten klein darunter. <b>Vorschlag</b> fasst gleichnamige Sorten mit einem Tipp zusammen, <b>+ Gruppe</b> legt eine eigene an.</li>
+          <li><b>Ausblenden:</b> Unter „Auf der Karte zeigen“ den Haken entfernen. Der Artikel bleibt in der Kasse, nur die Karte zeigt ihn nicht.</li>
+        </ul>
+      </section>
+
+      <section class="ch" id="bildschirme">
+        <h2>Bildschirme über der Theke</h2>
+        <p class="lead">Am Thekenrechner hängen mehrere Monitore. Jeder hat eine feste <b>Nummer</b>, von links nach rechts. In der Kasse wird eingestellt, was auf welcher Nummer läuft.</p>
+        <p>Den Knopf <span class="btn o">Bildschirme</span> gibt es auf den Seiten <b>Clubscore</b> und <b>Werbung</b>, jeweils oben rechts an derselben Stelle.</p>
+        <figure style="max-width:520px"><div class="fr"><img src="img/bildschirme.jpg" alt="Dialog Bildschirme über der Theke: Schritt 1 Belegung der Bildschirme 1 bis 4, Schritt 2 Startskript für Windows oder Linux herunterladen"></div><figcaption>Schritt 1: Belegung. Schritt 2: Startskript für den Thekenrechner.</figcaption></figure>
+        <h3>1 · Was läuft wo?</h3>
+        <ul>
+          <li>Für jede Nummer wählen: <b>Clubscore</b>, <b>Werbung</b>, <b>Verkauf</b> oder <b>nichts</b>, dann <b>Belegung speichern</b>. Die Bildschirme schalten sofort um.</li>
+          <li><b>Nummern auf den Bildschirmen einblenden</b> zeigt 8 Sekunden lang auf jedem Monitor groß seine Nummer.</li>
+          <li>Das Symbol ↗ neben einer Nummer öffnet diesen Bildschirm in einem neuen Tab – zum Ausprobieren, auch ohne Startskript.</li>
+        </ul>
+        <h3>2 · Am Thekenrechner starten</h3>
+        <p>Eine Webseite kann am PC kein Programm starten. Dafür gibt es ein kleines Startskript, das man im selben Dialog herunterlädt. Die Adresse der Kasse steht schon drin.</p>
+        <ol>
+          <li><span class="btn g">Startskript für Windows</span> antippen und die Datei <b>„Bildschirme starten.cmd“</b> auf dem Thekenrechner speichern, z. B. auf dem Desktop. Fragt der Browser, ob die Datei behalten werden soll: „Behalten“.</li>
+          <li>Doppelklick auf die Datei. Beim ersten Mal warnt Windows evtl.: „Weitere Informationen“ → „Trotzdem ausführen“.</li>
+          <li>Auf jedem Monitor öffnet sich ein Fenster: Clubscore und Werbung im Vollbild, der <b>Verkauf als normales Fenster</b> (daneben bleibt Platz, z. B. für die Musik). Der Verkauf fragt beim ersten Start einmal nach der Anmeldung.</li>
+          <li>Damit alles beim Hochfahren startet: <b>Win+R</b>, <b>shell:startup</b> eingeben, Enter. In den Ordner, der sich öffnet, eine Verknüpfung zur Datei legen.</li>
+        </ol>
+        <p>Gebraucht wird Chrome oder Edge. Ein Fenster schließt man mit <b>Alt+F4</b>. Unter Linux gibt es <b>für Linux</b> (Aufruf <span class="path">bash bildschirme-starten.sh</span>, braucht Chrome oder Chromium und xrandr).</p>
+        <div class="note warn"><b>Vollbild entscheidet sich beim Start</b>Wird die Belegung später geändert, wechselt der Inhalt sofort. Ob ein Fenster im Vollbild läuft, ändert sich aber erst, wenn das Startskript neu gestartet wird: alle Fenster mit Alt+F4 schließen, Doppelklick.</div>
+        <h3>Monitor getauscht?</h3>
+        <p>Am Thekenrechner muss nichts geändert werden. In der Kasse unter <span class="path">Bildschirme</span> die Nummern einblenden, nachsehen, welcher Monitor jetzt welche Nummer hat, die Belegung passend umstellen und speichern. Ist die Reihenfolge der Monitore ganz durcheinander, in den Anzeige-Einstellungen von Windows die Anordnung von links nach rechts korrigieren und das Startskript neu starten.</p>
         <h3>Bildschirme ohne Anmeldung</h3>
         <div class="tw"><table>
           <thead><tr><th>Adresse</th><th>Zeigt</th></tr></thead>
           <tbody>
-            <tr><td><span class="path">/public/highscore</span></td><td>Clubscore für den Fernseher. Vollbild über den Knopf oben rechts.</td></tr>
-            <tr><td><span class="path">/public/ads</span></td><td>Werbung und Aushänge in Dauerschleife.</td></tr>
+            <tr><td><span class="path">/screen/1</span>, <span class="path">/screen/2</span> …</td><td>Fester Platz je Monitor. Zeigt, was unter Bildschirme zugeordnet ist. Diese Adressen öffnet das Startskript.</td></tr>
+            <tr><td><span class="path">/public/highscore</span></td><td>Clubscore für einen Fernseher. Vollbild über den Knopf oben rechts.</td></tr>
+            <tr><td><span class="path">/public/ads</span></td><td>Werbung in Dauerschleife.</td></tr>
             <tr><td><span class="path">/check-balance</span></td><td>Guthaben-Abfrage für Gäste (Name + PIN).</td></tr>
           </tbody>
         </table></div>
-        <p>Die Folien für <span class="path">/public/ads</span> entstehen unter <span class="path">Menü → Werbung</span>: Bild oder Video hochladen oder eine Folie selbst gestalten, Reihenfolge per Ziehen ändern, Anzeigedauer einstellen.</p>
       </section>
 
       <section class="ch" id="benutzer">
@@ -434,6 +507,11 @@ dl.faq dd { margin: 2px 0 0; max-width: 68ch; }
           <div><dt>Die Kasse stimmt nicht.</dt><dd>Unter Kasse &amp; Bank die Herleitung des Solls ansehen („Alle Posten zeigen“). Häufige Ursachen: eine Aufladung als „Bar“ gebucht, die überwiesen wurde; Geld zur Bank gebracht, aber nicht gebucht; ein Storno, bei dem das Geld in der Kasse blieb.</dd></div>
           <div><dt>Eine Änderung wird mit einem Hinweis auf ein abgeschlossenes Geschäftsjahr abgelehnt.</dt><dd>Das Jahr ist geprüft. Nur ändern, wenn es wirklich nötig ist – „Trotzdem ändern“ protokolliert den Eingriff für die Kassenprüfung.</dd></div>
           <div><dt>Ein Beleg lässt sich nicht hochladen.</dt><dd>Erlaubt sind JPEG, PNG und PDF. iPhone-Fotos im Format HEIC vorher umwandeln oder als Bildschirmfoto speichern.</dd></div>
+          <div><dt>Auf einem Bildschirm über der Theke läuft das Falsche.</dt><dd>Clubscore oder Werbung → <b>Bildschirme</b> → „Nummern auf den Bildschirmen einblenden“. Dann die Belegung passend umstellen und speichern – die Monitore schalten sofort um.</dd></div>
+          <div><dt>Ein Bildschirm zeigt „noch nichts zugeordnet“.</dt><dd>Dieser Nummer ist „nichts“ zugeordnet. Unter Bildschirme Clubscore, Werbung oder Verkauf wählen und speichern.</dd></div>
+          <div><dt>Ein Bildschirm bleibt schwarz.</dt><dd>Steht dort „Keine aktive Werbung“: Unter Werbung ist keine Folie eingeschaltet („Wird gezeigt“). Ist er ganz schwarz: Monitor und Kabel prüfen, dann das Startskript neu starten (Fenster mit Alt+F4 schließen, Doppelklick).</dd></div>
+          <div><dt>Der Verkauf läuft im Vollbild oder der Clubscore nicht.</dt><dd>Die Fensterart wird beim Start festgelegt. Nach einer Änderung der Belegung das Startskript neu starten.</dd></div>
+          <div><dt>Windows warnt beim Startskript.</dt><dd>Die Datei kommt aus der eigenen Kasse. „Weitere Informationen“ → „Trotzdem ausführen“. Startet gar nichts: Chrome oder Edge installieren.</dd></div>
           <div><dt>Passwort vergessen.</dt><dd>Ein Admin setzt unter Benutzer ein neues.</dd></div>
         </dl>
         <p class="end">Bildschirmfotos zeigen eine Demo-Instanz mit erfundenen Namen. Stand: November 2026.</p>
