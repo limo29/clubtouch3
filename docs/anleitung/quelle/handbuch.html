@@ -1,0 +1,443 @@
+<title>ClubTouch Benutzerhandbuch</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap">
+<style>
+/* Layout: Handbuch mit fester Kapitelleiste links (Desktop), Lesespalte rechts; jedes Kapitel = Titelzeile, kurzer Text, Bildschirmfoto, Hinweiskästen */
+:root {
+  --bg: #f4f6f1; --paper: #ffffff; --ink: #141a12; --muted: #5a6456; --line: #d7ddd2;
+  --green: #0b8a4b; --green-soft: #e2f4e9; --red: #cf2e26; --red-soft: #fbe6e4; --amber: #a86a00; --amber-soft: #fbf0d6;
+  --screen: #0c100b; --on-green: #ffffff;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d110c; --paper: #161c14; --ink: #eef3ea; --muted: #a3ae9d; --line: #2b3427;
+  --green: #2fd67f; --green-soft: #143222; --red: #ff6257; --red-soft: #3a1714; --amber: #f0b440; --amber-soft: #33290f;
+  --screen: #05070a; --on-green: #06200f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d110c; --paper: #161c14; --ink: #eef3ea; --muted: #a3ae9d; --line: #2b3427;
+  --green: #2fd67f; --green-soft: #143222; --red: #ff6257; --red-soft: #3a1714; --amber: #f0b440; --amber-soft: #33290f;
+  --screen: #05070a; --on-green: #06200f; color-scheme: dark }
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.55; }
+.wrap { max-width: 1160px; margin: 0 auto; padding-block: 24px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; line-height: 1.08; }
+p { margin: 0; }
+a { color: var(--green); }
+a:focus-visible { outline: 3px solid var(--green); outline-offset: 2px; border-radius: 4px; }
+
+.cover { display: flex; align-items: center; gap: 20px; border-bottom: 3px solid var(--ink); padding-bottom: 18px; margin-bottom: 26px; }
+.cover img { width: 92px; height: 92px; border-radius: 16px; flex: none; }
+.cover h1 { font-size: clamp(38px, 7vw, 64px); font-weight: 700; text-transform: uppercase; letter-spacing: .01em; }
+.cover p { color: var(--muted); font-size: 18px; max-width: 60ch; }
+
+.layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 40px; align-items: start; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); font-size: 15px; }
+nav.toc b { font-family: var(--display); font-size: 15px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 8px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; counter-reset: k; }
+nav.toc li { counter-increment: k; }
+nav.toc a { display: grid; grid-template-columns: 26px minmax(0, 1fr); padding: 5px 8px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+nav.toc a::before { content: counter(k); font-family: var(--display); font-weight: 700; color: var(--red); }
+nav.toc a:hover { background: var(--paper); }
+
+main { display: flex; flex-direction: column; gap: 44px; min-width: 0; counter-reset: ch; }
+section.ch { display: flex; flex-direction: column; gap: 14px; counter-increment: ch; scroll-margin-top: 16px; }
+section.ch > h2 { font-size: 34px; font-weight: 700; text-transform: uppercase; letter-spacing: .01em; display: flex; gap: 12px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+section.ch > h2::before { content: counter(ch); color: var(--red); min-width: 26px; }
+section.ch h3 { font-size: 23px; font-weight: 700; margin-top: 6px; }
+section.ch p, section.ch li { max-width: 68ch; }
+section.ch ul, section.ch ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+.lead { font-size: 18px; color: var(--muted); }
+
+figure { margin: 4px 0; display: flex; flex-direction: column; gap: 6px; }
+figure .fr { background: var(--screen); border-radius: 12px; padding: 6px; }
+figure img { display: block; width: 100%; border-radius: 8px; }
+figcaption { font-size: 14px; color: var(--muted); }
+.duo { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; align-items: start; }
+.phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 230px)); gap: 14px; }
+
+.note { border-left: 5px solid var(--green); background: var(--green-soft); padding: 11px 15px; border-radius: 0 8px 8px 0; max-width: 72ch; }
+.note.warn { border-color: var(--amber); background: var(--amber-soft); }
+.note.stop { border-color: var(--red); background: var(--red-soft); }
+.note b:first-child { font-family: var(--display); font-size: 19px; letter-spacing: .02em; display: block; }
+
+.path { font-weight: 600; white-space: nowrap; }
+.btn { display: inline-block; font-weight: 700; font-size: 13.5px; padding: 2px 9px; border-radius: 7px; white-space: nowrap; vertical-align: 1px; }
+.btn.g { background: var(--green); color: var(--on-green); }
+.btn.y { background: #ffd600; color: #1a1500; }
+.btn.r { background: var(--red); color: #fff; }
+.btn.o { border: 2px solid var(--muted); color: var(--ink); padding: 0 8px; }
+
+.tw { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 560px; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--display); font-size: 16px; letter-spacing: .04em; text-transform: uppercase; background: var(--bg); }
+td.c, th.c { text-align: center; white-space: nowrap; }
+.yes { color: var(--green); font-weight: 700; } .no { color: var(--muted); }
+
+dl.faq { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+dl.faq dt { font-weight: 700; }
+dl.faq dd { margin: 2px 0 0; max-width: 68ch; }
+
+.end { border-top: 1px solid var(--line); padding-top: 14px; color: var(--muted); font-size: 14px; }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  nav.toc { position: static; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  nav.toc ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .cover img { width: 64px; height: 64px; }
+}
+@media print {
+  @page { size: A4; margin: 14mm 13mm; }
+  body { background: #fff; font-size: 11.5pt; }
+  .wrap { max-width: none; padding: 0; }
+  .layout { display: block; }
+  nav.toc { position: static; margin-bottom: 8mm; }
+  nav.toc ol { gap: 3mm; font-size: 13pt; }
+  main { gap: 9mm; }
+  figure, .note, tr, dl.faq > div { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+  figure { max-width: 150mm; } .phones { grid-template-columns: repeat(3, 48mm); }
+  table { min-width: 0; font-size: 9.5pt; } th, td { padding: 4px 7px; }
+}
+</style>
+
+<div class="wrap">
+  <header class="cover">
+    <img src="img/logo.png" alt="Clubraum-Logo">
+    <div>
+      <h1>Benutzerhandbuch</h1>
+      <p>ClubTouch 3 – die Kasse des Clubraums. Für alle, die an der Theke stehen, einkaufen, die Kasse zählen oder das Jahr prüfen.</p>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Kapitel">
+      <b>Kapitel</b>
+      <ol>
+        <li><a href="#ueberblick">Überblick und Rollen</a></li>
+        <li><a href="#anmelden">Anmelden</a></li>
+        <li><a href="#verkauf">Verkaufen</a></li>
+        <li><a href="#kunden">Kunden und Guthaben</a></li>
+        <li><a href="#offline">Ohne Netz arbeiten</a></li>
+        <li><a href="#storno">Stornieren</a></li>
+        <li><a href="#artikel">Artikel und Bestand</a></li>
+        <li><a href="#einkauf">Einkauf</a></li>
+        <li><a href="#rechnungen">Kundenrechnungen</a></li>
+        <li><a href="#kasse">Kasse und Bank</a></li>
+        <li><a href="#berichte">Berichte</a></li>
+        <li><a href="#pruefung">Kassenprüfung</a></li>
+        <li><a href="#clubscore">Clubscore und Bildschirme</a></li>
+        <li><a href="#benutzer">Benutzer und Passwörter</a></li>
+        <li><a href="#hilfe">Wenn etwas nicht klappt</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section class="ch" id="ueberblick">
+        <h2>Überblick und Rollen</h2>
+        <p class="lead">ClubTouch läuft im Browser: auf dem Tablet an der Theke, auf dem Handy und am Laptop. Es gibt nichts zu installieren.</p>
+        <p>Links oben öffnet das Menü <span class="path">☰</span> alle Bereiche. Auf jeder Seite außer dem Verkauf führt der rote Knopf <span class="btn r">Verkauf öffnen</span> mit einem Tipp zurück an die Kasse.</p>
+        <p>Ein Tag an der Theke endet nicht um Mitternacht: Der <b>Geschäftstag beginnt um 06:00 Uhr</b>. Was um 01:30 Uhr gebucht wird, gehört noch zum Abend davor – in der Tagesübersicht, im Tagesabschluss und im Clubscore.</p>
+        <h3>Wer darf was?</h3>
+        <p>Es gibt drei Rollen. Was eine Rolle nicht darf, wird im Menü gar nicht erst angezeigt.</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Bereich</th><th class="c">Admin</th><th class="c">Kassierer</th><th class="c">Buchhaltung</th></tr></thead>
+            <tbody>
+              <tr><td>Verkaufen, „Auf den Wirt“, Verkäufe stornieren</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">–</td></tr>
+              <tr><td>Kunden anlegen, Guthaben aufladen</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">nur lesen</td></tr>
+              <tr><td>Artikel anlegen und ändern</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">nur lesen</td></tr>
+              <tr><td>Einkauf erfassen, Belege hochladen</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">nur lesen</td></tr>
+              <tr><td>Einkauf als bezahlt markieren</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c yes">ja</td></tr>
+              <tr><td>Einkaufsbelege löschen</td><td class="c yes">ja</td><td class="c no">–</td><td class="c yes">ja</td></tr>
+              <tr><td>Kundenrechnungen schreiben</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">lesen + PDF</td></tr>
+              <tr><td>Kasse zählen, Kassenbewegung buchen</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c yes">ja</td></tr>
+              <tr><td>Anfangsstände, Kontostand abgleichen, Kassenbewegung stornieren</td><td class="c yes">ja</td><td class="c no">–</td><td class="c yes">ja</td></tr>
+              <tr><td>Geschäftsjahr anlegen und abschließen</td><td class="c yes">ja</td><td class="c no">–</td><td class="c yes">ja</td></tr>
+              <tr><td>Berichte: Monatsbericht, Kundenliste, Einnahmen &amp; Ausgaben</td><td class="c yes">ja</td><td class="c no">–</td><td class="c yes">ja</td></tr>
+              <tr><td>Clubscore-Ziele, Werbung</td><td class="c yes">ja</td><td class="c yes">ja</td><td class="c no">–</td></tr>
+              <tr><td>Benutzer verwalten</td><td class="c yes">ja</td><td class="c no">–</td><td class="c no">–</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="ch" id="anmelden">
+        <h2>Anmelden</h2>
+        <p>Die Adresse der Kasse im Browser öffnen und mit <b>E-Mail oder Benutzername</b> und Passwort anmelden. Groß- und Kleinschreibung spielt beim Namen keine Rolle.</p>
+        <ul>
+          <li>Das Tablet an der Theke bleibt angemeldet, auch über Nacht und nach einem Neuladen.</li>
+          <li>Nach zehn falschen Versuchen ist die Anmeldung für 15 Minuten gesperrt.</li>
+          <li>Das eigene Passwort ändert man über das runde Symbol oben rechts → <b>Passwort ändern</b>.</li>
+          <li>Der Mond daneben schaltet zwischen dunkler und heller Ansicht um.</li>
+        </ul>
+        <div class="note warn"><b>Abmelden nur mit Netz</b>Sind noch Buchungen in der Warteschlange (Zähler oben), erst warten, bis sie übertragen sind. Ein abgemeldetes Gerät überträgt nichts.</div>
+      </section>
+
+      <section class="ch" id="verkauf">
+        <h2>Verkaufen</h2>
+        <p class="lead">Drei Spalten: links wer zahlt, in der Mitte die Getränke, rechts der Warenkorb.</p>
+        <figure><div class="fr"><img src="img/verkauf.jpg" alt="Verkauf auf dem Tablet: Kunde Anna Beispiel ausgewählt, zwei Artikel im Warenkorb, Knopf Buchen: Anna"></div><figcaption>Verkauf auf dem Tablet. Der gewählte Kunde ist grün umrandet, der Knopf unten rechts nennt seinen Namen.</figcaption></figure>
+        <h3>Getränke wählen</h3>
+        <ul>
+          <li>Kachel antippen: eine Flasche mehr im Warenkorb. Die grüne Zahl auf der Kachel zeigt, wie viele schon drin sind.</li>
+          <li>Kachel <b>lange drücken</b>: Menge direkt eingeben.</li>
+          <li>Oben nach Kategorie filtern (Bier, Alkoholfrei, Wein &amp; Spritzer, Alles) oder suchen.</li>
+          <li>Im Warenkorb mit + und − ändern, mit dem Papierkorb entfernen. Auf dem Tablet reicht ein <b>Wisch nach links</b>. Wer sich dabei vertut, bekommt 5 Sekunden „RÜCKGÄNGIG“.</li>
+        </ul>
+        <h3>Wer zahlt?</h3>
+        <ul>
+          <li><span class="btn g">Bar</span> Der Gast zahlt bar. Das Feld „Wechselgeld“ rechnet das Rückgeld aus.</li>
+          <li><span class="btn o">Karte</span> Erst am SumUp-Gerät kassieren, dann in der Kasse bestätigen. Die Kasse steuert das Kartengerät nicht.</li>
+          <li><span class="btn o">Auf den Wirt</span> Eigenverbrauch der Thekenkraft. Kostet nichts, der Bestand sinkt trotzdem.</li>
+          <li><b>Kundenkonto:</b> Namen in der Liste antippen. Oben steht „Heute an der Theke“ mit allen, die heute schon etwas hatten, darunter alle Kunden nach Alphabet. Die Suche findet auch Spitznamen.</li>
+        </ul>
+        <h3>Buchen</h3>
+        <p>Der große Knopf zeigt, was passieren wird:</p>
+        <ul>
+          <li><span class="btn g">Buchen: Anna</span> Das Guthaben reicht.</li>
+          <li><span class="btn y">Überziehen: Anna</span> Das Guthaben reicht nicht. Nach einer Rückfrage wird angeschrieben.</li>
+          <li><b>Limit überschritten:</b> Das Konto würde unter −10 € fallen. Das geht nicht – erst aufladen oder bar kassieren.</li>
+        </ul>
+        <div class="note"><b>Zurück auf „Bar“</b>Nach jedem Verkauf auf ein Kundenkonto stellt sich die Kasse von selbst wieder auf „Bar“. Das nächste Getränk landet so nicht aus Versehen auf dem Konto des Vorgängers.</div>
+        <p>Nach der Buchung erscheint unten 5 Sekunden lang <b>RÜCKGÄNGIG</b>. Ein Tipp darauf storniert den Verkauf und legt Warenkorb und Kunde wieder hin.</p>
+        <h3>Auf dem Handy</h3>
+        <p>Die Getränke bleiben sichtbar, die Leiste unten übernimmt den Rest: „Wer zahlt?“, der Warenkorb mit Anzahl und Summe und der Buchen-Knopf.</p>
+        <div class="phones">
+          <figure><div class="fr"><img src="img/handy.jpg" alt="Verkauf auf dem Handy mit Leiste unten"></div><figcaption>Leiste unten: Zahler, Warenkorb, Buchen.</figcaption></figure>
+          <figure><div class="fr"><img src="img/handy-zahler.jpg" alt="Auswahl Wer zahlt auf dem Handy"></div><figcaption>„Wer zahlt?“ öffnet die Auswahl.</figcaption></figure>
+        </div>
+      </section>
+
+      <section class="ch" id="kunden">
+        <h2>Kunden und Guthaben</h2>
+        <p class="lead"><span class="path">Menü → Verwaltung → Kunden</span></p>
+        <figure><div class="fr"><img src="img/kunden.jpg" alt="Kundenseite mit Kennzahlen oben und Kundenliste"></div><figcaption>Oben die Kennzahlen, darunter Filter wie „Unter 5 €“ oder „Im Minus“.</figcaption></figure>
+        <h3>Neuen Kunden anlegen</h3>
+        <p><span class="btn g">Neuer Kunde</span> antippen, Namen eintragen, speichern. Jeden Namen gibt es nur einmal. Spitzname, Gruppe und Kontaktdaten sind freiwillig.</p>
+        <h3>Guthaben aufladen</h3>
+        <ol>
+          <li>Kunden antippen (im Verkauf oder auf der Kundenseite), dann <b>Aufladen</b>.</li>
+          <li>Betrag wählen oder eintippen. Komma ist erlaubt: 12,50.</li>
+          <li>Zahlungsart wählen: <b>Bar</b> (Geld kommt in die Kasse), <b>Karte</b> (SumUp) oder <b>Überweisung</b> (Geld ist auf dem Konto eingegangen).</li>
+        </ol>
+        <figure><div class="fr"><img src="img/aufladen.jpg" alt="Dialog Guthaben aufladen mit Betragsknöpfen und Zahlungsart"></div><figcaption>Der Dialog zeigt unten das neue Guthaben, bevor gebucht wird.</figcaption></figure>
+        <div class="note warn"><b>Falsch aufgeladen?</b>Nicht mit einer Gegenbuchung ausgleichen. Unter Finanzen → Transaktionen die Aufladung antippen und <b>stornieren</b> – dann stimmen Kasse und Kontoauszug.</div>
+        <h3>Verlauf und Kontoauszug</h3>
+        <p>Im Kunden-Panel steht jede Buchung. Den Kontoauszug als PDF gibt es unter <span class="path">Berichte → Kontoauszug</span>. Er beginnt mit dem Anfangssaldo und endet mit dem aktuellen Guthaben.</p>
+        <h3>Gruppen</h3>
+        <p>Über <b>Gruppen</b> lassen sich Teams anlegen (Farbe, Emoji oder Bild). Sie erscheinen als Abzeichen am Namen und treten im Clubscore gegeneinander an. Ein Kunde gehört zu höchstens einer Gruppe.</p>
+        <h3>Ausblenden statt löschen</h3>
+        <p>Wer lange nicht da war, wird ausgeblendet und stört im Verkauf nicht mehr. Über den Filter „Ausgeblendet“ ist er jederzeit wieder da, das Guthaben bleibt.</p>
+        <h3>Guthaben selbst abfragen</h3>
+        <p>Auf der Seite <span class="path">/check-balance</span> kann jeder Gast ohne Anmeldung seinen Stand sehen: Namen und den gemeinsamen PIN eingeben. Nach zehn Fehlversuchen ist für 15 Minuten Pause.</p>
+      </section>
+
+      <section class="ch" id="offline">
+        <h2>Ohne Netz arbeiten</h2>
+        <p class="lead">Fällt das WLAN aus, läuft die Theke weiter.</p>
+        <div class="duo">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <ul>
+              <li>Verkäufe und Aufladungen werden auf dem Gerät gespeichert. Oben erscheint ein Zähler mit den wartenden Buchungen.</li>
+              <li>Sobald das Netz zurück ist, werden sie der Reihe nach übertragen. Jede Buchung kommt <b>genau einmal</b> an, auch wenn die Verbindung mittendrin abreißt.</li>
+              <li>Die Seite neu laden oder das Tablet sperren ist kein Problem.</li>
+              <li>Artikel, Preise und Kundenliste stehen auch ohne Netz bereit – mit dem Stand vom letzten Laden.</li>
+            </ul>
+            <div class="note warn"><b>Was offline anders ist</b>Guthaben anderer Geräte sind nicht aktuell. Die −10-€-Grenze wird mit dem zuletzt bekannten Stand geprüft. Lehnt der Server eine Buchung später ab, landet sie in der Liste „fehlgeschlagen“ (Tipp auf den Zähler) und muss von Hand geklärt werden.</div>
+            <p>Neue Kunden, Einkauf, Kasse zählen und Berichte brauchen Netz.</p>
+          </div>
+          <figure style="max-width:240px"><div class="fr"><img src="img/offline.jpg" alt="Handy ohne Netz: Hinweis Offline, Buchung gespeichert und Zähler in der Kopfzeile"></div><figcaption>Rote Kopfzeile, Zähler „1“: eine Buchung wartet.</figcaption></figure>
+        </div>
+      </section>
+
+      <section class="ch" id="storno">
+        <h2>Stornieren</h2>
+        <p class="lead"><span class="path">Menü → Finanzen → Transaktionen</span></p>
+        <p>Jede Buchung des Tages steht hier, gruppiert nach Geschäftstag. Zeile antippen öffnet die Details, dort gibt es <b>Stornieren</b>.</p>
+        <figure><div class="fr"><img src="img/transaktionen.jpg" alt="Transaktionsliste mit Tageskennzahlen und Filtern"></div><figcaption>Filter wie „Bar“, „Kundenkonto“ oder „Storniert“ grenzen die Liste ein.</figcaption></figure>
+        <ul>
+          <li>Ein Storno löscht nichts. Es entsteht eine Gegenbuchung: Geld bzw. Guthaben geht zurück, die Flaschen kommen wieder in den Bestand.</li>
+          <li>Jede Buchung lässt sich genau einmal stornieren. Ein Storno selbst kann nicht storniert werden – dann neu buchen.</li>
+          <li>Bei Barverkäufen muss das Geld auch wirklich aus der Kasse zurück an den Gast.</li>
+        </ul>
+      </section>
+
+      <section class="ch" id="artikel">
+        <h2>Artikel und Bestand</h2>
+        <p class="lead"><span class="path">Menü → Verwaltung → Artikel</span></p>
+        <figure><div class="fr"><img src="img/artikel.jpg" alt="Artikelseite mit Kategorien und Artikelliste"></div><figcaption>Artikel nach Kategorie. Die Reihenfolge der Kategorien gilt auch im Verkauf.</figcaption></figure>
+        <ul>
+          <li><b>Neuer Artikel:</b> Name, Preis, Kategorie, Einheit (Flasche) und wie viele Flaschen in einer Kiste sind. Ein Foto vom Etikett macht die Kachel im Verkauf leichter zu finden.</li>
+          <li><b>„Zählt für den Clubscore“</b> legt fest, ob Verkäufe dieses Artikels in die Rangliste eingehen.</li>
+          <li><b>Mindestbestand:</b> Fällt der Bestand darunter, warnt das Dashboard.</li>
+          <li><b>Abgelaufen / Bruch:</b> Flaschen, die weggeschüttet werden, hier ausbuchen. Das kostet niemanden etwas, hält aber den Bestand ehrlich.</li>
+          <li>Artikel, die es nicht mehr gibt, <b>deaktivieren</b> statt löschen. Alte Buchungen bleiben lesbar.</li>
+        </ul>
+        <div class="note"><b>Bestand darf ins Minus</b>Die Kasse blockiert nie einen Verkauf, nur weil laut App nichts mehr da ist. Ein negativer Bestand heißt: Es wurde eine Lieferung noch nicht erfasst.</div>
+      </section>
+
+      <section class="ch" id="einkauf">
+        <h2>Einkauf</h2>
+        <p class="lead"><span class="path">Menü → Finanzen → Einkauf</span> – alles, was reinkommt: Ware und Rechnungen.</p>
+        <p>Es gibt zwei Belegarten:</p>
+        <ul>
+          <li><b>Lieferschein:</b> Die Ware ist da. Bucht Flaschen in den Bestand, kostet noch nichts.</li>
+          <li><b>Lieferantenrechnung:</b> Das kostet Geld. Sie zählt als Ausgabe, sobald sie bezahlt ist.</li>
+        </ul>
+        <p>Kommt die Rechnung später als die Ware, werden die Lieferscheine der Rechnung zugeordnet. Die Rechnung selbst braucht dann keine eigenen Positionen mehr.</p>
+        <figure><div class="fr"><img src="img/einkauf.jpg" alt="Neue Lieferantenrechnung: links Belegdaten, in der Mitte Artikel mit Knopf plus eine Kiste, rechts Positionen"></div><figcaption>Unter jeder Kachel steht „+1 Kiste“. Einzelne Flaschen lassen sich in der Position nachtragen.</figcaption></figure>
+        <h3>So wird ein Beleg erfasst</h3>
+        <ol>
+          <li><b>Belegdatum</b> und <b>Lieferant</b> eintragen.</li>
+          <li><b>Nachweis hochladen:</b> Foto oder PDF des Belegs (JPEG, PNG oder PDF). Die Kassenprüfung braucht ihn am Jahresende.</li>
+          <li>Artikel antippen: gerechnet wird in Kisten und einzelnen Flaschen, die App rechnet um.</li>
+          <li>Bei Rechnungen den <b>Betrag</b> eintragen. Ist sie schon bezahlt: Schalter „Bereits bezahlt“, Zahlungsart und <b>„Bezahlt am“</b>.</li>
+          <li><b>„Eingetragen von“</b> – der eigene Name. Wichtig am gemeinsamen Thekentablet.</li>
+        </ol>
+        <div class="note"><b>Privat ausgelegt?</b>Hat ein Mitglied die Rechnung aus eigener Tasche bezahlt, als Zahlungsart „Ausgelegt – dem Kundenkonto gutschreiben“ wählen. Der Betrag landet als Guthaben auf seinem Konto.</div>
+        <div class="note warn"><b>Das Zahldatum entscheidet</b>Für Kasse, Bank und die Einnahmen-Ausgaben-Rechnung zählt, <i>wann</i> bezahlt wurde, nicht das Datum auf dem Beleg. Eine Barzahlung mit einem Datum vor der letzten Kassenzählung wird abgelehnt, weil sie eine bereits gezählte Kasse nachträglich verändern würde.</div>
+      </section>
+
+      <section class="ch" id="rechnungen">
+        <h2>Kundenrechnungen</h2>
+        <p class="lead"><span class="path">Menü → Finanzen → Kundenrechnungen</span> – wenn jemand eine Rechnung braucht, etwa für eine Feier.</p>
+        <ul>
+          <li>Empfänger wählen (ein Kunde aus der Liste füllt Name und Anschrift vor) oder frei eintragen.</li>
+          <li>Artikel antippen oder freie Positionen schreiben, der Preis ist hier änderbar.</li>
+          <li>Speichern bucht die Ware aus dem Bestand. Die Rechnungsnummer vergibt die App fortlaufend.</li>
+          <li>Das PDF trägt Logo, Absender, Kontoinhaber, IBAN und einen QR-Code für die Banking-App.</li>
+        </ul>
+        <h3>Der Status</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Status</th><th>Bedeutung</th></tr></thead>
+          <tbody>
+            <tr><td><b>Entwurf</b></td><td>Noch änderbar.</td></tr>
+            <tr><td><b>Versendet</b></td><td>Beim Kunden, noch offen.</td></tr>
+            <tr><td><b>Bezahlt</b></td><td>Geld ist da. Zahlungsart (bar oder Überweisung) und Datum angeben – erst jetzt zählt sie als Einnahme.</td></tr>
+            <tr><td><b>Storniert</b></td><td>Die Ware kommt zurück in den Bestand. Storniert bleibt storniert.</td></tr>
+          </tbody>
+        </table></div>
+        <p>Absender und Bankverbindung stehen unter „Einstellungen“ auf dieser Seite (nur Admin).</p>
+      </section>
+
+      <section class="ch" id="kasse">
+        <h2>Kasse und Bank</h2>
+        <p class="lead"><span class="path">Menü → Finanzen → Kasse &amp; Bank</span></p>
+        <figure><div class="fr"><img src="img/kasse.jpg" alt="Kasse und Bank: links Soll in der Kasse mit Knopf Kasse zählen, rechts Bank-Soll, darunter vier Bewegungsknöpfe und die Herleitung"></div><figcaption>Links die Kasse, rechts die Bank. Darunter, wie sich das Soll zusammensetzt.</figcaption></figure>
+        <h3>Kasse zählen</h3>
+        <p>Die Kasse muss nicht täglich gezählt werden – jederzeit geht. <span class="btn g">Kasse zählen</span> öffnet das Zählbrett: Stückzahl je Schein und Münze eintragen, die Summe rechnet die App.</p>
+        <figure><div class="fr"><img src="img/zaehlen.jpg" alt="Zählbrett mit Scheinen links und Münzen rechts"></div><figcaption>Die erste Zählung überhaupt kann als Anfangsbestand gespeichert werden.</figcaption></figure>
+        <p>Nach dem Speichern steht da, was drin sein müsste (<b>Soll</b>), was gezählt wurde (<b>Ist</b>) und die <b>Differenz</b>. Das Soll ergibt sich so:</p>
+        <ul>
+          <li>letzte Zählung</li>
+          <li>+ Barverkäufe, + bar aufgeladenes Guthaben, + bar bezahlte Kundenrechnungen</li>
+          <li>− bar bezahlte Lieferantenrechnungen, − Stornos</li>
+          <li>± Kassenbewegungen (siehe unten)</li>
+        </ul>
+        <h3>Geld rein, Geld raus</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Knopf</th><th>Wann</th></tr></thead>
+          <tbody>
+            <tr><td><b>Zur Bank gebracht</b></td><td>Bargeld aus der Kasse aufs Konto eingezahlt.</td></tr>
+            <tr><td><b>Wechselgeld geholt</b></td><td>Geld vom Konto in die Kasse gelegt.</td></tr>
+            <tr><td><b>Einnahme</b></td><td>Bargeld ohne Verkauf, z. B. eine Spende. Bemerkung ist Pflicht.</td></tr>
+            <tr><td><b>Ausgabe</b></td><td>Bargeld ohne Beleg im Einkauf, z. B. Pfand. Bemerkung ist Pflicht.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Bank</h3>
+        <p>Die App führt kein Bankkonto, sie rechnet nur mit: Überweisungen, Kartenzahlungen (abzüglich geschätzter SumUp-Gebühr) und Einzahlungen. Über <b>Kontostand abgleichen</b> den Stand vom Kontoauszug eintragen – die App zeigt die Differenz.</p>
+        <div class="note"><b>Eine Differenz bei der Bank ist normal</b>Kontogebühren, Mitgliedsbeiträge und Spenden laufen nicht über die Kasse. Die Differenz muss erklärbar sein, nicht null.</div>
+      </section>
+
+      <section class="ch" id="berichte">
+        <h2>Berichte</h2>
+        <p class="lead"><span class="path">Menü → Finanzen → Berichte</span></p>
+        <figure><div class="fr"><img src="img/berichte.jpg" alt="Liste der verfügbaren Berichte mit Format CSV oder PDF"></div><figcaption>Bericht wählen, Zeitraum einstellen, herunterladen.</figcaption></figure>
+        <div class="tw"><table>
+          <thead><tr><th>Bericht</th><th>Format</th><th>Wofür</th></tr></thead>
+          <tbody>
+            <tr><td>Tagesabschluss</td><td>PDF</td><td>Ein Geschäftstag (06:00 bis 06:00): Umsatz, Zahlungsarten, Artikel.</td></tr>
+            <tr><td>Monatsbericht</td><td>PDF</td><td>Zusammenfassung eines Monats.</td></tr>
+            <tr><td>Einnahmen &amp; Ausgaben (EÜR)</td><td>PDF</td><td>Laufende Zahlen mit Belegen und Eigenverbrauch; darunter die Live-Vorschau.</td></tr>
+            <tr><td>Kontoauszug</td><td>PDF</td><td>Alle Bewegungen eines Kunden.</td></tr>
+            <tr><td>Kassenzählung</td><td>PDF</td><td>Protokoll einer gespeicherten Zählung.</td></tr>
+            <tr><td>Transaktionen, Bestand, Kundenliste</td><td>CSV</td><td>Zum Weiterrechnen in der Tabellenkalkulation.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="ch" id="pruefung">
+        <h2>Kassenprüfung</h2>
+        <p class="lead"><span class="path">Menü → Finanzen → Kassenprüfung</span> – das Geschäftsjahr abschließen und einfrieren.</p>
+        <p><span class="btn g">Neues Jahr</span> legt ein Geschäftsjahr an (Zeiträume dürfen sich nicht überschneiden). Der Abschluss führt in sechs Schritten durch alles, was die Kassenprüfer sehen wollen:</p>
+        <ol>
+          <li><b>Zeitraum</b> – von wann bis wann.</li>
+          <li><b>Kasse</b> – eine Kassenzählung zum Stichtag. Ohne Zählung kein Abschluss.</li>
+          <li><b>Bank</b> – Kontostände eintragen, die App zeigt die Abstimmung.</li>
+          <li><b>Belege</b> – alle Einkaufsbelege des Jahres mit Nachweis; fehlende fallen sofort auf. Alles zusammen gibt es als ZIP.</li>
+          <li><b>Inventur</b> – gezählte Kisten und Flaschen. Plus heißt: mehr da als gebucht. Minus heißt: es fehlt etwas, z. B. getrunken ohne „Auf den Wirt“.</li>
+          <li><b>Prüfen</b> – Zusammenfassung ansehen und abschließen.</li>
+        </ol>
+        <p>Das Jahresabschluss-PDF enthält unter anderem: Einnahmen und Ausgaben, alle Kassenzählungen des Jahres, Stornos und Korrekturen, die Guthaben aller Kunden zum Stichtag mit Abstimmung, den Geldbestand am Anfang und am Ende, die Bank-Abstimmung und die Inventur. Solange das Jahr offen ist, steht <b>ENTWURF</b> darauf.</p>
+        <div class="note stop"><b>Nach dem Abschluss: Sperre mit Rückfrage</b>Wer später etwas ändert, das in ein abgeschlossenes Jahr fällt, bekommt einen Warnhinweis. Mit „Trotzdem ändern“ wird die Änderung ausgeführt und protokolliert: wer, wann, welcher Betrag. Im PDF des Jahres erscheint sie in einem Nachtrag „Nachträgliche Änderungen nach dem Abschluss“. Die Zahlen des Abschlusses selbst bleiben unverändert.</div>
+      </section>
+
+      <section class="ch" id="clubscore">
+        <h2>Clubscore und Bildschirme</h2>
+        <p class="lead"><span class="path">Menü → Clubscore</span> – die Rangliste, live.</p>
+        <figure><div class="fr"><img src="img/tv.jpg" alt="Clubscore auf dem Fernseher mit Tageswertung und Jahreswertung"></div><figcaption>Die Fernseh-Ansicht: links der Tag (ab 06:00 Uhr), rechts das Jahr.</figcaption></figure>
+        <ul>
+          <li>Gezählt werden nur Artikel mit „Zählt für den Clubscore“ und nur Verkäufe, die nicht storniert sind.</li>
+          <li>Ansichten: <b>Umsatz</b>, <b>Anzahl</b>, <b>Teams</b> oder <b>Wechselnd</b>.</li>
+          <li><b>Ziele</b> (höchstens sechs) setzen Marken, z. B. „200 Radler im Monat“ – auch für ein Team. Wird ein Ziel erreicht, feiert der Bildschirm den Käufer.</li>
+          <li>Am Jahresanfang startet die Jahreswertung neu, das alte Jahr landet im Archiv.</li>
+        </ul>
+        <h3>Bildschirme ohne Anmeldung</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Adresse</th><th>Zeigt</th></tr></thead>
+          <tbody>
+            <tr><td><span class="path">/public/highscore</span></td><td>Clubscore für den Fernseher. Vollbild über den Knopf oben rechts.</td></tr>
+            <tr><td><span class="path">/public/ads</span></td><td>Werbung und Aushänge in Dauerschleife.</td></tr>
+            <tr><td><span class="path">/check-balance</span></td><td>Guthaben-Abfrage für Gäste (Name + PIN).</td></tr>
+          </tbody>
+        </table></div>
+        <p>Die Folien für <span class="path">/public/ads</span> entstehen unter <span class="path">Menü → Werbung</span>: Bild oder Video hochladen oder eine Folie selbst gestalten, Reihenfolge per Ziehen ändern, Anzeigedauer einstellen.</p>
+      </section>
+
+      <section class="ch" id="benutzer">
+        <h2>Benutzer und Passwörter</h2>
+        <p class="lead"><span class="path">Menü → Verwaltung → Benutzer</span> (nur Admin)</p>
+        <ul>
+          <li>Neuen Benutzer mit Name, E-Mail oder Benutzername, Rolle und Passwort anlegen.</li>
+          <li>Passwörter brauchen mindestens 8 Zeichen mit Groß- und Kleinbuchstaben und einer Zahl.</li>
+          <li>Wer nicht mehr mitmacht, wird <b>deaktiviert</b>. Seine Buchungen bleiben mit seinem Namen erhalten, anmelden kann er sich nicht mehr.</li>
+          <li>Ein Admin kann jedem ein neues Passwort setzen. Das eigene ändert jeder selbst über das Symbol oben rechts.</li>
+        </ul>
+        <div class="note"><b>Tipp fürs Thekentablet</b>Ein gemeinsames Kassierer-Konto für das Tablet reicht für den Verkauf. Für Einkauf, Kasse zählen und Prüfung lohnt sich ein eigenes Konto je Person – dann steht bei jeder Buchung, wer es war.</div>
+      </section>
+
+      <section class="ch" id="hilfe">
+        <h2>Wenn etwas nicht klappt</h2>
+        <dl class="faq">
+          <div><dt>Der Bildschirm bleibt hängen oder zeigt „Da ist etwas schiefgelaufen“.</dt><dd>„Neu laden“ antippen. Gebuchte Verkäufe sind gespeichert, offline erfasste bleiben in der Warteschlange.</dd></div>
+          <div><dt>Oben steht „Neue Version verfügbar“.</dt><dd>In einer ruhigen Minute bestätigen. Die Seite lädt neu, der Warenkorb ist danach leer.</dd></div>
+          <div><dt>Der Zähler mit wartenden Buchungen geht nicht weg.</dt><dd>WLAN prüfen. Auf den Zähler tippen: Dort steht, was wartet und was fehlgeschlagen ist. Angemeldet bleiben.</dd></div>
+          <div><dt>Auf den falschen Kunden gebucht.</dt><dd>Stornieren (direkt über „RÜCKGÄNGIG“ oder unter Transaktionen) und neu buchen.</dd></div>
+          <div><dt>„Limit überschritten“.</dt><dd>Das Konto steht bei −10 € oder würde darunter fallen. Aufladen oder bar kassieren.</dd></div>
+          <div><dt>Die Kasse stimmt nicht.</dt><dd>Unter Kasse &amp; Bank die Herleitung des Solls ansehen („Alle Posten zeigen“). Häufige Ursachen: eine Aufladung als „Bar“ gebucht, die überwiesen wurde; Geld zur Bank gebracht, aber nicht gebucht; ein Storno, bei dem das Geld in der Kasse blieb.</dd></div>
+          <div><dt>Eine Änderung wird mit einem Hinweis auf ein abgeschlossenes Geschäftsjahr abgelehnt.</dt><dd>Das Jahr ist geprüft. Nur ändern, wenn es wirklich nötig ist – „Trotzdem ändern“ protokolliert den Eingriff für die Kassenprüfung.</dd></div>
+          <div><dt>Ein Beleg lässt sich nicht hochladen.</dt><dd>Erlaubt sind JPEG, PNG und PDF. iPhone-Fotos im Format HEIC vorher umwandeln oder als Bildschirmfoto speichern.</dd></div>
+          <div><dt>Passwort vergessen.</dt><dd>Ein Admin setzt unter Benutzer ein neues.</dd></div>
+        </dl>
+        <p class="end">Bildschirmfotos zeigen eine Demo-Instanz mit erfundenen Namen. Stand: November 2026.</p>
+      </section>
+    </main>
+  </div>
+</div>

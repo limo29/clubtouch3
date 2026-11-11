@@ -1,0 +1,172 @@
+<title>ClubTouch Schnellstart</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap">
+<style>
+/* Layout: ein Blatt wie ein Thekenaushang – Kopfband, großes beschriftetes Bild mit 5 Schritten, darunter drei Reihen kurzer Karten */
+:root {
+  --bg: #f4f6f1; --paper: #ffffff; --ink: #141a12; --muted: #5a6456; --line: #d7ddd2;
+  --green: #0b8a4b; --green-soft: #e2f4e9; --red: #cf2e26; --amber: #a86a00; --amber-soft: #fbf0d6;
+  --screen: #0c100b; --on-green: #ffffff;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d110c; --paper: #161c14; --ink: #eef3ea; --muted: #a3ae9d; --line: #2b3427;
+  --green: #2fd67f; --green-soft: #143222; --red: #ff6257; --amber: #f0b440; --amber-soft: #33290f;
+  --screen: #05070a; --on-green: #06200f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d110c; --paper: #161c14; --ink: #eef3ea; --muted: #a3ae9d; --line: #2b3427;
+  --green: #2fd67f; --green-soft: #143222; --red: #ff6257; --amber: #f0b440; --amber-soft: #33290f;
+  --screen: #05070a; --on-green: #06200f; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.45; }
+.sheet { max-width: 1040px; margin: 0 auto; padding-block: 20px 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 16px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; line-height: 1.05; }
+p { margin: 0; }
+
+.head { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid var(--ink); padding-bottom: 12px; }
+.head img { width: 68px; height: 68px; border-radius: 12px; flex: none; }
+.head h1 { font-size: clamp(34px, 6vw, 52px); font-weight: 700; letter-spacing: .01em; text-transform: uppercase; }
+.head p { color: var(--muted); font-size: 16px; }
+.head .tag { margin-left: auto; font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: .08em; text-transform: uppercase;
+  border: 2px solid var(--ink); padding: 4px 10px; border-radius: 6px; white-space: nowrap; }
+
+.main { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.shot { position: relative; background: var(--screen); border-radius: 12px; padding: 6px; }
+.shot img { display: block; width: 100%; border-radius: 8px; }
+.pin { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%; background: var(--red); color: #fff;
+  font-family: var(--display); font-weight: 700; font-size: 19px; display: grid; place-items: center; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.steps li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.steps .n { width: 30px; height: 30px; border-radius: 50%; background: var(--red); color: #fff; font-family: var(--display); font-weight: 700; font-size: 19px; display: grid; place-items: center; }
+.steps b { font-family: var(--display); font-size: 20px; font-weight: 700; display: block; line-height: 1.1; }
+.steps span { color: var(--muted); font-size: 14px; }
+
+.row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.card h2 { font-size: 22px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+.card ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.card li, .card p { font-size: 14px; }
+.card.warn { background: var(--amber-soft); border-color: var(--amber); }
+.card.go { background: var(--green-soft); border-color: var(--green); }
+
+.keys { display: flex; flex-direction: column; gap: 6px; }
+.key { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 10px; align-items: center; font-size: 14px; }
+.btn { font-family: var(--body); font-weight: 700; font-size: 13px; text-align: center; padding: 6px 8px; border-radius: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn.g { background: var(--green); color: var(--on-green); }
+.btn.y { background: #ffd600; color: #1a1500; }
+.btn.r { background: var(--red); color: #fff; }
+.btn.o { border: 2px solid var(--amber); color: var(--amber); }
+
+.foot { display: flex; flex-wrap: wrap; gap: 6px 22px; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); font-size: 13px; }
+.foot b { color: var(--ink); }
+
+@media (max-width: 760px) { .main, .row { grid-template-columns: minmax(0, 1fr); } .head .tag { display: none; } }
+@media print {
+  @page { size: A4; margin: 9mm; }
+  body { background: #fff; font-size: 12.5px; }
+  .sheet { max-width: none; padding: 0; gap: 11px; }
+  .card { break-inside: avoid; padding: 9px 12px; gap: 5px; }
+  .card h2 { font-size: 19px; } .card li, .card p, .key, .steps span { font-size: 12px; }
+  .steps b { font-size: 17px; } .steps { gap: 6px; }
+  .head img { width: 56px; height: 56px; } .head h1 { font-size: 40px; }
+  .key { grid-template-columns: 100px minmax(0, 1fr); gap: 8px; } .btn { font-size: 11px; padding: 5px 6px; }
+  .keys { gap: 4px; } .card ul { gap: 1px; } .row { gap: 10px; } .main { gap: 14px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+  .card li, .card p, .key, .steps span { font-size: 11.5px; line-height: 1.35; }
+  .foot { font-size: 11px; padding-top: 7px; }
+}
+</style>
+
+<div class="sheet">
+  <header class="head">
+    <img src="img/logo.png" alt="Clubraum-Logo">
+    <div>
+      <h1>Schnellstart an der Theke</h1>
+      <p>ClubTouch 3 – in fünf Handgriffen vom Getränk zur Buchung</p>
+    </div>
+    <span class="tag">Zum Aushängen</span>
+  </header>
+
+  <section class="main">
+    <div class="shot">
+      <img src="img/verkauf.jpg" alt="Verkaufsbildschirm mit Kundenliste links, Artikelkacheln in der Mitte und Warenkorb rechts">
+      <span class="pin" style="left:11%;top:13%">2</span>
+      <span class="pin" style="left:11%;top:44%">2</span>
+      <span class="pin" style="left:47%;top:50%">1</span>
+      <span class="pin" style="left:86%;top:27%">3</span>
+      <span class="pin" style="left:88%;top:90%">4</span>
+    </div>
+    <ol class="steps">
+      <li><span class="n">1</span><div><b>Getränke antippen</b><span>Jeder Tipp legt eine Flasche in den Warenkorb. Lange drücken öffnet die Mengeneingabe.</span></div></li>
+      <li><span class="n">2</span><div><b>Wer zahlt?</b><span>Oben „Bar“, „Karte“ oder „Auf den Wirt“. Für ein Kundenkonto den Namen in der Liste antippen oder suchen.</span></div></li>
+      <li><span class="n">3</span><div><b>Warenkorb prüfen</b><span>Mit + und − die Menge ändern. Auf dem Tablet eine Zeile nach links wischen, um sie zu entfernen.</span></div></li>
+      <li><span class="n">4</span><div><b>Buchen</b><span>Der große Knopf unten rechts. Bei Karte zuerst am SumUp-Gerät kassieren, dann bestätigen.</span></div></li>
+      <li><span class="n">5</span><div><b>Vertippt? Rückgängig</b><span>Nach jeder Buchung erscheint 5 Sekunden lang „RÜCKGÄNGIG“. Später: Transaktionen → Buchung antippen → Stornieren.</span></div></li>
+    </ol>
+  </section>
+
+  <section class="row">
+    <div class="card">
+      <h2>Der Buchen-Knopf</h2>
+      <div class="keys">
+        <div class="key"><span class="btn g">Bar bezahlen</span><span>Gast zahlt bar in die Kasse.</span></div>
+        <div class="key"><span class="btn g">Buchen: Anna</span><span>Geht vom Guthaben des Kunden ab.</span></div>
+        <div class="key"><span class="btn y">Überziehen: Anna</span><span>Guthaben reicht nicht: nach Rückfrage anschreiben, höchstens bis −10 €.</span></div>
+        <div class="key"><span class="btn o">Auf Wirt buchen</span><span>Eigenverbrauch ohne Geld, Bestand sinkt.</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Guthaben aufladen</h2>
+      <ul>
+        <li>Kunden auswählen, dann <b>Aufladen</b> antippen.</li>
+        <li>Betrag wählen (5, 10, 20, 50 €) oder eintippen.</li>
+        <li>Zahlungsart: <b>Bar</b>, <b>Karte</b> oder <b>Überweisung</b>.</li>
+        <li>Bargeld gehört danach in die Kasse – es zählt beim Kassensturz mit.</li>
+      </ul>
+      <p>Neuer Gast: Menü → Verwaltung → Kunden → <b>Neuer Kunde</b>.</p>
+    </div>
+    <div class="card warn">
+      <h2>Kein Netz? Weitermachen.</h2>
+      <ul>
+        <li>Einfach weiter buchen. Oben erscheint ein Zähler mit den wartenden Buchungen.</li>
+        <li>Sobald das Netz zurück ist, werden sie von selbst übertragen – jede genau einmal.</li>
+        <li>Seite neu laden ist erlaubt, <b>abmelden nicht</b>, solange noch etwas wartet.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="row">
+    <div class="card go">
+      <h2>Nach dem Kundenverkauf</h2>
+      <p>Die Kasse springt von selbst zurück auf <b>Bar</b>. So landet das nächste Getränk nicht versehentlich auf dem Konto des Vorgängers.</p>
+      <p>Kunden von heute stehen oben unter <b>„Heute an der Theke“</b>.</p>
+    </div>
+    <div class="card">
+      <h2>Kasse zählen</h2>
+      <ul>
+        <li>Menü → Finanzen → <b>Kasse &amp; Bank</b> → „Kasse zählen“.</li>
+        <li>Scheine und Münzen eintragen, speichern.</li>
+        <li>Die App zeigt, was drin sein müsste, und die Differenz.</li>
+        <li>Geld zur Bank gebracht oder Wechselgeld geholt? Dort mit einem Tipp buchen.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>Wenn etwas hakt</h2>
+      <ul>
+        <li><b>Weißer oder hängender Bildschirm:</b> Seite neu laden. Gebuchtes bleibt erhalten.</li>
+        <li><b>„Limit überschritten“:</b> Konto steht bei −10 €. Erst aufladen oder bar kassieren.</li>
+        <li><b>Falscher Kunde gebucht:</b> stornieren und neu buchen, nichts ausgleichen.</li>
+        <li><b>Artikel fehlt:</b> Menü → Verwaltung → Artikel.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span><b>Guthaben selbst abfragen:</b> Seite „/check-balance“, Name und PIN eingeben.</span>
+    <span><b>Mehr dazu:</b> ClubTouch Benutzerhandbuch</span>
+  </footer>
+</div>
