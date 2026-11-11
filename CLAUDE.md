@@ -133,7 +133,7 @@ Railway deploys backend and frontend from the per-app Dockerfiles on every push 
 - `README.md` (UTF-8, German) is the overview for operators: features, role table, setup, Railway notes. Keep it in sync with feature and role changes.
 - User manual: `docs/anleitung/ClubTouch-Benutzerhandbuch.pdf` and `ClubTouch-Schnellstart.pdf`. Their source is `docs/anleitung/quelle/` (`handbuch.html`, `schnellstart.html` = page content only, starting at `<title>`, as published as claude.ai artifacts; images in `img/`, JPEG ≤ 1300 px, never real member names, Clubscore shots use mocked API data). Regenerate the PDFs with `NODE_PATH=<dir with playwright-core> node docs/anleitung/quelle/pdf-erzeugen.js` (adds a minimal HTML skeleton, A4, print CSS, light scheme). Keep UI terms in the manual in sync with the interface.
 - Migrations live in `apps/backend/prisma/migrations`; add a migration with `npm run prisma:migrate` rather than editing the schema alone.
-- Work currently happens directly on `main` (the old `dev` / `public-dev` branches and `feat/topup-migration` on GitHub are behind and unused). Every push to `main` redeploys Railway, so commit and push only when the owner asks.
+- Work happens on the branch `dev` and is pushed there. `main` is the deployed branch: every push to `main` redeploys Railway, so never commit or push to `main` directly; bring `dev` to `main` only when the owner explicitly asks for it. "Push the branch" means `dev`. (`public-dev` and `feat/topup-migration` on GitHub are old and unused.)
 
 ## Working notes for agents
 
