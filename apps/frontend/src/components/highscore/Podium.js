@@ -11,12 +11,16 @@ const slideUp = keyframes`
 `;
 
 const COLORS = ['#FFC400', '#C0C0C0', '#CD7F32'];
-// Reihenfolge links → rechts: Platz 2, 1, 3 (Positionen, nicht Rangzahl – bei Gleichstand teilen sich zwei den Rang)
-const SLOTS = [{ idx: 1, h: 0.78 }, { idx: 0, h: 1 }, { idx: 2, h: 0.6 }];
+const HEIGHTS = [1, 0.78, 0.6];
+// Reihenfolge links → rechts: 2., 1., 3. Eintrag (Positionen). Farbe und Sockelhöhe kommen aus dem Rang:
+// bei Gleichstand teilen sich mehrere den Rang und stehen gleich hoch in derselben Farbe.
+const SLOTS = [1, 0, 2];
+const tier = (entry, idx) => Math.min(2, Math.max(0, (Number(entry?.rank) || idx + 1) - 1));
 
 function PodiumItem({ entry, idx, baseHeight, mode, change, gap, lg }) {
-  const color = COLORS[idx];
   if (!entry) return <Box sx={{ width: idx === 0 ? '37%' : '29%' }} />;
+  const t = tier(entry, idx);
+  const color = COLORS[t];
   return (
     <Stack alignItems="center" justifyContent="flex-end" sx={{
       width: idx === 0 ? '37%' : '29%', minWidth: 0, height: '100%',
@@ -29,7 +33,7 @@ function PodiumItem({ entry, idx, baseHeight, mode, change, gap, lg }) {
           fontWeight: 900, minWidth: 0, textAlign: 'center', lineHeight: 1.1,
           display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden', overflowWrap: 'break-word',
           textShadow: (t) => (t.palette.mode === 'dark' ? `0 0 10px ${alpha(color, 0.35)}` : 'none'),
-          fontSize: lg ? (idx === 0 ? '2rem' : '1.6rem') : { xs: '0.9rem', md: idx === 0 ? '1.2rem' : '1.05rem' },
+          fontSize: lg ? (t === 0 ? '2rem' : '1.6rem') : { xs: '0.9rem', md: t === 0 ? '1.2rem' : '1.05rem' },
         }}>
           {displayName(entry)}
         </Typography>
@@ -70,8 +74,9 @@ function Podium({ entries, mode, height = 200, size = 'md', changes = [], gaps =
   return (
     <Stack direction="row" alignItems="flex-end" justifyContent="center" spacing={{ xs: 1, md: 2 }}
       sx={{ width: '100%', height }} role="list" aria-label="Podium">
-      {SLOTS.map((s) => (
-        <PodiumItem key={s.idx} idx={s.idx} entry={list[s.idx]} baseHeight={Math.round(maxBase * s.h)} mode={mode} change={changes[s.idx]} gap={gaps[s.idx]} lg={lg} />
+      {SLOTS.map((idx) => (
+        <PodiumItem key={idx} idx={idx} entry={list[idx]} baseHeight={Math.round(maxBase * HEIGHTS[tier(list[idx], idx)])}
+          mode={mode} change={changes[idx]} gap={gaps[idx]} lg={lg} />
       ))}
     </Stack>
   );
