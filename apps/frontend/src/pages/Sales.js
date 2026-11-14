@@ -113,7 +113,7 @@ const Sales = () => {
 
   // History Query
   const { data: historyData, refetch: refetchHistory, isFetching: historyLoading } = useQuery({
-    queryKey: ['customer-history', historyCustomer?.id],
+    queryKey: ['customer-history', historyCustomer?.id, 50],
     enabled: !!historyCustomer?.id,
     queryFn: async () => {
       const res = await api.get(`/customers/${historyCustomer.id}/history`, { params: { limit: 50 } });

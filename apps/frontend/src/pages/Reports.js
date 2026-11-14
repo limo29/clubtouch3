@@ -198,7 +198,7 @@ const Reports = () => {
     staleTime: 60 * 1000,
   });
   const { data: cashCountsData } = useQuery({
-    queryKey: ['cash-counts', 'list'],
+    queryKey: ['cash-counts', 'list', 50],
     queryFn: async () => (await api.get('/cash-counts', { params: { limit: 50 } })).data,
     enabled: selectedId === 'cash-count',
   });

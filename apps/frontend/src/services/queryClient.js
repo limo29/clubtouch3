@@ -71,4 +71,28 @@ queryClient.getQueryCache().subscribe((event) => {
 
 window.addEventListener('pagehide', flush);
 
+/*
+ * Schutz vor doppelt belegten Schlüsseln: Zwei Stellen mit gleichem queryKey teilen sich denselben Cache-Eintrag.
+ * Holen sie unterschiedliche Daten (andere Form, anderes limit, inaktive mit/ohne), sieht die zweite Stelle die
+ * Daten der ersten – so blieb die Gruppenauswahl der Kunden leer, nachdem die Tagesziele offen waren.
+ * Meldet einmal je Schlüssel als console.error, wenn dort zwei verschiedene queryFn-Texte ankommen
+ * (gleich geschriebene Funktionen an zwei Stellen sind erlaubt). Die UI-Tests werten console.error aus.
+ */
+const queryFnSources = new Map();
+const reportedKeys = new Set();
+export const checkQueryFn = (queryHash, queryFn) => {
+  if (typeof queryFn !== 'function') return null;
+  const src = queryFn.toString().replace(/\s+/g, ' ');
+  const known = queryFnSources.get(queryHash);
+  if (!known) { queryFnSources.set(queryHash, src); return null; }
+  if (known === src || reportedKeys.has(queryHash)) return null;
+  reportedKeys.add(queryHash);
+  const msg = `Query-Schlüssel ${queryHash} wird von zwei verschiedenen Abfragen genutzt – Schlüssel eindeutig machen.`;
+  console.error(msg, { erste: known, zweite: src });
+  return msg;
+};
+queryClient.getQueryCache().subscribe((event) => {
+  if (event.type === 'observerAdded') checkQueryFn(event.query.queryHash, event.observer.options.queryFn);
+});
+
 export default queryClient;

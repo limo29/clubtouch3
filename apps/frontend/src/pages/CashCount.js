@@ -196,7 +196,7 @@ export default function CashCount() {
   }, [period, range, preview]);
 
   const { data: listData, isLoading: listLoading } = useQuery({
-    queryKey: [...CASH_COUNTS_QUERY_KEY, 'list'],
+    queryKey: [...CASH_COUNTS_QUERY_KEY, 'list', 200],
     queryFn: async () => (await api.get('/cash-counts', { params: { limit: 200 } })).data,
   });
   const fromParam = start ? format(start, 'yyyy-MM-dd') : undefined;

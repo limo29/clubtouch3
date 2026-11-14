@@ -80,7 +80,7 @@ function AccountTab({ customer, canEdit, onTopUp }) {
     queryFn: async () => (await api.get(`${API_ENDPOINTS.CUSTOMERS}/${customer.id}/stats`)).data,
   });
   const { data: history, isLoading } = useQuery({
-    queryKey: ['customer-history', customer.id],
+    queryKey: ['customer-history', customer.id, 200],
     queryFn: async () => (await api.get(`${API_ENDPOINTS.CUSTOMERS}/${customer.id}/history`, { params: { limit: 200 } })).data,
   });
   const balance = num(customer.balance);

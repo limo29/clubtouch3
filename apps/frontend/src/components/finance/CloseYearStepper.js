@@ -509,7 +509,7 @@ export default function CloseYearStepper({ open, fy, onClose, onClosed }) {
   });
 
   const { data: countsData } = useQuery({
-    queryKey: ['cash-counts', 'list'],
+    queryKey: ['cash-counts', 'list', 50],
     queryFn: async () => (await api.get('/cash-counts', { params: { limit: 50 } })).data,
     enabled: open,
   });
