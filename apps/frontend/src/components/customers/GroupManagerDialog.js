@@ -31,9 +31,10 @@ import {
   DeleteForever,
 } from '@mui/icons-material';
 import { useTheme, alpha } from '@mui/material/styles';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import api from '../../services/api';
+import { useCustomerGroups, CUSTOMER_GROUPS_KEY } from '../../hooks/useCustomerGroups';
 import { API_ENDPOINTS } from '../../config/api';
 import { useAuth } from '../../context/AuthContext';
 import GroupBadge from './GroupBadge';
@@ -193,17 +194,7 @@ export default function GroupManagerDialog({ open, onClose }) {
   const watchEmoji = watch('emoji');
 
   // Gruppen laden
-  const { data: groupsData, isLoading } = useQuery({
-    queryKey: ['customer-groups'],
-    queryFn: async () => {
-      const res = await api.get(API_ENDPOINTS.CUSTOMER_GROUPS, {
-        params: { includeInactive: true },
-      });
-      return res.data;
-    },
-    enabled: open,
-  });
-  const groups = groupsData?.groups || [];
+  const { groups, isLoading } = useCustomerGroups({ includeInactive: true, enabled: open });
 
   // Bei Öffnen zurücksetzen
   useEffect(() => {
@@ -290,7 +281,7 @@ export default function GroupManagerDialog({ open, onClose }) {
         });
       }
 
-      queryClient.invalidateQueries({ queryKey: ['customer-groups'] });
+      queryClient.invalidateQueries({ queryKey: CUSTOMER_GROUPS_KEY });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       queryClient.invalidateQueries({ queryKey: ['customers-sales'] });
       setView('list');
@@ -308,7 +299,7 @@ export default function GroupManagerDialog({ open, onClose }) {
   const handleDelete = async (id) => {
     try {
       await api.delete(`${API_ENDPOINTS.CUSTOMER_GROUPS}/${id}`);
-      queryClient.invalidateQueries({ queryKey: ['customer-groups'] });
+      queryClient.invalidateQueries({ queryKey: CUSTOMER_GROUPS_KEY });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       queryClient.invalidateQueries({ queryKey: ['customers-sales'] });
       setConfirmDeleteId(null);

@@ -16,6 +16,7 @@ import {
 } from '@mui/icons-material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
+import { useCustomerGroups } from '../hooks/useCustomerGroups';
 import { API_ENDPOINTS } from '../config/api';
 import KPICard from '../components/common/KPICard';
 import { invalidate } from '../utils/invalidate';
@@ -172,8 +173,7 @@ export default function Customers() {
     setSearchParams({}, { replace: true });
   }, [linkedId, setSearchParams]);
 
-  const { data: groupsData } = useQuery({ queryKey: ['customer-groups'], queryFn: async () => (await api.get(API_ENDPOINTS.CUSTOMER_GROUPS)).data });
-  const groups = groupsData?.groups || [];
+  const { groups } = useCustomerGroups();
   // Alle Kunden einmal laden, Suche/Filter/Sortierung im Browser (kein Flackern beim Tippen)
   const { data, isLoading } = useQuery({ queryKey: ['customers', 'all'], queryFn: async () => (await api.get(API_ENDPOINTS.CUSTOMERS)).data });
   const customers = useMemo(() => data?.customers || [], [data]);

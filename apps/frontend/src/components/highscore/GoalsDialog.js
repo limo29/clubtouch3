@@ -10,6 +10,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import BookmarkAddOutlinedIcon from '@mui/icons-material/BookmarkAddOutlined';
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import api from '../../services/api';
+import { useCustomerGroups } from '../../hooks/useCustomerGroups';
 import GroupBadge from '../customers/GroupBadge';
 import useArticles from '../../hooks/useArticles';
 import { num, unitLabel } from '../../utils/format';
@@ -198,11 +199,7 @@ function GoalRow({ row, index, articles, categories, groups, onChange, onRemove,
 function Body({ goalsProgress, canEdit, onClose, onSaved }) {
   const queryClient = useQueryClient();
   const { articles, isLoading: articlesLoading } = useArticles({ activeOnly: true });
-  const { data: groups = [] } = useQuery({
-    queryKey: ['customer-groups'],
-    queryFn: async () => (await api.get('/customer-groups')).data?.groups || [],
-    staleTime: 60000,
-  });
+  const { groups } = useCustomerGroups();
   const templatesQuery = useQuery({
     queryKey: TEMPLATES_KEY,
     queryFn: async () => (await api.get('/highscore/goal-templates')).data?.templates || [],
